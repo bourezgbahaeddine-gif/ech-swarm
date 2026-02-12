@@ -1,11 +1,11 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { newsApi, dashboardApi, editorialApi, type ArticleBrief } from '@/lib/api';
 import { cn, formatRelativeTime, getStatusColor, getCategoryLabel, truncate } from '@/lib/utils';
 import {
-    Newspaper, Search, Filter, Zap, ExternalLink,
+    Newspaper, Search, Zap, ExternalLink,
     Clock, ChevronLeft, ChevronRight, Star,
     Rocket, Route, PenSquare, Radar, RefreshCw,
     CheckCircle, XCircle, RotateCw,
@@ -21,7 +21,7 @@ export default function NewsPage() {
     const [isBreaking, setIsBreaking] = useState<boolean | null>(null);
     const [selectedArticle, setSelectedArticle] = useState<number | null>(null);
     const [rejectReason, setRejectReason] = useState('');
-    const [editorName] = useState('???? ???????');
+    const [editorName] = useState('رئيس التحرير');
 
     useEffect(() => {
         const t = setTimeout(() => setDebouncedSearch(search.trim()), 400);
@@ -97,16 +97,15 @@ export default function NewsPage() {
 
     return (
         <div className="space-y-6">
-            {/* Header */}
             <div className="flex flex-col gap-4">
                 <div className="flex items-center justify-between">
                     <div>
                         <h1 className="text-2xl font-bold text-white flex items-center gap-3">
                             <Newspaper className="w-7 h-7 text-emerald-400" />
-                            ???????
+                            الأخبار
                         </h1>
                         <p className="text-sm text-gray-500 mt-1">
-                            {data?.data?.total || 0} ??? ?? ????? ????????
+                            {data?.data?.total || 0} خبر في غرفة الأخبار
                         </p>
                     </div>
 
@@ -116,7 +115,7 @@ export default function NewsPage() {
                             className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-gray-300 hover:text-white hover:border-white/20 transition-colors flex items-center gap-2"
                         >
                             <RefreshCw className="w-4 h-4" />
-                            ?????
+                            تحديث
                         </button>
                         <button
                             onClick={() => triggerScout.mutate()}
@@ -124,7 +123,7 @@ export default function NewsPage() {
                             className="px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-xs text-emerald-300 hover:bg-emerald-500/25 transition-colors flex items-center gap-2"
                         >
                             <Rocket className="w-4 h-4" />
-                            ????? ??????
+                            تشغيل الكشاف
                         </button>
                         <button
                             onClick={() => triggerRouter.mutate()}
@@ -132,7 +131,7 @@ export default function NewsPage() {
                             className="px-3 py-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-xs text-amber-300 hover:bg-amber-500/25 transition-colors flex items-center gap-2"
                         >
                             <Route className="w-4 h-4" />
-                            ????? ??????
+                            تشغيل الموجّه
                         </button>
                         <button
                             onClick={() => triggerScribe.mutate()}
@@ -140,7 +139,7 @@ export default function NewsPage() {
                             className="px-3 py-2 rounded-xl bg-sky-500/15 border border-sky-500/30 text-xs text-sky-300 hover:bg-sky-500/25 transition-colors flex items-center gap-2"
                         >
                             <PenSquare className="w-4 h-4" />
-                            ????? ??????
+                            تشغيل الكاتب
                         </button>
                         <button
                             onClick={() => triggerTrends.mutate()}
@@ -148,52 +147,47 @@ export default function NewsPage() {
                             className="px-3 py-2 rounded-xl bg-violet-500/15 border border-violet-500/30 text-xs text-violet-300 hover:bg-violet-500/25 transition-colors flex items-center gap-2"
                         >
                             <Radar className="w-4 h-4" />
-                            ????? ???????
+                            تشغيل الرادار
                         </button>
                     </div>
                 </div>
 
-                {/* Filters */}
                 <div className="flex flex-wrap items-center gap-3 p-4 rounded-2xl bg-gray-800/30 border border-white/5">
-                    {/* Search */}
                     <div className="relative flex-1 min-w-[200px]">
                         <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
                         <input
                             type="text"
                             value={search}
                             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                            placeholder="???? ?? ????????..."
+                            placeholder="ابحث في الأخبار..."
                             className="w-full h-9 pr-10 pl-4 rounded-xl bg-white/5 border border-white/5 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-emerald-500/40 transition-colors"
                             dir="rtl"
                         />
                     </div>
 
-                    {/* Status filter */}
                     <select
                         value={status}
                         onChange={(e) => { setStatus(e.target.value); setPage(1); }}
                         className="h-9 px-3 rounded-xl bg-white/5 border border-white/5 text-sm text-gray-300 focus:outline-none focus:border-emerald-500/40 appearance-none cursor-pointer"
                     >
-                        <option value="">?? ???????</option>
+                        <option value="">كل الحالات</option>
                         {statuses.filter(Boolean).map(s => (
                             <option key={s} value={s}>{s}</option>
                         ))}
                     </select>
 
-                    {/* Category filter */}
                     <select
                         value={category}
                         onChange={(e) => { setCategory(e.target.value); setPage(1); }}
                         className="h-9 px-3 rounded-xl bg-white/5 border border-white/5 text-sm text-gray-300 focus:outline-none focus:border-emerald-500/40 appearance-none cursor-pointer"
                     >
-                        <option value="">?? ???????</option>
+                        <option value="">كل التصنيفات</option>
                         {categories.filter(Boolean).map(c => (
                             <option key={c} value={c}>{getCategoryLabel(c)}</option>
                         ))}
                     </select>
                 </div>
 
-                {/* Quick chips */}
                 <div className="flex flex-wrap items-center gap-2">
                     <button
                         onClick={() => { setIsBreaking(null); setStatus(''); setCategory(''); setPage(1); }}
@@ -204,7 +198,7 @@ export default function NewsPage() {
                                 : 'border-white/10 bg-white/5 text-gray-300 hover:text-white hover:border-white/20'
                         )}
                     >
-                        ????
+                        الكل
                     </button>
 
                     <button
@@ -216,7 +210,7 @@ export default function NewsPage() {
                                 : 'border-white/10 bg-white/5 text-gray-300 hover:text-white hover:border-white/20'
                         )}
                     >
-                        ???? ???
+                        عاجل فقط
                     </button>
 
                     <button
@@ -228,7 +222,7 @@ export default function NewsPage() {
                                 : 'border-white/10 bg-white/5 text-gray-300 hover:text-white hover:border-white/20'
                         )}
                     >
-                        ?????? ???
+                        مرشحة للتحرير
                     </button>
 
                     {categories.filter(Boolean).map((c) => (
@@ -248,7 +242,6 @@ export default function NewsPage() {
                 </div>
             </div>
 
-            {/* Cards Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {isLoading ? (
                     Array.from({ length: 9 }).map((_, i) => (
@@ -282,10 +275,10 @@ export default function NewsPage() {
                                         <div className="flex items-center gap-2 mb-2">
                                             {article.is_breaking && (
                                                 <span className="px-2 py-0.5 rounded-full bg-red-500 text-[10px] font-bold text-white flex items-center gap-1 animate-pulse">
-                                                    <Zap className="w-3 h-3" /> ????
+                                                    <Zap className="w-3 h-3" /> عاجل
                                                 </span>
                                             )}
-                                            <span className="text-[10px] text-gray-400">{article.source_name || '�'}</span>
+                                            <span className="text-[10px] text-gray-400">{article.source_name || '—'}</span>
                                             <span className="text-[10px] text-gray-500 mr-auto flex items-center gap-1">
                                                 <Clock className="w-3 h-3" />
                                                 {formatRelativeTime(article.created_at || article.crawled_at)}
@@ -326,13 +319,13 @@ export default function NewsPage() {
                                         )}
                                     >
                                         <ExternalLink className="w-4 h-4" />
-                                        ??????
+                                        المصدر
                                     </a>
                                     <a
                                         href={`/news/${article.id}`}
                                         className="px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-xs text-emerald-300 hover:bg-emerald-500/25 transition-colors flex items-center justify-center"
                                     >
-                                        ????????
+                                        التفاصيل
                                     </a>
                                 </div>
 
@@ -347,7 +340,7 @@ export default function NewsPage() {
                                                 : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed'
                                         )}
                                     >
-                                        <CheckCircle className="w-3 h-3" /> ??????
+                                        <CheckCircle className="w-3 h-3" /> موافقة
                                     </button>
                                     <button
                                         onClick={() => decideMutation.mutate({ articleId: article.id, decision: 'rewrite' })}
@@ -359,7 +352,7 @@ export default function NewsPage() {
                                                 : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed'
                                         )}
                                     >
-                                        <RotateCw className="w-3 h-3" /> ?????
+                                        <RotateCw className="w-3 h-3" /> إعادة
                                     </button>
                                     <button
                                         onClick={() => setSelectedArticle(article.id)}
@@ -371,7 +364,7 @@ export default function NewsPage() {
                                                 : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed'
                                         )}
                                     >
-                                        <XCircle className="w-3 h-3" /> ???
+                                        <XCircle className="w-3 h-3" /> رفض
                                     </button>
                                 </div>
 
@@ -381,7 +374,7 @@ export default function NewsPage() {
                                             type="text"
                                             value={rejectReason}
                                             onChange={(e) => setRejectReason(e.target.value)}
-                                            placeholder="??? ????? (???????)..."
+                                            placeholder="سبب الرفض (اختياري)..."
                                             className="flex-1 h-10 px-3 rounded-xl bg-white/5 border border-white/5 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-red-500/40"
                                             dir="rtl"
                                         />
@@ -390,7 +383,7 @@ export default function NewsPage() {
                                             disabled={decideMutation.isPending}
                                             className="px-4 py-2 rounded-xl bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors text-xs font-medium"
                                         >
-                                            ????? ?????
+                                            تأكيد الرفض
                                         </button>
                                     </div>
                                 )}
@@ -399,12 +392,11 @@ export default function NewsPage() {
                     })
                 ) : (
                     <div className="col-span-full text-center py-16 rounded-2xl bg-gray-800/20 border border-white/5">
-                        ?? ???? ?????
+                        لا توجد أخبار حالياً
                     </div>
                 )}
             </div>
 
-            {/* Pagination */}
             {totalPages > 1 && (
                 <div className="flex items-center justify-center gap-2 px-4 py-3 border-t border-white/5">
                     <button
@@ -415,7 +407,7 @@ export default function NewsPage() {
                         <ChevronRight className="w-4 h-4" />
                     </button>
                     <span className="text-xs text-gray-400 px-3">
-                        ???? {page} ?? {totalPages}
+                        صفحة {page} من {totalPages}
                     </span>
                     <button
                         onClick={() => setPage(p => Math.min(totalPages, p + 1))}

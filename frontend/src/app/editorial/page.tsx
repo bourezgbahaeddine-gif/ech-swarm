@@ -1,12 +1,12 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { newsApi, editorialApi, type ArticleBrief } from '@/lib/api';
-import { cn, formatRelativeTime, getCategoryLabel, truncate } from '@/lib/utils';
+import { cn, formatRelativeTime, getCategoryLabel } from '@/lib/utils';
 import {
     UserCheck, CheckCircle, XCircle, RotateCw,
-    Star, Zap, Send, MessageSquare,
+    Star, Zap,
 } from 'lucide-react';
 
 export default function EditorialPage() {
@@ -15,6 +15,7 @@ export default function EditorialPage() {
     const [editorName] = useState('رئيس التحرير');
     const [rejectReason, setRejectReason] = useState('');
     const now = Date.now();
+
     const isFresh = (iso: string | null, minutes = 10) => {
         if (!iso) return false;
         const deltaMs = now - new Date(iso).getTime();
@@ -41,7 +42,6 @@ export default function EditorialPage() {
 
     return (
         <div className="space-y-6">
-            {/* Header */}
             <div>
                 <h1 className="text-2xl font-bold text-white flex items-center gap-3">
                     <UserCheck className="w-7 h-7 text-amber-400" />
@@ -52,7 +52,6 @@ export default function EditorialPage() {
                 </p>
             </div>
 
-            {/* Articles queue */}
             <div className="space-y-3">
                 {isLoading ? (
                     Array.from({ length: 5 }).map((_, i) => (
@@ -71,13 +70,11 @@ export default function EditorialPage() {
                                 article.is_breaking && 'border-red-500/20',
                             )}
                         >
-                            {/* Article header */}
                             <div
                                 className="p-5 cursor-pointer"
                                 onClick={() => setSelectedArticle(selectedArticle === article.id ? null : article.id)}
                             >
                                 <div className="flex items-start gap-4">
-                                    {/* Importance */}
                                     <div className={cn(
                                         'w-12 h-12 rounded-xl flex flex-col items-center justify-center flex-shrink-0',
                                         article.importance_score >= 8 ? 'bg-red-500/20 text-red-400' :
@@ -88,7 +85,6 @@ export default function EditorialPage() {
                                         <span className="text-lg font-bold">{article.importance_score}</span>
                                     </div>
 
-                                    {/* Content */}
                                     <div className="flex-1">
                                         <div className="flex items-center gap-2 mb-1">
                                             {article.is_breaking && (
@@ -98,7 +94,7 @@ export default function EditorialPage() {
                                             )}
                                             {isFresh(article.created_at) && (
                                                 <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-[10px] font-bold text-emerald-400">
-                                                    ???? ????
+                                                    جديد الآن
                                                 </span>
                                             )}
                                             <span className="text-xs text-gray-500">{getCategoryLabel(article.category)}</span>
@@ -121,11 +117,9 @@ export default function EditorialPage() {
                                 </div>
                             </div>
 
-                            {/* Decision panel */}
                             {selectedArticle === article.id && (
                                 <div className="px-5 pb-5 border-t border-white/5 pt-4 animate-fade-in-up">
                                     <div className="flex flex-wrap items-center gap-3">
-                                        {/* Approve */}
                                         <button
                                             onClick={() => decideMutation.mutate({ articleId: article.id, decision: 'approve' })}
                                             disabled={decideMutation.isPending}
@@ -135,7 +129,6 @@ export default function EditorialPage() {
                                             موافقة
                                         </button>
 
-                                        {/* Rewrite */}
                                         <button
                                             onClick={() => decideMutation.mutate({ articleId: article.id, decision: 'rewrite' })}
                                             disabled={decideMutation.isPending}
@@ -145,7 +138,6 @@ export default function EditorialPage() {
                                             إعادة صياغة
                                         </button>
 
-                                        {/* Reject */}
                                         <div className="flex items-center gap-2 flex-1 min-w-[200px]">
                                             <input
                                                 type="text"
