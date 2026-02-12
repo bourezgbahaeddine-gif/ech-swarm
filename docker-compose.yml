@@ -1,0 +1,103 @@
+version: "3.9"
+
+# ============================================
+# Echorouk AI Swarm — Development Stack
+# ============================================
+# Usage: docker-compose up -d
+# ============================================
+
+services:
+  # ── Backend API ──
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ech-backend
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      # Override to use Docker service names
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+    volumes:
+      - ./backend:/app
+      - audio_tmp:/tmp/audio
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ech-network
+
+  # ── PostgreSQL + pgvector ──
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: ech-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-echorouk_db}
+      POSTGRES_USER: ${POSTGRES_USER:-echorouk}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-echorouk2025secure}
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./scripts/seed_sources.sql:/docker-entrypoint-initdb.d/02-seed-sources.sql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-echorouk}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - ech-network
+
+  # ── Redis (Cache & Queue) ──
+  redis:
+    image: redis:7-alpine
+    container_name: ech-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - ech-network
+
+  # ── MinIO (S3-Compatible Storage) ──
+  minio:
+    image: minio/minio:latest
+    container_name: ech-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+    networks:
+      - ech-network
+
+volumes:
+  pgdata:
+  redis_data:
+  minio_data:
+  audio_tmp:
+
+
+networks:
+  ech-network:
+    driver: bridge

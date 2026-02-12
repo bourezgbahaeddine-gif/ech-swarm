@@ -1,0 +1,323 @@
+"""
+Echorouk AI Swarm — Journalist Services
+=======================================
+Editor/Fact-check/SEO/Multimedia tools for journalists.
+"""
+
+from typing import Optional, List
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
+from app.services.ai_service import ai_service
+
+router = APIRouter(prefix="/services", tags=["Journalist Services"])
+
+
+@router.post("/editor/tonality")
+async def editor_tonality(payload: dict):
+    text = payload.get("text", "")
+    if not text:
+        raise HTTPException(400, "Missing text")
+    prompt = (
+        "Rewrite the following Arabic headline/text to be sober, non-sensational, "
+        "and compliant with a newsroom editorial guide. Provide 3 alternatives."
+        f"\n\nText:\n{text}"
+    )
+    result = await ai_service.generate_text(prompt)
+    return {"result": result}
+
+
+@router.post("/editor/inverted-pyramid")
+async def editor_inverted_pyramid(payload: dict):
+    text = payload.get("text", "")
+    if not text:
+        raise HTTPException(400, "Missing text")
+    prompt = (
+        "Rewrite the following news text in Arabic using the inverted pyramid style. "
+        "Start with a concise lead answering: who, what, where, when, why, how. "
+        "Then order details by importance."
+        f"\n\nText:\n{text}"
+    )
+    result = await ai_service.generate_text(prompt)
+    return {"result": result}
+
+
+@router.post("/editor/proofread")
+async def editor_proofread(payload: dict):
+    text = payload.get("text", "")
+    if not text:
+        raise HTTPException(400, "Missing text")
+    prompt = (
+        "Proofread the following Arabic text. Fix grammar and spelling mistakes only. "
+        "Return the corrected text."
+        f"\n\nText:\n{text}"
+    )
+    result = await ai_service.generate_text(prompt)
+    return {"result": result}
+
+
+@router.post("/editor/social-summary")
+async def editor_social_summary(payload: dict):
+    text = payload.get("text", "")
+    platform = payload.get("platform", "general")
+    if not text:
+        raise HTTPException(400, "Missing text")
+    prompt = (
+        "Summarize the following news in Arabic for social media without clickbait. "
+        f"Platform: {platform}. Provide 2 short variants (1-2 sentences)."
+        f"\n\nText:\n{text}"
+    )
+    result = await ai_service.generate_text(prompt)
+    return {"result": result}
+
+
+@router.post("/factcheck/vision")
+async def factcheck_vision(payload: dict):
+    image_url = payload.get("image_url")
+    question = payload.get("question", "Verify if this image appears manipulated or out of context.")
+    if not image_url:
+        raise HTTPException(400, "Missing image_url")
+    result = await ai_service.analyze_image_url(image_url, question)
+    return {"result": result}
+
+
+@router.post("/factcheck/consistency")
+async def factcheck_consistency(payload: dict):
+    text = payload.get("text", "")
+    reference = payload.get("reference", "")
+    if not text:
+        raise HTTPException(400, "Missing text")
+    prompt = (
+        "Check the following Arabic news text for historical or factual inconsistencies. "
+        "If a reference context is provided, compare against it. "
+        "List any contradictions and suggest corrections.\n\n"
+        f"Reference:\n{reference}\n\nText:\n{text}"
+    )
+    result = await ai_service.generate_text(prompt)
+    return {"result": result}
+
+
+@router.post("/factcheck/extract")
+async def factcheck_extract(payload: dict):
+    text = payload.get("text", "")
+    if not text:
+        raise HTTPException(400, "Missing text")
+    prompt = (
+        "Extract the most important points from the following document in Arabic. "
+        "Return a bullet list and a 3-sentence executive summary."
+        f"\n\nText:\n{text}"
+    )
+    result = await ai_service.generate_text(prompt)
+    return {"result": result}
+
+
+@router.post("/seo/keywords")
+async def seo_keywords(payload: dict):
+    text = payload.get("text", "")
+    if not text:
+        raise HTTPException(400, "Missing text")
+    prompt = (
+        "Generate 10 long-tail SEO keywords in Arabic related to the following news. "
+        "Return as a comma-separated list."
+        f"\n\nText:\n{text}"
+    )
+    result = await ai_service.generate_text(prompt)
+    return {"result": result}
+
+
+@router.post("/seo/internal-links")
+async def seo_internal_links(payload: dict):
+    text = payload.get("text", "")
+    archive_titles = payload.get("archive_titles", [])
+    if not text:
+        raise HTTPException(400, "Missing text")
+    prompt = (
+        "Suggest 5 internal links from the provided archive titles that match this news. "
+        "Return the titles only.\n\n"
+        f"News:\n{text}\n\nArchive Titles:\n{archive_titles}"
+    )
+    result = await ai_service.generate_text(prompt)
+    return {"result": result}
+
+
+@router.post("/seo/metadata")
+async def seo_metadata(payload: dict):
+    text = payload.get("text", "")
+    if not text:
+        raise HTTPException(400, "Missing text")
+    prompt = (
+        "Write SEO metadata in Arabic for this news: "
+        "1) SEO Title (<=60 chars) "
+        "2) Meta Description (<=160 chars) "
+        "3) Slug (latin, kebab-case). "
+        "Return as JSON with keys: seo_title, meta_description, slug.\n\n"
+        f"Text:\n{text}"
+    )
+    result = await ai_service.generate_text(prompt)
+    return {"result": result}
+
+
+@router.post("/multimedia/video-script")
+async def multimedia_video_script(payload: dict):
+    text = payload.get("text", "")
+    if not text:
+        raise HTTPException(400, "Missing text")
+    prompt = (
+        "Create a short Arabic video script (60-90 seconds) from this news. "
+        "Include scenes and on-screen text suggestions."
+        f"\n\nText:\n{text}"
+    )
+    result = await ai_service.generate_text(prompt)
+    return {"result": result}
+
+
+@router.post("/multimedia/sentiment")
+async def multimedia_sentiment(payload: dict):
+    text = payload.get("text", "")
+    if not text:
+        raise HTTPException(400, "Missing text")
+    prompt = (
+        "Analyze audience sentiment for the following Arabic comments/news. "
+        "Return a brief report with sentiment (positive/neutral/negative) and key themes."
+        f"\n\nText:\n{text}"
+    )
+    result = await ai_service.generate_text(prompt)
+    return {"result": result}
+
+
+@router.post("/multimedia/translate")
+async def multimedia_translate(payload: dict):
+    text = payload.get("text", "")
+    source_lang = payload.get("source_lang", "auto")
+    if not text:
+        raise HTTPException(400, "Missing text")
+    prompt = (
+        "Translate the following text to Arabic Fusha, preserving meaning precisely. "
+        f"Source language: {source_lang}.\n\nText:\n{text}"
+    )
+    result = await ai_service.generate_text(prompt)
+    return {"result": result}
+
+
+@router.post("/multimedia/image-prompt")
+async def multimedia_image_prompt(payload: dict, db: AsyncSession = Depends(get_db)):
+    text = payload.get("text", "")
+    style = payload.get("style", "cinematic")
+    article_id = payload.get("article_id")
+    created_by = payload.get("created_by")
+    if not text:
+        raise HTTPException(400, "Missing text")
+
+    prompt = f"""
+You are Echorouk Nano-Hook Studio. Build 3 high-impact image prompts.
+Use this 10-point structure in each prompt:
+1) Subject
+2) Style
+3) Lighting
+4) Composition
+5) Camera
+6) 3D Element (emoji or symbol, 3D, interacts with light)
+7) Color Theory (Echorouk Orange #F37021, Deep Black #0A0A0A, White #FFFFFF)
+8) Texture
+9) Negative Space (logo/text safe area, top-right gradient for logo protection)
+10) Dimensions (--ar)
+
+Constraints:
+- Visual semiotics: strong hook, viral-ready, journalistic realism.
+- Keep text area clean; avoid clutter.
+- Output in Arabic only.
+- Provide 3 variants.
+
+News text:
+{text}
+
+Preferred style: {style}
+"""
+    result = await ai_service.generate_text(prompt)
+    # Save prompt
+    if result:
+        from app.models.constitution import ImagePrompt
+        db.add(ImagePrompt(
+            article_id=article_id,
+            prompt_text=result,
+            style=style,
+            created_by=created_by,
+        ))
+        await db.commit()
+    return {"result": result}
+
+
+@router.post("/multimedia/infographic/analyze")
+async def infographic_analyze(payload: dict, db: AsyncSession = Depends(get_db)):
+    text = payload.get("text", "")
+    article_id = payload.get("article_id")
+    created_by = payload.get("created_by")
+    if not text:
+        raise HTTPException(400, "Missing text")
+
+    prompt = f"""
+Analyze the following Arabic news and extract structured data for an infographic.
+Return JSON only with this schema:
+{{
+  "title": "short Arabic title",
+  "items": [{{"id": "1", "label": "label", "value": "value"}}],
+  "type": "timeline|ranking|comparison|numbers|map|steps|profile|stats|quote|impact",
+  "theme": "dark|light|orange|mono",
+  "aspect_ratio": "1:1|4:5|16:9|9:16"
+}}
+
+Text:
+{text}
+"""
+    data = await ai_service.generate_json(prompt)
+    if data:
+        from app.models.constitution import InfographicData
+        import json
+        db.add(InfographicData(
+            article_id=article_id,
+            data_json=json.dumps(data, ensure_ascii=False),
+            created_by=created_by,
+        ))
+        await db.commit()
+    return {"data": data}
+
+
+@router.post("/multimedia/infographic/prompt")
+async def infographic_prompt(payload: dict, db: AsyncSession = Depends(get_db)):
+    data = payload.get("data", {})
+    article_id = payload.get("article_id")
+    created_by = payload.get("created_by")
+    if not data:
+        raise HTTPException(400, "Missing data")
+    prompt = f"""
+You are a visual prompt engineer for an Arabic newsroom.
+Build a rich visual prompt for an infographic using this data:
+{data}
+
+Include camera, lighting, composition, and typography (IBM Plex Sans Arabic).
+Output only the final prompt text in Arabic.
+"""
+    result = await ai_service.generate_text(prompt)
+    if result:
+        from app.models.constitution import InfographicData
+        import json
+        # create a new record with prompt only
+        db.add(InfographicData(
+            article_id=article_id,
+            data_json=json.dumps(data, ensure_ascii=False),
+            prompt_text=result,
+            created_by=created_by,
+        ))
+        await db.commit()
+    return {"result": result}
+
+
+@router.post("/multimedia/infographic/render")
+async def infographic_render(payload: dict):
+    prompt = payload.get("prompt", "")
+    if not prompt:
+        raise HTTPException(400, "Missing prompt")
+    # Placeholder: return prompt for now (image generation hook)
+    return {"image_url": "", "prompt": prompt}

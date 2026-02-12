@@ -1,0 +1,47 @@
+# ── Core Framework ──
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+python-dotenv==1.0.1
+python-multipart==0.0.19
+
+# ── Database ──
+sqlalchemy==2.0.36
+asyncpg==0.30.0
+alembic==1.14.1
+pgvector==0.3.6
+
+# ── Redis / Cache ──
+redis[hiredis]==5.2.1
+
+# ── AI Services ──
+google-generativeai==0.8.4
+groq==0.15.0
+httpx==0.28.1
+
+# ── RSS & Web Scraping ──
+feedparser==6.0.11
+trafilatura==2.0.0
+beautifulsoup4==4.12.3
+aiohttp==3.11.11
+
+# ── Text Processing ──
+python-Levenshtein==0.26.1
+rapidfuzz==3.11.0
+
+# ── TTS (Audio Agent) ──
+edge-tts==7.0.0
+
+# ── Utilities ──
+bcrypt==4.1.2
+python-jose[cryptography]==3.3.0
+apscheduler==3.11.0
+tenacity==9.0.0
+structlog==24.4.0
+
+# ── Testing ──
+pytest==8.3.4
+pytest-asyncio==0.25.0
+pytest-cov==6.0.0
+httpx==0.28.1

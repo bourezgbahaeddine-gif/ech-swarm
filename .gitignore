@@ -1,0 +1,65 @@
+# =========================
+# Echorouk Swarm .gitignore
+# =========================
+
+# Environment & Secrets
+.env
+.env.local
+.env.production
+*.pem
+secrets/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+*.whl
+
+# Node.js / Frontend
+node_modules/
+.next/
+out/
+.turbo/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Docker volumes (local data)
+pgdata/
+redis_data/
+minio_data/
+
+# Temp files
+tmp/
+*.tmp
+*.log
+data/audio_assets/*.mp3
+data/audio_assets/*.m4a
+
+# Coverage & Testing
+htmlcov/
+.coverage
+.pytest_cache/
+.mypy_cache/
+
+# OS
+desktop.ini
