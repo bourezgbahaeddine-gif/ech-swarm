@@ -1,4 +1,6 @@
-﻿import { useState } from 'react';
+﻿"use client";
+
+import { useState } from 'react';
 import { Film, Image, Layers } from 'lucide-react';
 import { journalistServicesApi } from '@/lib/journalist-services-api';
 
@@ -195,3 +197,4 @@ function ResultBox({ result }: { result: string }) {
         </div>
     );
 }
+

@@ -1,4 +1,6 @@
-﻿import { useState } from 'react';
+﻿"use client";
+
+import { useState } from 'react';
 import { Sparkles } from 'lucide-react';
 import { journalistServicesApi } from '@/lib/journalist-services-api';
 
@@ -58,3 +60,4 @@ function ResultBox({ result }: { result: string }) {
         </div>
     );
 }
+
