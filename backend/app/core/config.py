@@ -78,6 +78,8 @@ class Settings(BaseSettings):
     # ── Scheduling ──
     scout_interval_minutes: int = 30
     trend_radar_interval_minutes: int = 15
+    auto_pipeline_enabled: bool = False
+    auto_scribe_enabled: bool = True
 
     # ── FreshRSS / RSS-Bridge ──
     scout_use_freshrss: bool = False
@@ -90,6 +92,8 @@ class Settings(BaseSettings):
     breaking_news_urgency_threshold: int = 8
     truth_score_reject_threshold: float = 0.4
     truth_score_verify_threshold: float = 0.8
+    editorial_min_importance: int = 6
+    editorial_require_local_signal: bool = True
     max_rss_sources: int = 300
     rss_fetch_timeout: int = 30
     scout_batch_size: int = 8

@@ -40,6 +40,9 @@ async def list_articles(
             filters.append(Article.status == NewsStatus(status))
         except ValueError:
             raise HTTPException(400, f"Invalid status: {status}")
+    else:
+        # Keep newsroom list focused by hiding auto-archived noise by default.
+        filters.append(Article.status != NewsStatus.ARCHIVED)
     if category:
         try:
             filters.append(Article.category == NewsCategory(category))

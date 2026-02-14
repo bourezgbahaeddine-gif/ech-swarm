@@ -68,6 +68,23 @@ BREAKING_KEYWORDS = [
     "breaking", "urgent", "séisme", "explosion", "attentat",
 ]
 
+NOISE_PATTERNS = [
+    r"\bwordle\b",
+    r"\bcrossword\b",
+    r"\bnyt mini\b",
+    r"\bconnections\b",
+    r"\bquordle\b",
+    r"\bhints?\b",
+    r"\banswers?\b",
+    r"\bhoroscope\b",
+    r"\bsudoku\b",
+]
+
+LOCAL_SIGNAL_KEYWORDS = [
+    "الجزائر", "جزائري", "الجزائرية", "algérie", "algerie", "algeria",
+    "وهران", "الجزائر العاصمة", "قسنطينة", "سطيف", "عنابة", "تلمسان", "بجاية",
+]
+
 
 class RouterAgent:
     """
@@ -109,6 +126,15 @@ class RouterAgent:
         """Classify a single article using rules + AI fallback."""
 
         text = f"{article.original_title} {article.original_content or ''}"
+        text_lower = text.lower()
+
+        # Step 0: Early noise gate (before paying any AI cost)
+        noisy, noisy_reason = self._noise_gate(article, text_lower)
+        if noisy:
+            article.status = NewsStatus.ARCHIVED
+            article.importance_score = 0
+            article.rejection_reason = f"auto_filtered:{noisy_reason}"
+            return
 
         # ── Step 1: Rule-Based Classification (FREE) ──
         category = self._rule_based_category(text)
@@ -169,11 +195,14 @@ class RouterAgent:
                 article.summary = (article.original_content or article.original_title)[:300]
 
         # ── Step 4: Determine if Candidate ──
+        has_local_signal = self._has_local_signal(text_lower, article.source_name or "")
         is_candidate = (
-            article.importance_score >= 5
+            article.importance_score >= settings.editorial_min_importance
             or article.is_breaking
             or article.urgency in [UrgencyLevel.HIGH, UrgencyLevel.BREAKING]
         )
+        if settings.editorial_require_local_signal and not (article.is_breaking or article.urgency == UrgencyLevel.BREAKING):
+            is_candidate = is_candidate and has_local_signal
 
         if is_candidate:
             article.status = NewsStatus.CANDIDATE
@@ -194,6 +223,7 @@ class RouterAgent:
                 await cache_service.set(notify_key, "1", ttl=timedelta(hours=12))
         else:
             article.status = NewsStatus.CLASSIFIED
+            article.rejection_reason = "auto_filtered:low_editorial_value"
 
     def _rule_based_category(self, text: str) -> Optional[NewsCategory]:
         """Determine category using keyword matching (no AI cost)."""
@@ -252,6 +282,33 @@ class RouterAgent:
             score += 1
 
         return min(score, 10)
+
+    def _has_local_signal(self, text_lower: str, source_name: str) -> bool:
+        if any(k in text_lower for k in LOCAL_SIGNAL_KEYWORDS):
+            return True
+        src = (source_name or "").lower()
+        if any(k in src for k in ["aps", "tsa", "echorouk", "el khabar", "elwatan", "dz", "algerie", "algérie"]):
+            return True
+        return False
+
+    def _noise_gate(self, article: Article, text_lower: str) -> tuple[bool, str]:
+        title = (article.original_title or "").strip()
+        content = (article.original_content or "").strip()
+
+        if len(title) < 12:
+            return True, "title_too_short"
+        if len(content) < 40 and not article.is_breaking:
+            return True, "content_too_short"
+
+        for pattern in NOISE_PATTERNS:
+            if re.search(pattern, text_lower):
+                return True, "game_or_puzzle_noise"
+
+        # Common low-value aggregator stream that floods newsroom
+        if (article.source_name or "").lower().startswith("google news") and not self._has_local_signal(text_lower, article.source_name or ""):
+            return True, "global_aggregator_non_local"
+
+        return False, ""
 
 
 # Singleton
