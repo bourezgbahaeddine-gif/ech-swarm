@@ -428,6 +428,14 @@ export default function NewsPage() {
                                         التفاصيل
                                     </a>
                                 </div>
+                                <div className="mt-2">
+                                    <a
+                                        href={`/workspace-drafts?article_id=${article.id}`}
+                                        className="block w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-gray-300 hover:text-white hover:border-white/20 transition-colors text-center"
+                                    >
+                                        فتح في Workspace
+                                    </a>
+                                </div>
 
                                 <div className="mt-3 grid grid-cols-3 gap-2">
                                     <button
@@ -569,9 +577,12 @@ export default function NewsPage() {
                                 مسودة {draftEditor.action} (#{draftEditor.articleId})
                             </h3>
                             {draftEditor.workId && (
-                                <span className="text-xs text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-2 py-1 rounded-lg">
+                                <a
+                                    href={`/workspace-drafts?work_id=${draftEditor.workId}`}
+                                    className="text-xs text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-2 py-1 rounded-lg hover:bg-emerald-500/20"
+                                >
                                     {draftEditor.workId}
-                                </span>
+                                </a>
                             )}
                         </div>
                         <div className="space-y-3">

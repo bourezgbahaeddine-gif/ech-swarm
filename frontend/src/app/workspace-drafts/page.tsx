@@ -1,21 +1,29 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { editorialApi, type WorkspaceDraft } from '@/lib/api';
 import { cn, formatRelativeTime, truncate } from '@/lib/utils';
 import { Search, CheckCircle2, FileText, Filter } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
 
 export default function WorkspaceDraftsPage() {
     const queryClient = useQueryClient();
+    const searchParams = useSearchParams();
     const [status, setStatus] = useState('draft');
     const [q, setQ] = useState('');
+    const [articleIdFilter, setArticleIdFilter] = useState(searchParams.get('article_id') || '');
     const [selected, setSelected] = useState<WorkspaceDraft | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const initialWorkId = searchParams.get('work_id') || '';
 
     const { data, isLoading } = useQuery({
-        queryKey: ['workspace-drafts', status],
-        queryFn: () => editorialApi.workspaceDrafts({ status, limit: 200 }),
+        queryKey: ['workspace-drafts', status, articleIdFilter],
+        queryFn: () => editorialApi.workspaceDrafts({
+            status,
+            limit: 200,
+            article_id: articleIdFilter ? Number(articleIdFilter) : undefined,
+        }),
     });
 
     const applyMutation = useMutation({
@@ -27,6 +35,16 @@ export default function WorkspaceDraftsPage() {
             setError(null);
         },
         onError: (err: any) => setError(err?.response?.data?.detail || 'تعذر تطبيق المسودة'),
+    });
+
+    const archiveMutation = useMutation({
+        mutationFn: (workId: string) => editorialApi.archiveWorkspaceDraft(workId),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['workspace-drafts'] });
+            setSelected(null);
+            setError(null);
+        },
+        onError: (err: any) => setError(err?.response?.data?.detail || 'تعذر أرشفة المسودة'),
     });
 
     const drafts = data?.data || [];
@@ -41,12 +59,27 @@ export default function WorkspaceDraftsPage() {
         );
     }, [drafts, q]);
 
+    const finalList = useMemo(() => {
+        if (!initialWorkId) return filtered;
+        return filtered.sort((a, b) => (a.work_id === initialWorkId ? -1 : b.work_id === initialWorkId ? 1 : 0));
+    }, [filtered, initialWorkId]);
+
+    useEffect(() => {
+        if (selected || finalList.length === 0) return;
+        if (initialWorkId) {
+            const target = finalList.find((d) => d.work_id === initialWorkId);
+            setSelected(target || finalList[0]);
+            return;
+        }
+        setSelected(finalList[0]);
+    }, [finalList, initialWorkId, selected]);
+
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between gap-3">
                 <div>
                     <h1 className="text-2xl font-bold text-white">Workspace Drafts</h1>
-                    <p className="text-sm text-gray-400 mt-1">{filtered.length} مسودة</p>
+                    <p className="text-sm text-gray-400 mt-1">{finalList.length} مسودة</p>
                 </div>
             </div>
 
@@ -66,6 +99,12 @@ export default function WorkspaceDraftsPage() {
                         className="w-full h-10 pr-10 pl-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder:text-gray-500"
                     />
                 </div>
+                <input
+                    value={articleIdFilter}
+                    onChange={(e) => setArticleIdFilter(e.target.value.replace(/[^\d]/g, ''))}
+                    placeholder="فلتر Article ID"
+                    className="h-10 w-[170px] px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder:text-gray-500"
+                />
                 <div className="flex items-center gap-2">
                     <Filter className="w-4 h-4 text-gray-500" />
                     <select
@@ -85,14 +124,14 @@ export default function WorkspaceDraftsPage() {
                     Array.from({ length: 6 }).map((_, i) => (
                         <div key={i} className="h-48 rounded-2xl bg-gray-800/30 border border-white/5 animate-pulse" />
                     ))
-                ) : filtered.length > 0 ? (
-                    filtered.map((d) => (
+                ) : finalList.length > 0 ? (
+                    finalList.map((d) => (
                         <button
                             key={d.id}
                             onClick={() => setSelected(d)}
                             className={cn(
                                 'text-right rounded-2xl border p-4 bg-gradient-to-br from-gray-800/40 to-gray-900/70 transition-colors',
-                                selected?.id === d.id ? 'border-emerald-500/40' : 'border-white/10 hover:border-white/20'
+                                selected?.id === d.id || d.work_id === initialWorkId ? 'border-emerald-500/40' : 'border-white/10 hover:border-white/20'
                             )}
                         >
                             <div className="flex items-center justify-between gap-2 mb-2">
@@ -140,6 +179,18 @@ export default function WorkspaceDraftsPage() {
                             <CheckCircle2 className="w-4 h-4" />
                             تطبيق مباشر
                         </button>
+                        <button
+                            onClick={() => archiveMutation.mutate(selected.work_id)}
+                            disabled={archiveMutation.isPending || selected.status === 'archived'}
+                            className={cn(
+                                'px-3 py-2 rounded-xl text-xs border',
+                                selected.status !== 'archived'
+                                    ? 'bg-amber-500/20 border-amber-500/30 text-amber-200'
+                                    : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed'
+                            )}
+                        >
+                            أرشفة
+                        </button>
                     </div>
                     <div className="text-xs text-gray-400 flex flex-wrap gap-3">
                         <span>Article: #{selected.article_id}</span>
@@ -158,4 +209,3 @@ export default function WorkspaceDraftsPage() {
         </div>
     );
 }
-

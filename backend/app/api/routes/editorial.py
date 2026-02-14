@@ -387,6 +387,8 @@ async def process_article(
 @router.get("/workspace/drafts")
 async def workspace_drafts(
     status: str = "draft",
+    article_id: Optional[int] = None,
+    source_action: Optional[str] = None,
     limit: int = 100,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -401,9 +403,14 @@ async def workspace_drafts(
             UserRole.print_editor,
         },
     )
+    query = select(EditorialDraft).where(EditorialDraft.status == status)
+    if article_id is not None:
+        query = query.where(EditorialDraft.article_id == article_id)
+    if source_action:
+        query = query.where(EditorialDraft.source_action == source_action)
+
     result = await db.execute(
-        select(EditorialDraft)
-        .where(EditorialDraft.status == status)
+        query
         .order_by(EditorialDraft.updated_at.desc(), EditorialDraft.id.desc())
         .limit(max(1, min(limit, 500)))
     )
@@ -660,6 +667,35 @@ async def apply_draft_by_work_id(
     )
     await db.commit()
     return {"article_id": article.id, "work_id": work_id, "applied": True, "draft": _draft_to_dict(draft)}
+
+
+@router.post("/workspace/drafts/{work_id}/archive")
+async def archive_draft_by_work_id(
+    work_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(
+        current_user,
+        {
+            UserRole.director,
+            UserRole.editor_chief,
+            UserRole.journalist,
+            UserRole.social_media,
+            UserRole.print_editor,
+        },
+    )
+    draft_result = await db.execute(select(EditorialDraft).where(EditorialDraft.work_id == work_id))
+    draft = draft_result.scalar_one_or_none()
+    if not draft:
+        raise HTTPException(404, "Draft not found")
+    if draft.status == "archived":
+        return {"work_id": work_id, "archived": True, "draft": _draft_to_dict(draft)}
+
+    draft.status = "archived"
+    draft.updated_by = current_user.full_name_ar
+    await db.commit()
+    return {"work_id": work_id, "archived": True, "draft": _draft_to_dict(draft)}
 
 
 

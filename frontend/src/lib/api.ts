@@ -183,12 +183,14 @@ export const editorialApi = {
     }) => api.put(`/editorial/${articleId}/drafts/${draftId}`, data),
     applyDraft: (articleId: number, draftId: number) =>
         api.post(`/editorial/${articleId}/drafts/${draftId}/apply`),
-    workspaceDrafts: (params?: { status?: string; limit?: number }) =>
+    workspaceDrafts: (params?: { status?: string; limit?: number; article_id?: number; source_action?: string }) =>
         api.get<WorkspaceDraft[]>('/editorial/workspace/drafts', { params }),
     workspaceDraft: (workId: string) =>
         api.get<WorkspaceDraft>(`/editorial/workspace/drafts/${workId}`),
     applyWorkspaceDraft: (workId: string) =>
         api.post(`/editorial/workspace/drafts/${workId}/apply`),
+    archiveWorkspaceDraft: (workId: string) =>
+        api.post(`/editorial/workspace/drafts/${workId}/archive`),
     decisions: (articleId: number) => api.get(`/editorial/${articleId}/decisions`),
     generate: (articleId: number) => api.post(`/editorial/${articleId}/generate`),
 };
