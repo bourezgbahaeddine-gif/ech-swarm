@@ -24,6 +24,7 @@ export default function NewsPage() {
     const [selectedArticle, setSelectedArticle] = useState<number | null>(null);
     const [rejectReason, setRejectReason] = useState('');
     const [actionResult, setActionResult] = useState<{ articleId: number; action: string; result: string } | null>(null);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [editorName] = useState('رئيس التحرير');
 
     useEffect(() => {
@@ -47,20 +48,24 @@ export default function NewsPage() {
     const triggerScout = useMutation({
         mutationFn: () => dashboardApi.triggerScout(),
         onSuccess: () => queryClient.invalidateQueries({ queryKey: ['news'] }),
+        onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'فشل تشغيل الكشاف'),
     });
 
     const triggerRouter = useMutation({
         mutationFn: () => dashboardApi.triggerRouter(),
         onSuccess: () => queryClient.invalidateQueries({ queryKey: ['news'] }),
+        onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'فشل تشغيل الموجّه'),
     });
 
     const triggerScribe = useMutation({
         mutationFn: () => dashboardApi.triggerScribe(),
         onSuccess: () => queryClient.invalidateQueries({ queryKey: ['news'] }),
+        onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'فشل تشغيل الكاتب'),
     });
 
     const triggerTrends = useMutation({
         mutationFn: () => dashboardApi.triggerTrends(),
+        onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'فشل تشغيل الرادار'),
     });
 
     const decideMutation = useMutation({
@@ -73,6 +78,7 @@ export default function NewsPage() {
             setSelectedArticle(null);
             setRejectReason('');
         },
+        onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'تعذر تنفيذ القرار'),
     });
 
     const processMutation = useMutation({
@@ -83,6 +89,7 @@ export default function NewsPage() {
             setActionResult({ articleId: vars.articleId, action: vars.action, result: resultText });
             queryClient.invalidateQueries({ queryKey: ['news'] });
         },
+        onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'تعذرت معالجة الخبر'),
     });
 
     const refresh = () => queryClient.invalidateQueries({ queryKey: ['news'] });
@@ -115,6 +122,17 @@ export default function NewsPage() {
 
     return (
         <div className="space-y-6">
+            {errorMessage && (
+                <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200 flex items-center justify-between">
+                    <span>{errorMessage}</span>
+                    <button
+                        onClick={() => setErrorMessage(null)}
+                        className="px-2 py-1 rounded-md bg-white/10 hover:bg-white/20 text-xs"
+                    >
+                        إغلاق
+                    </button>
+                </div>
+            )}
             <div className="flex flex-col gap-4">
                 <div className="flex items-center justify-between">
                     <div>
