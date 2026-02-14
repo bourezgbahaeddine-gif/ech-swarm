@@ -138,6 +138,33 @@ curl http://localhost:8000/health
 open http://localhost:8000/docs
 ```
 
+### FreshRSS + RSS-Bridge Mode (Recommended for stable ingestion)
+
+Use this mode to centralize all feeds in FreshRSS and bridge non-RSS sources through RSS-Bridge.
+
+1. In `.env`:
+```bash
+SCOUT_USE_FRESHRSS=true
+FRESHRSS_FEED_URL=http://freshrss:80/p/i/?a=rss&state=all
+RSSBRIDGE_ENABLED=true
+RSSBRIDGE_BASE_URL=http://rssbridge:80
+```
+
+2. Start stack:
+```bash
+docker compose up -d --build
+```
+
+3. Open admin UIs:
+- FreshRSS: `http://SERVER_IP:8082`
+- RSS-Bridge: `http://SERVER_IP:8083`
+
+4. Add feed sources in FreshRSS:
+- Native RSS feeds directly
+- Non-RSS feeds using RSS-Bridge URLs
+
+5. Run Scout as usual. It will pull from `FRESHRSS_FEED_URL` when `SCOUT_USE_FRESHRSS=true`.
+
 ### 4. Run Without Docker (Development)
 
 ```bash

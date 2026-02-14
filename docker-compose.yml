@@ -18,6 +18,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      freshrss:
+        condition: service_started
+      rssbridge:
+        condition: service_started
     restart: unless-stopped
     networks:
       - ech-network
@@ -90,10 +94,78 @@ services:
     networks:
       - ech-network
 
+  freshrss-db:
+    image: mariadb:11
+    container_name: ech-freshrss-db
+    environment:
+      MYSQL_ROOT_PASSWORD: ${FRESHRSS_DB_ROOT_PASSWORD:-freshrss_root_change_me}
+      MYSQL_DATABASE: ${FRESHRSS_DB_NAME:-freshrss}
+      MYSQL_USER: ${FRESHRSS_DB_USER:-freshrss}
+      MYSQL_PASSWORD: ${FRESHRSS_DB_PASSWORD:-freshrss_change_me}
+    volumes:
+      - freshrss_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - ech-network
+
+  freshrss:
+    image: freshrss/freshrss:latest
+    container_name: ech-freshrss
+    depends_on:
+      freshrss-db:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-Africa/Algiers}
+      CRON_MIN: '*/20'
+      FRESHRSS_INSTALL: |-
+        --api-enabled
+        --base-url ${FRESHRSS_BASE_URL:-https://echswarm.agentdz.com/freshrss}
+        --db-base ${FRESHRSS_DB_NAME:-freshrss}
+        --db-host freshrss-db
+        --db-password ${FRESHRSS_DB_PASSWORD:-freshrss_change_me}
+        --db-type mysql
+        --db-user ${FRESHRSS_DB_USER:-freshrss}
+        --default-user ${FRESHRSS_ADMIN_USER:-admin}
+        --language ar
+        --auth-type form
+      FRESHRSS_USER: |-
+        --api-password=${FRESHRSS_API_PASSWORD:-change_me_api_password}
+        --email=${FRESHRSS_ADMIN_EMAIL:-admin@localhost}
+        --language=ar
+        --password=${FRESHRSS_ADMIN_PASSWORD:-change_me_admin_password}
+        --user=${FRESHRSS_ADMIN_USER:-admin}
+    ports:
+      - "8082:80"
+    volumes:
+      - freshrss_data:/var/www/FreshRSS/data
+      - freshrss_extensions:/var/www/FreshRSS/extensions
+    restart: unless-stopped
+    networks:
+      - ech-network
+
+  rssbridge:
+    image: rssbridge/rss-bridge:latest
+    container_name: ech-rssbridge
+    ports:
+      - "8083:80"
+    volumes:
+      - ./docs/rssbridge/whitelist.txt:/app/whitelist.txt:ro
+    restart: unless-stopped
+    networks:
+      - ech-network
+
 volumes:
   pgdata:
   redis_data:
   minio_data:
+  freshrss_db_data:
+  freshrss_data:
+  freshrss_extensions:
 
 networks:
   ech-network:

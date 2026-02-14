@@ -11,6 +11,7 @@ import time
 import asyncio
 import random
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Optional, Iterable
 from urllib.parse import urljoin, urlparse
 
@@ -57,6 +58,19 @@ class ScoutAgent:
         max_new_per_run = settings.scout_max_new_per_run
 
         try:
+            async with aiohttp.ClientSession() as session:
+                if settings.scout_use_freshrss:
+                    await self._fetch_from_freshrss(db, stats, session)
+                    run.status = "success"
+                    run.finished_at = datetime.utcnow()
+                    run.total_items = stats["total"]
+                    run.new_items = stats["new"]
+                    run.duplicates = stats["duplicates"]
+                    run.errors = stats["errors"]
+                    await db.commit()
+                    logger.info("scout_run_complete", **stats, mode="freshrss")
+                    return stats
+
             # Get enabled sources
             result = await db.execute(
                 select(Source).where(Source.enabled == True).order_by(Source.priority.desc())
@@ -79,23 +93,22 @@ class ScoutAgent:
             # Process sources in batches to avoid overwhelming the network
             batch_size = settings.scout_batch_size
             semaphore = asyncio.Semaphore(settings.scout_concurrency)
-            async with aiohttp.ClientSession() as session:
-                for i in range(0, len(sources), batch_size):
-                    batch = sources[i:i + batch_size]
-                    tasks = [
-                        self._fetch_source(source.id, stats, session, semaphore)
-                        for source in batch
-                    ]
-                    await asyncio.gather(*tasks, return_exceptions=True)
+            for i in range(0, len(sources), batch_size):
+                batch = sources[i:i + batch_size]
+                tasks = [
+                    self._fetch_source(source.id, stats, session, semaphore)
+                    for source in batch
+                ]
+                await asyncio.gather(*tasks, return_exceptions=True)
 
-                    # Global cap to keep editorial feed smooth
-                    if stats["new"] >= max_new_per_run:
-                        logger.info("scout_run_cap_reached", max_new=max_new_per_run)
-                        break
+                # Global cap to keep editorial feed smooth
+                if stats["new"] >= max_new_per_run:
+                    logger.info("scout_run_cap_reached", max_new=max_new_per_run)
+                    break
 
-                    # Small delay between batches (backpressure)
-                    if i + batch_size < len(sources):
-                        await asyncio.sleep(0.5)
+                # Small delay between batches (backpressure)
+                if i + batch_size < len(sources):
+                    await asyncio.sleep(0.5)
 
             # Update run record
             run.status = "success"
@@ -117,6 +130,51 @@ class ScoutAgent:
 
         return stats
 
+    async def _fetch_from_freshrss(
+        self,
+        db: AsyncSession,
+        stats: dict,
+        session: aiohttp.ClientSession,
+    ) -> None:
+        """Fetch consolidated feed from FreshRSS."""
+        feed_url = settings.freshrss_feed_url
+        feed = await self._parse_feed(feed_url, session=session)
+        if not feed or not feed.entries:
+            logger.warning("freshrss_feed_empty", feed_url=feed_url)
+            return
+
+        logger.info("freshrss_fetch_started", entries=len(feed.entries), feed_url=feed_url)
+        for entry in feed.entries:
+            stats["total"] += 1
+            source_name = self._entry_source_name(entry)
+            pseudo_source = SimpleNamespace(id=None, name=source_name)
+            try:
+                await self._process_entry(db, entry, pseudo_source, stats)
+            except Exception as e:
+                stats["errors"] += 1
+                logger.warning("freshrss_entry_process_error", source=source_name, error=str(e))
+        await db.commit()
+
+    @staticmethod
+    def _entry_source_name(entry) -> str:
+        """Best-effort source extraction from FreshRSS item."""
+        if isinstance(entry, dict):
+            src = entry.get("source")
+            if isinstance(src, dict):
+                title = src.get("title")
+                if title:
+                    return title
+            if entry.get("author"):
+                return str(entry.get("author"))
+        else:
+            if hasattr(entry, "source") and entry.source:
+                src = entry.source
+                if isinstance(src, dict) and src.get("title"):
+                    return src.get("title")
+            if hasattr(entry, "author") and entry.author:
+                return str(entry.author)
+        return "FreshRSS"
+
     async def _fetch_source(
         self,
         source_id: int,
@@ -132,11 +190,19 @@ class ScoutAgent:
             try:
                 async with semaphore:
                     entries = []
-                    if (source.method or "rss") == "rss":
+                    source_method = (source.method or "rss").lower()
+                    if source_method == "rss":
                         feed_url = source.rss_url or source.url
                         feed = await self._parse_feed(feed_url, session=session)
                         if feed and feed.entries:
                             entries = feed.entries
+                    elif source_method == "scraper" and settings.rssbridge_enabled and source.rss_url:
+                        # Optional mode: scraper sources can be bridged into RSS via RSS-Bridge URL in rss_url
+                        feed = await self._parse_feed(source.rss_url, session=session)
+                        if feed and feed.entries:
+                            entries = feed.entries
+                        else:
+                            entries = await self._scrape_source(source, session=session)
                     else:
                         entries = await self._scrape_source(source, session=session)
 

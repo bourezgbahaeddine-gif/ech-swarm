@@ -79,6 +79,12 @@ class Settings(BaseSettings):
     scout_interval_minutes: int = 30
     trend_radar_interval_minutes: int = 15
 
+    # ── FreshRSS / RSS-Bridge ──
+    scout_use_freshrss: bool = False
+    freshrss_feed_url: str = "http://freshrss:80/p/i/?a=rss&state=all"
+    rssbridge_base_url: str = "http://rssbridge:80"
+    rssbridge_enabled: bool = True
+
     # ── Processing Thresholds ──
     dedup_similarity_threshold: float = 0.70
     breaking_news_urgency_threshold: int = 8
