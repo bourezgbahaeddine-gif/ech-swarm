@@ -45,6 +45,8 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db():
-    """Create all tables on startup (development only)."""
+    """Create tables only in development. Production must use Alembic migrations."""
+    if settings.app_env.lower() != "development":
+        return
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

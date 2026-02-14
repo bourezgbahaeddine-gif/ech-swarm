@@ -5,7 +5,7 @@ Stores external API credentials and service configuration.
 """
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, Index
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime
 
 from app.core.database import Base
 
@@ -20,7 +20,3 @@ class ApiSetting(Base):
     description = Column(Text, nullable=True)
     is_secret = Column(Boolean, default=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    __table_args__ = (
-        Index("ix_api_settings_key", "key"),
-    )

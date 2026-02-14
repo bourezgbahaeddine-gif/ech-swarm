@@ -21,7 +21,4 @@ class SettingsAudit(Base):
     actor = Column(String(100), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    __table_args__ = (
-        Index("ix_settings_audit_key", "key"),
-        Index("ix_settings_audit_created_at", "created_at"),
-    )
+    __table_args__ = (Index("ix_settings_audit_created_at", "created_at"),)
