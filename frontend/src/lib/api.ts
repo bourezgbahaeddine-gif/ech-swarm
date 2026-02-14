@@ -149,6 +149,15 @@ export const editorialApi = {
         action: string;
         value?: string;
     }) => api.post(`/editorial/${articleId}/process`, data),
+    drafts: (articleId: number) => api.get(`/editorial/${articleId}/drafts`),
+    createDraft: (articleId: number, data: {
+        title?: string;
+        body: string;
+        note?: string;
+        source_action?: string;
+    }) => api.post(`/editorial/${articleId}/drafts`, data),
+    applyDraft: (articleId: number, draftId: number) =>
+        api.post(`/editorial/${articleId}/drafts/${draftId}/apply`),
     decisions: (articleId: number) => api.get(`/editorial/${articleId}/decisions`),
     generate: (articleId: number) => api.post(`/editorial/${articleId}/generate`),
 };

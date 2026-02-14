@@ -23,7 +23,13 @@ export default function NewsPage() {
     const [isBreaking, setIsBreaking] = useState<boolean | null>(null);
     const [selectedArticle, setSelectedArticle] = useState<number | null>(null);
     const [rejectReason, setRejectReason] = useState('');
-    const [actionResult, setActionResult] = useState<{ articleId: number; action: string; result: string } | null>(null);
+    const [draftEditor, setDraftEditor] = useState<{
+        articleId: number;
+        action: string;
+        draftId?: number;
+        title: string;
+        body: string;
+    } | null>(null);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [editorName] = useState('رئيس التحرير');
 
@@ -85,11 +91,42 @@ export default function NewsPage() {
         mutationFn: ({ articleId, action }: { articleId: number; action: string }) =>
             editorialApi.process(articleId, { action }),
         onSuccess: (res, vars) => {
-            const resultText = typeof res.data?.result === 'string' ? res.data.result : 'تم تنفيذ الإجراء';
-            setActionResult({ articleId: vars.articleId, action: vars.action, result: resultText });
+            const resultText = typeof res.data?.result === 'string' ? res.data.result : '';
+            const draft = res.data?.draft;
+            setDraftEditor({
+                articleId: vars.articleId,
+                action: vars.action,
+                draftId: typeof draft?.id === 'number' ? draft.id : undefined,
+                title: typeof draft?.title === 'string' && draft.title.trim() ? draft.title : '',
+                body: draft?.body || resultText || 'تم تنفيذ الإجراء بنجاح',
+            });
             queryClient.invalidateQueries({ queryKey: ['news'] });
         },
         onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'تعذرت معالجة الخبر'),
+    });
+
+    const saveDraftMutation = useMutation({
+        mutationFn: (payload: { articleId: number; title?: string; body: string; source_action: string }) =>
+            editorialApi.createDraft(payload.articleId, payload),
+        onSuccess: (res) => {
+            setDraftEditor((prev) => prev ? {
+                ...prev,
+                draftId: res.data?.id || prev.draftId,
+            } : prev);
+            setErrorMessage(null);
+        },
+        onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'تعذر حفظ المسودة'),
+    });
+
+    const applyDraftMutation = useMutation({
+        mutationFn: (payload: { articleId: number; draftId: number }) =>
+            editorialApi.applyDraft(payload.articleId, payload.draftId),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['news'] });
+            setDraftEditor(null);
+            setErrorMessage(null);
+        },
+        onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'تعذر تطبيق المسودة على الخبر'),
     });
 
     const refresh = () => queryClient.invalidateQueries({ queryKey: ['news'] });
@@ -494,26 +531,68 @@ export default function NewsPage() {
                 </div>
             )}
 
-            {actionResult && (
-                <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setActionResult(null)}>
+            {draftEditor && (
+                <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setDraftEditor(null)}>
                     <div
                         className="w-full max-w-3xl rounded-2xl border border-white/10 bg-gray-900 p-4"
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="flex items-center justify-between mb-3">
                             <h3 className="text-sm font-semibold text-white">
-                                نتيجة الإجراء: {actionResult.action} (#{actionResult.articleId})
+                                مسودة {draftEditor.action} (#{draftEditor.articleId})
                             </h3>
-                            <button
-                                onClick={() => setActionResult(null)}
-                                className="px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-xs text-gray-300 hover:text-white"
-                            >
-                                إغلاق
-                            </button>
                         </div>
-                        <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap text-xs text-gray-200 bg-black/30 rounded-xl p-3">
-                            {actionResult.result}
-                        </pre>
+                        <div className="space-y-3">
+                            <input
+                                value={draftEditor.title}
+                                onChange={(e) => setDraftEditor({ ...draftEditor, title: e.target.value })}
+                                placeholder="عنوان المسودة"
+                                className="w-full h-10 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder:text-gray-500"
+                                dir="rtl"
+                            />
+                            <textarea
+                                value={draftEditor.body}
+                                onChange={(e) => setDraftEditor({ ...draftEditor, body: e.target.value })}
+                                className="w-full min-h-[300px] px-3 py-2 rounded-xl bg-black/30 border border-white/10 text-sm text-gray-100"
+                                dir="rtl"
+                            />
+                            <div className="flex items-center justify-end gap-2">
+                                <button
+                                    onClick={() => setDraftEditor(null)}
+                                    className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-xs text-gray-300 hover:text-white"
+                                >
+                                    إغلاق
+                                </button>
+                                <button
+                                    onClick={() => saveDraftMutation.mutate({
+                                        articleId: draftEditor.articleId,
+                                        title: draftEditor.title,
+                                        body: draftEditor.body,
+                                        source_action: draftEditor.action,
+                                    })}
+                                    disabled={saveDraftMutation.isPending}
+                                    className="px-3 py-2 rounded-lg bg-violet-500/20 border border-violet-500/30 text-xs text-violet-200"
+                                >
+                                    حفظ كمسودة
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        if (!draftEditor.draftId) {
+                                            setErrorMessage('احفظ المسودة أولاً قبل التطبيق');
+                                            return;
+                                        }
+                                        applyDraftMutation.mutate({
+                                            articleId: draftEditor.articleId,
+                                            draftId: draftEditor.draftId,
+                                        });
+                                    }}
+                                    disabled={applyDraftMutation.isPending}
+                                    className="px-3 py-2 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-xs text-emerald-200"
+                                >
+                                    تطبيق على الخبر
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}
