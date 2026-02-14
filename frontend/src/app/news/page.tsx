@@ -27,6 +27,7 @@ export default function NewsPage() {
         articleId: number;
         action: string;
         draftId?: number;
+        version?: number;
         title: string;
         body: string;
     } | null>(null);
@@ -97,6 +98,7 @@ export default function NewsPage() {
                 articleId: vars.articleId,
                 action: vars.action,
                 draftId: typeof draft?.id === 'number' ? draft.id : undefined,
+                version: typeof draft?.version === 'number' ? draft.version : undefined,
                 title: typeof draft?.title === 'string' && draft.title.trim() ? draft.title : '',
                 body: draft?.body || resultText || 'تم تنفيذ الإجراء بنجاح',
             });
@@ -106,12 +108,34 @@ export default function NewsPage() {
     });
 
     const saveDraftMutation = useMutation({
-        mutationFn: (payload: { articleId: number; title?: string; body: string; source_action: string }) =>
-            editorialApi.createDraft(payload.articleId, payload),
+        mutationFn: (payload: {
+            articleId: number;
+            draftId?: number;
+            title?: string;
+            body: string;
+            source_action: string;
+            version?: number;
+        }) => {
+            if (payload.draftId && payload.version) {
+                return editorialApi.updateDraft(payload.articleId, payload.draftId, {
+                    title: payload.title,
+                    body: payload.body,
+                    note: 'updated_from_modal',
+                    version: payload.version,
+                });
+            }
+            return editorialApi.createDraft(payload.articleId, {
+                title: payload.title,
+                body: payload.body,
+                source_action: payload.source_action,
+                note: 'created_from_modal',
+            });
+        },
         onSuccess: (res) => {
             setDraftEditor((prev) => prev ? {
                 ...prev,
                 draftId: res.data?.id || prev.draftId,
+                version: res.data?.version || prev.version,
             } : prev);
             setErrorMessage(null);
         },
@@ -566,14 +590,16 @@ export default function NewsPage() {
                                 <button
                                     onClick={() => saveDraftMutation.mutate({
                                         articleId: draftEditor.articleId,
+                                        draftId: draftEditor.draftId,
                                         title: draftEditor.title,
                                         body: draftEditor.body,
                                         source_action: draftEditor.action,
+                                        version: draftEditor.version,
                                     })}
                                     disabled={saveDraftMutation.isPending}
                                     className="px-3 py-2 rounded-lg bg-violet-500/20 border border-violet-500/30 text-xs text-violet-200"
                                 >
-                                    حفظ كمسودة
+                                    {draftEditor.draftId ? 'تحديث المسودة' : 'حفظ كمسودة'}
                                 </button>
                                 <button
                                     onClick={() => {

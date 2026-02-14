@@ -5,18 +5,19 @@ Human-in-the-loop editorial decision and article processing endpoints.
 """
 
 from datetime import datetime
+import re
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.scribe import scribe_agent
 from app.api.routes.auth import get_current_user
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.models import Article, EditorDecision, FeedbackLog, NewsCategory, NewsStatus
+from app.models import Article, EditorDecision, EditorialDraft, FeedbackLog, NewsCategory, NewsStatus
 from app.models.user import User, UserRole
 from app.schemas import EditorDecisionCreate, EditorDecisionResponse
 from app.services.ai_service import ai_service
@@ -48,6 +49,13 @@ class DraftUpsertRequest(BaseModel):
     source_action: Optional[str] = Field(default=None, max_length=100)
 
 
+class DraftUpdateRequest(BaseModel):
+    title: Optional[str] = Field(default=None, max_length=1024)
+    body: str = Field(..., min_length=1, max_length=20000)
+    note: Optional[str] = Field(default=None, max_length=1000)
+    version: int = Field(..., ge=1)
+
+
 def _require_roles(user: User, allowed: set[UserRole]) -> None:
     if user.role not in allowed:
         raise HTTPException(status_code=403, detail="??? ???? ???? ???????")
@@ -70,6 +78,41 @@ def _can_review_decision(user: User, decision: str) -> None:
         )
         return
     raise HTTPException(status_code=400, detail="???? ??? ?????")
+
+
+def _clean_editorial_output(text: str) -> str:
+    """Remove common explanatory/meta text and keep publishable output."""
+    cleaned = (text or "").strip()
+    patterns = [
+        r"(?im)^here\b.*$",
+        r"(?im)^alternative phrasing.*$",
+        r"(?im)^explanation of choices.*$",
+        r"(?im)^\*\*alternative phrasing.*$",
+        r"(?im)^\*\*explanation of choices.*$",
+    ]
+    for pattern in patterns:
+        cleaned = re.sub(pattern, "", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned
+
+
+def _draft_to_dict(draft: EditorialDraft) -> dict:
+    return {
+        "id": draft.id,
+        "article_id": draft.article_id,
+        "source_action": draft.source_action,
+        "title": draft.title,
+        "body": draft.body,
+        "note": draft.note,
+        "status": draft.status,
+        "version": draft.version,
+        "created_by": draft.created_by,
+        "updated_by": draft.updated_by,
+        "applied_by": draft.applied_by,
+        "applied_at": draft.applied_at,
+        "created_at": draft.created_at,
+        "updated_at": draft.updated_at,
+    }
 
 
 @router.post("/{article_id}/decide", response_model=EditorDecisionResponse)
@@ -188,24 +231,56 @@ async def process_article(
 
         if payload.action == "summarize":
             prompt = (
-                "Summarize this news item in Arabic as 3 clear editorial bullets, neutral tone.\n\n"
-                f"{text}"
+                "مهمة تحريرية: لخص الخبر التالي بالعربية الفصحى فقط.\n"
+                "قواعد إلزامية:\n"
+                "1) أعد الناتج النهائي فقط دون أي شرح أو مقدمات.\n"
+                "2) لا تستخدم أي كلمة إنجليزية إلا أسماء العلم.\n"
+                "3) لا تضع عناوين مثل Explanation أو Alternative phrasing.\n"
+                "4) المخرجات: 3 نقاط قصيرة واضحة للنشر في غرفة الأخبار.\n\n"
+                f"النص:\n{text}"
             )
         elif payload.action == "translate":
-            target = payload.value or "Arabic (MSA)"
-            prompt = f"Translate the following text to {target} while preserving journalistic accuracy:\n\n{text}"
+            target = payload.value or "العربية الفصحى"
+            prompt = (
+                f"ترجم النص التالي إلى {target} بصياغة صحفية عربية سليمة.\n"
+                "قواعد إلزامية:\n"
+                "1) أعد الترجمة النهائية فقط دون شروحات أو بدائل.\n"
+                "2) امنع خلط اللغات داخل الجمل.\n"
+                "3) لا تكتب ملاحظات للمحرر أو شرح قراراتك.\n\n"
+                f"النص:\n{text}"
+            )
         elif payload.action == "proofread":
-            prompt = f"Proofread the following text and return only the corrected version:\n\n{text}"
+            prompt = (
+                "دقق النص التالي لغويًا وإملائيًا بالعربية الفصحى.\n"
+                "قواعد إلزامية:\n"
+                "1) أعد النص المصحح فقط.\n"
+                "2) لا تضف شروحات أو ملاحظات.\n"
+                "3) حافظ على المعنى الأصلي دون توسع.\n\n"
+                f"النص:\n{text}"
+            )
         elif payload.action == "fact_check":
             prompt = (
-                "Fact-check this article and return: (1) claims needing verification, "
-                "(2) possible contradictions, (3) safer publishable wording.\n\n"
-                f"{text}"
+                "قم بتدقيق المحتوى التالي وأعد النتيجة بالعربية الفصحى فقط.\n"
+                "قواعد إلزامية:\n"
+                "1) لا تكتب أي شرح خارج القالب.\n"
+                "2) لا تستخدم الإنجليزية إلا أسماء العلم.\n"
+                "3) استخدم القالب الحرفي التالي:\n"
+                "نقاط تحتاج تحقق:\n- ...\n"
+                "ملاحظات تعارض/ثغرات:\n- ...\n"
+                "صياغة آمنة للنشر:\n...\n\n"
+                f"النص:\n{text}"
             )
         else:
-            prompt = f"Write 2 short social media variants for this news without sensationalism:\n\n{text}"
+            prompt = (
+                "اكتب نسختين موجزتين للسوشيال ميديا بالعربية الفصحى فقط وبدون تهويل.\n"
+                "قواعد إلزامية:\n"
+                "1) الناتج النهائي فقط دون شرح.\n"
+                "2) لا خلط لغات داخل الجمل.\n"
+                "3) كل نسخة في سطر مستقل.\n\n"
+                f"النص:\n{text}"
+            )
 
-        output = await ai_service.generate_text(prompt)
+        output = _clean_editorial_output(await ai_service.generate_text(prompt))
         if not output or not output.strip():
             raise HTTPException(
                 status_code=503,
@@ -218,15 +293,23 @@ async def process_article(
             decision=f"process:{payload.action}",
             reason=f"executed_by:{current_user.role.value}",
         )
-        draft_decision = EditorDecision(
+        version_result = await db.execute(
+            select(func.coalesce(func.max(EditorialDraft.version), 0)).where(
+                EditorialDraft.article_id == article_id,
+                EditorialDraft.source_action == payload.action,
+            )
+        )
+        next_version = int(version_result.scalar_one() or 0) + 1
+        draft_decision = EditorialDraft(
             article_id=article_id,
-            editor_name=current_user.full_name_ar,
-            decision=f"draft:{payload.action}",
-            reason="auto_from_process",
-            original_ai_title=article.title_ar or article.original_title,
-            edited_title=article.title_ar or article.original_title,
-            original_ai_body=article.body_html or article.original_content or article.summary,
-            edited_body=output,
+            source_action=payload.action,
+            title=article.title_ar or article.original_title,
+            body=output,
+            note="auto_from_process",
+            status="draft",
+            version=next_version,
+            created_by=current_user.full_name_ar,
+            updated_by=current_user.full_name_ar,
         )
         db.add(process_decision)
         db.add(draft_decision)
@@ -237,11 +320,7 @@ async def process_article(
             "article_id": article_id,
             "action": payload.action,
             "result": output,
-            "draft": {
-                "id": draft_decision.id,
-                "title": draft_decision.edited_title,
-                "body": draft_decision.edited_body,
-            },
+            "draft": _draft_to_dict(draft_decision),
         }
 
     if payload.action in {"change_category", "change_priority", "assign"}:
@@ -315,24 +394,41 @@ async def list_drafts(
         },
     )
     result = await db.execute(
-        select(EditorDecision)
-        .where(EditorDecision.article_id == article_id, EditorDecision.decision.like("draft:%"))
-        .order_by(EditorDecision.decided_at.desc())
+        select(EditorialDraft)
+        .where(EditorialDraft.article_id == article_id)
+        .order_by(EditorialDraft.updated_at.desc(), EditorialDraft.id.desc())
     )
     drafts = result.scalars().all()
-    return [
+    return [_draft_to_dict(d) for d in drafts]
+
+
+@router.get("/{article_id}/drafts/{draft_id}")
+async def get_draft(
+    article_id: int,
+    draft_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(
+        current_user,
         {
-            "id": d.id,
-            "article_id": d.article_id,
-            "source_action": (d.decision or "").replace("draft:", "", 1),
-            "editor_name": d.editor_name,
-            "title": d.edited_title,
-            "body": d.edited_body,
-            "note": d.reason,
-            "created_at": d.decided_at,
-        }
-        for d in drafts
-    ]
+            UserRole.director,
+            UserRole.editor_chief,
+            UserRole.journalist,
+            UserRole.social_media,
+            UserRole.print_editor,
+        },
+    )
+    result = await db.execute(
+        select(EditorialDraft).where(
+            EditorialDraft.id == draft_id,
+            EditorialDraft.article_id == article_id,
+        )
+    )
+    draft = result.scalar_one_or_none()
+    if not draft:
+        raise HTTPException(404, "Draft not found")
+    return _draft_to_dict(draft)
 
 
 @router.post("/{article_id}/drafts")
@@ -358,29 +454,71 @@ async def create_draft(
         raise HTTPException(404, "Article not found")
 
     source_action = payload.source_action or "manual"
-    draft = EditorDecision(
+    version_result = await db.execute(
+        select(func.coalesce(func.max(EditorialDraft.version), 0)).where(
+            EditorialDraft.article_id == article_id,
+            EditorialDraft.source_action == source_action,
+        )
+    )
+    next_version = int(version_result.scalar_one() or 0) + 1
+    draft = EditorialDraft(
         article_id=article_id,
-        editor_name=current_user.full_name_ar,
-        decision=f"draft:{source_action}",
-        reason=payload.note or "manual_draft",
-        original_ai_title=article.title_ar or article.original_title,
-        edited_title=payload.title or article.title_ar or article.original_title,
-        original_ai_body=article.body_html or article.original_content or article.summary,
-        edited_body=payload.body,
+        source_action=source_action,
+        title=payload.title or article.title_ar or article.original_title,
+        body=payload.body,
+        note=payload.note or "manual_draft",
+        status="draft",
+        version=next_version,
+        created_by=current_user.full_name_ar,
+        updated_by=current_user.full_name_ar,
     )
     db.add(draft)
     await db.commit()
     await db.refresh(draft)
-    return {
-        "id": draft.id,
-        "article_id": draft.article_id,
-        "source_action": source_action,
-        "editor_name": draft.editor_name,
-        "title": draft.edited_title,
-        "body": draft.edited_body,
-        "note": draft.reason,
-        "created_at": draft.decided_at,
-    }
+    return _draft_to_dict(draft)
+
+
+@router.put("/{article_id}/drafts/{draft_id}")
+async def update_draft(
+    article_id: int,
+    draft_id: int,
+    payload: DraftUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(
+        current_user,
+        {
+            UserRole.director,
+            UserRole.editor_chief,
+            UserRole.journalist,
+            UserRole.social_media,
+            UserRole.print_editor,
+        },
+    )
+
+    draft_result = await db.execute(
+        select(EditorialDraft).where(
+            EditorialDraft.id == draft_id,
+            EditorialDraft.article_id == article_id,
+        )
+    )
+    draft = draft_result.scalar_one_or_none()
+    if not draft:
+        raise HTTPException(404, "Draft not found")
+    if draft.status != "draft":
+        raise HTTPException(409, "Cannot update non-draft state")
+    if payload.version != draft.version:
+        raise HTTPException(409, f"Draft version conflict. current={draft.version}")
+
+    draft.title = payload.title or draft.title
+    draft.body = payload.body
+    draft.note = payload.note
+    draft.updated_by = current_user.full_name_ar
+    draft.version += 1
+    await db.commit()
+    await db.refresh(draft)
+    return _draft_to_dict(draft)
 
 
 @router.post("/{article_id}/drafts/{draft_id}/apply")
@@ -406,20 +544,25 @@ async def apply_draft(
         raise HTTPException(404, "Article not found")
 
     draft_result = await db.execute(
-        select(EditorDecision).where(
-            EditorDecision.id == draft_id,
-            EditorDecision.article_id == article_id,
-            EditorDecision.decision.like("draft:%"),
+        select(EditorialDraft).where(
+            EditorialDraft.id == draft_id,
+            EditorialDraft.article_id == article_id,
         )
     )
     draft = draft_result.scalar_one_or_none()
     if not draft:
         raise HTTPException(404, "Draft not found")
+    if draft.status != "draft":
+        raise HTTPException(409, "Draft already applied or archived")
 
-    if draft.edited_title:
-        article.title_ar = draft.edited_title
-    if draft.edited_body:
-        article.body_html = draft.edited_body
+    if draft.title:
+        article.title_ar = draft.title
+    if draft.body:
+        article.body_html = draft.body
+    draft.status = "applied"
+    draft.applied_by = current_user.full_name_ar
+    draft.applied_at = datetime.utcnow()
+    draft.updated_by = current_user.full_name_ar
 
     db.add(
         EditorDecision(
@@ -427,14 +570,12 @@ async def apply_draft(
             editor_name=current_user.full_name_ar,
             decision="process:apply_draft",
             reason=f"draft_id:{draft_id}",
-            original_ai_title=draft.original_ai_title,
-            edited_title=draft.edited_title,
-            original_ai_body=draft.original_ai_body,
-            edited_body=draft.edited_body,
+            edited_title=draft.title,
+            edited_body=draft.body,
         )
     )
     await db.commit()
-    return {"article_id": article_id, "draft_id": draft_id, "applied": True}
+    return {"article_id": article_id, "draft_id": draft_id, "applied": True, "draft": _draft_to_dict(draft)}
 
 
 @router.get("/{article_id}/decisions", response_model=list[EditorDecisionResponse])

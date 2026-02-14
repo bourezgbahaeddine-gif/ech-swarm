@@ -176,6 +176,36 @@ class EditorDecision(Base):
         return f"<EditorDecision(article_id={self.article_id}, decision='{self.decision}')>"
 
 
+class EditorialDraft(Base):
+    """Versioned editable draft generated from editorial actions."""
+    __tablename__ = "editorial_drafts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    article_id = Column(Integer, ForeignKey("articles.id"), nullable=False, index=True)
+    source_action = Column(String(100), nullable=False, default="manual")
+    title = Column(String(1024), nullable=True)
+    body = Column(Text, nullable=False)
+    note = Column(Text, nullable=True)
+    status = Column(String(30), nullable=False, default="draft")  # draft|applied|archived
+    version = Column(Integer, nullable=False, default=1)
+    created_by = Column(String(255), nullable=False)
+    updated_by = Column(String(255), nullable=True)
+    applied_by = Column(String(255), nullable=True)
+    applied_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    article = relationship("Article")
+
+    __table_args__ = (
+        UniqueConstraint("article_id", "source_action", "version", name="uq_draft_article_action_version"),
+        Index("ix_editorial_drafts_article_status", "article_id", "status"),
+    )
+
+    def __repr__(self):
+        return f"<EditorialDraft(id={self.id}, article_id={self.article_id}, version={self.version})>"
+
+
 class FeedbackLog(Base):
     """RLHF — Records diffs between AI output and human edits."""
     __tablename__ = "feedback_logs"
