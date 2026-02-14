@@ -26,6 +26,16 @@ class AIService:
         self._gemini_client = None
         self._groq_client = None
 
+    @staticmethod
+    def _resolve_gemini_model(model_name: str, use_pro_default: bool = False) -> str:
+        """Map retired Gemini 1.5 model names to supported 2.x defaults."""
+        fallback = "gemini-2.5-pro" if use_pro_default else "gemini-2.5-flash"
+        if not model_name:
+            return fallback
+        if model_name.startswith("gemini-1.5"):
+            return fallback
+        return model_name
+
     async def _get_gemini(self):
         """Lazy-load Gemini client."""
         api_key = await settings_service.get_value("GEMINI_API_KEY", settings.gemini_api_key)
@@ -80,7 +90,7 @@ Output Schema (JSON only, no markdown):
 
         try:
             start = time.time()
-            model = gemini.GenerativeModel(settings.gemini_model_flash)
+            model = gemini.GenerativeModel(self._resolve_gemini_model(settings.gemini_model_flash, use_pro_default=False))
             response = model.generate_content(
                 f"{system_prompt}\n\nSource: {source}\nText:\n{text[:8000]}"
             )
@@ -153,7 +163,7 @@ Content to rewrite:
         # Fallback to Gemini Flash
         gemini = await self._get_gemini()
         if gemini:
-            model = gemini.GenerativeModel(settings.gemini_model_flash)
+            model = gemini.GenerativeModel(self._resolve_gemini_model(settings.gemini_model_flash, use_pro_default=False))
             response = model.generate_content(prompt)
             result_text = response.text.strip()
             if result_text.startswith("```"):
@@ -183,7 +193,7 @@ Rules:
 4. Output: Structured Markdown report in Arabic."""
 
         try:
-            model = gemini.GenerativeModel(settings.gemini_model_pro)
+            model = gemini.GenerativeModel(self._resolve_gemini_model(settings.gemini_model_pro, use_pro_default=True))
             response = model.generate_content(
                 f"{system_prompt}\n\nQuestion: {question}\n\nContent:\n{content[:30000]}"
             )
@@ -216,7 +226,7 @@ Articles:
 {articles_text}"""
 
         try:
-            model = gemini.GenerativeModel(settings.gemini_model_flash)
+            model = gemini.GenerativeModel(self._resolve_gemini_model(settings.gemini_model_flash, use_pro_default=False))
             response = model.generate_content(prompt)
             return response.text
         except Exception as e:
@@ -229,7 +239,7 @@ Articles:
         if not gemini:
             return ""
         try:
-            model = gemini.GenerativeModel(settings.gemini_model_flash)
+            model = gemini.GenerativeModel(self._resolve_gemini_model(settings.gemini_model_flash, use_pro_default=False))
             response = model.generate_content(prompt)
             return response.text.strip()
         except Exception as e:
@@ -244,7 +254,7 @@ Articles:
         try:
             import json
 
-            model = gemini.GenerativeModel(settings.gemini_model_flash)
+            model = gemini.GenerativeModel(self._resolve_gemini_model(settings.gemini_model_flash, use_pro_default=False))
             response = model.generate_content(prompt)
             text = response.text.strip()
             if text.startswith("```"):
@@ -268,7 +278,7 @@ Articles:
                 resp.raise_for_status()
                 image_bytes = resp.content
 
-            model = gemini.GenerativeModel(settings.gemini_model_flash)
+            model = gemini.GenerativeModel(self._resolve_gemini_model(settings.gemini_model_flash, use_pro_default=False))
             response = model.generate_content([prompt, image_bytes])
             return response.text.strip()
         except Exception as e:

@@ -58,8 +58,8 @@ class Settings(BaseSettings):
 
     # ── AI Services ──
     gemini_api_key: str = ""
-    gemini_model_flash: str = "gemini-1.5-flash"
-    gemini_model_pro: str = "gemini-1.5-pro"
+    gemini_model_flash: str = "gemini-2.5-flash"
+    gemini_model_pro: str = "gemini-2.5-pro"
     groq_api_key: str = ""
 
     # ── Telegram Notifications ──
