@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, BackgroundTasks
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import get_db, async_session
 from app.core.logging import get_logger
 from app.models import Article, Source, PipelineRun, FailedJob, NewsStatus
 from app.schemas import DashboardStats, PipelineRunResponse
@@ -128,37 +128,56 @@ async def get_failed_jobs(
 
 # ── Agent Triggers ──
 
+async def _run_scout_pipeline():
+    async with async_session() as db:
+        stats = await scout_agent.run(db)
+        await router_agent.process_batch(db)
+        logger.info("scout_pipeline_completed", stats=stats)
+
+
+async def _run_router_pipeline():
+    async with async_session() as db:
+        stats = await router_agent.process_batch(db)
+        logger.info("router_pipeline_completed", stats=stats)
+
+
+async def _run_scribe_pipeline():
+    async with async_session() as db:
+        stats = await scribe_agent.batch_write(db)
+        logger.info("scribe_pipeline_completed", stats=stats)
+
+
+async def _run_trends_scan():
+    alerts = await trend_radar_agent.scan()
+    logger.info("trends_scan_completed", alerts_count=len(alerts))
+
+
 @router.post("/agents/scout/run")
-async def trigger_scout(background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
-    """Manually trigger the Scout Agent to fetch news."""
-    stats = await scout_agent.run(db)
-    # Optional smooth pipeline: route immediately after scout
-    await router_agent.process_batch(db)
-    return {"message": "Scout run completed", "stats": stats}
+async def trigger_scout(background_tasks: BackgroundTasks):
+    """Queue Scout Agent run in background and return immediately."""
+    background_tasks.add_task(_run_scout_pipeline)
+    return {"message": "Scout run queued"}
 
 
 @router.post("/agents/router/run")
-async def trigger_router(db: AsyncSession = Depends(get_db)):
-    """Manually trigger the Router Agent to classify pending articles."""
-    stats = await router_agent.process_batch(db)
-    return {"message": "Router run completed", "stats": stats}
+async def trigger_router(background_tasks: BackgroundTasks):
+    """Queue Router Agent run in background and return immediately."""
+    background_tasks.add_task(_run_router_pipeline)
+    return {"message": "Router run queued"}
 
 
 @router.post("/agents/scribe/run")
-async def trigger_scribe(db: AsyncSession = Depends(get_db)):
-    """Manually trigger the Scribe Agent to write approved articles."""
-    stats = await scribe_agent.batch_write(db)
-    return {"message": "Scribe run completed", "stats": stats}
+async def trigger_scribe(background_tasks: BackgroundTasks):
+    """Queue Scribe Agent run in background and return immediately."""
+    background_tasks.add_task(_run_scribe_pipeline)
+    return {"message": "Scribe run queued"}
 
 
 @router.post("/agents/trends/scan")
-async def trigger_trend_scan():
-    """Manually trigger the Trend Radar scan."""
-    alerts = await trend_radar_agent.scan()
-    return {
-        "message": "Trend scan completed",
-        "alerts": [a.model_dump() for a in alerts],
-    }
+async def trigger_trend_scan(background_tasks: BackgroundTasks):
+    """Queue Trend Radar scan in background and return immediately."""
+    background_tasks.add_task(_run_trends_scan)
+    return {"message": "Trend scan queued"}
 
 
 @router.get("/agents/status")
