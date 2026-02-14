@@ -145,6 +145,10 @@ export const editorialApi = {
         editor_name: string; decision: string;
         reason?: string; edited_title?: string; edited_body?: string;
     }) => api.post(`/editorial/${articleId}/decide`, data),
+    process: (articleId: number, data: {
+        action: string;
+        value?: string;
+    }) => api.post(`/editorial/${articleId}/process`, data),
     decisions: (articleId: number) => api.get(`/editorial/${articleId}/decisions`),
     generate: (articleId: number) => api.post(`/editorial/${articleId}/generate`),
 };

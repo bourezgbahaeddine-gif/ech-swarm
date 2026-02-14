@@ -5,13 +5,15 @@ Dashboard stats, agent triggers, and pipeline monitoring.
 """
 
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, BackgroundTasks
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db, async_session
 from app.core.logging import get_logger
 from app.models import Article, Source, PipelineRun, FailedJob, NewsStatus
+from app.models.user import User, UserRole
+from app.api.routes.auth import get_current_user
 from app.schemas import DashboardStats, PipelineRunResponse
 from app.services.cache_service import cache_service
 from app.agents import scout_agent, router_agent, scribe_agent, trend_radar_agent
@@ -152,30 +154,51 @@ async def _run_trends_scan():
     logger.info("trends_scan_completed", alerts_count=len(alerts))
 
 
+def _assert_agent_control_permission(user: User) -> None:
+    if user.role not in {UserRole.director, UserRole.editor_chief}:
+        raise HTTPException(status_code=403, detail="غير مصرح بالتحكم في الوكلاء")
+
+
 @router.post("/agents/scout/run")
-async def trigger_scout(background_tasks: BackgroundTasks):
+async def trigger_scout(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+):
     """Queue Scout Agent run in background and return immediately."""
+    _assert_agent_control_permission(current_user)
     background_tasks.add_task(_run_scout_pipeline)
     return {"message": "Scout run queued"}
 
 
 @router.post("/agents/router/run")
-async def trigger_router(background_tasks: BackgroundTasks):
+async def trigger_router(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+):
     """Queue Router Agent run in background and return immediately."""
+    _assert_agent_control_permission(current_user)
     background_tasks.add_task(_run_router_pipeline)
     return {"message": "Router run queued"}
 
 
 @router.post("/agents/scribe/run")
-async def trigger_scribe(background_tasks: BackgroundTasks):
+async def trigger_scribe(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+):
     """Queue Scribe Agent run in background and return immediately."""
+    _assert_agent_control_permission(current_user)
     background_tasks.add_task(_run_scribe_pipeline)
     return {"message": "Scribe run queued"}
 
 
 @router.post("/agents/trends/scan")
-async def trigger_trend_scan(background_tasks: BackgroundTasks):
+async def trigger_trend_scan(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+):
     """Queue Trend Radar scan in background and return immediately."""
+    _assert_agent_control_permission(current_user)
     background_tasks.add_task(_run_trends_scan)
     return {"message": "Trend scan queued"}
 

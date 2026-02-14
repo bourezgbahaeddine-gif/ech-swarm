@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { newsApi, dashboardApi, editorialApi, type ArticleBrief } from '@/lib/api';
 import { cn, formatRelativeTime, getStatusColor, getCategoryLabel, truncate } from '@/lib/utils';
+import { useAuth } from '@/lib/auth';
 import {
     Newspaper, Search, Zap, ExternalLink,
     Clock, ChevronLeft, ChevronRight, Star,
@@ -13,6 +14,7 @@ import {
 
 export default function NewsPage() {
     const queryClient = useQueryClient();
+    const { user } = useAuth();
     const [page, setPage] = useState(1);
     const [status, setStatus] = useState<string>('');
     const [category, setCategory] = useState<string>('');
@@ -21,6 +23,7 @@ export default function NewsPage() {
     const [isBreaking, setIsBreaking] = useState<boolean | null>(null);
     const [selectedArticle, setSelectedArticle] = useState<number | null>(null);
     const [rejectReason, setRejectReason] = useState('');
+    const [actionResult, setActionResult] = useState<{ articleId: number; action: string; result: string } | null>(null);
     const [editorName] = useState('رئيس التحرير');
 
     useEffect(() => {
@@ -72,6 +75,16 @@ export default function NewsPage() {
         },
     });
 
+    const processMutation = useMutation({
+        mutationFn: ({ articleId, action }: { articleId: number; action: string }) =>
+            editorialApi.process(articleId, { action }),
+        onSuccess: (res, vars) => {
+            const resultText = typeof res.data?.result === 'string' ? res.data.result : 'تم تنفيذ الإجراء';
+            setActionResult({ articleId: vars.articleId, action: vars.action, result: resultText });
+            queryClient.invalidateQueries({ queryKey: ['news'] });
+        },
+    });
+
     const refresh = () => queryClient.invalidateQueries({ queryKey: ['news'] });
 
     const articles = data?.data?.items || [];
@@ -94,6 +107,11 @@ export default function NewsPage() {
             default: return 'border-white/10 text-gray-300 bg-white/5';
         }
     };
+
+    const role = user?.role || '';
+    const canApproveReject = role === 'director' || role === 'editor_chief';
+    const canRewrite = ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'].includes(role);
+    const canProcess = canRewrite;
 
     return (
         <div className="space-y-6">
@@ -332,10 +350,10 @@ export default function NewsPage() {
                                 <div className="mt-3 grid grid-cols-3 gap-2">
                                     <button
                                         onClick={() => decideMutation.mutate({ articleId: article.id, decision: 'approve' })}
-                                        disabled={decideMutation.isPending || !canReview}
+                                        disabled={decideMutation.isPending || !canReview || !canApproveReject}
                                         className={cn(
                                             'px-2 py-2 rounded-xl border text-[10px] flex items-center justify-center gap-1 transition-colors',
-                                            canReview
+                                            canReview && canApproveReject
                                                 ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25'
                                                 : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed'
                                         )}
@@ -344,10 +362,10 @@ export default function NewsPage() {
                                     </button>
                                     <button
                                         onClick={() => decideMutation.mutate({ articleId: article.id, decision: 'rewrite' })}
-                                        disabled={decideMutation.isPending || !canReview}
+                                        disabled={decideMutation.isPending || !canReview || !canRewrite}
                                         className={cn(
                                             'px-2 py-2 rounded-xl border text-[10px] flex items-center justify-center gap-1 transition-colors',
-                                            canReview
+                                            canReview && canRewrite
                                                 ? 'bg-amber-500/15 border-amber-500/30 text-amber-300 hover:bg-amber-500/25'
                                                 : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed'
                                         )}
@@ -356,10 +374,10 @@ export default function NewsPage() {
                                     </button>
                                     <button
                                         onClick={() => setSelectedArticle(article.id)}
-                                        disabled={!canReview}
+                                        disabled={!canReview || !canApproveReject}
                                         className={cn(
                                             'px-2 py-2 rounded-xl border text-[10px] flex items-center justify-center gap-1 transition-colors',
-                                            canReview
+                                            canReview && canApproveReject
                                                 ? 'bg-red-500/15 border-red-500/30 text-red-300 hover:bg-red-500/25'
                                                 : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed'
                                         )}
@@ -387,6 +405,45 @@ export default function NewsPage() {
                                         </button>
                                     </div>
                                 )}
+
+                                <div className="mt-2 grid grid-cols-3 gap-2">
+                                    <button
+                                        onClick={() => processMutation.mutate({ articleId: article.id, action: 'summarize' })}
+                                        disabled={processMutation.isPending || !canProcess}
+                                        className={cn(
+                                            'px-2 py-2 rounded-xl border text-[10px] transition-colors',
+                                            canProcess
+                                                ? 'bg-sky-500/15 border-sky-500/30 text-sky-300 hover:bg-sky-500/25'
+                                                : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed'
+                                        )}
+                                    >
+                                        تلخيص
+                                    </button>
+                                    <button
+                                        onClick={() => processMutation.mutate({ articleId: article.id, action: 'translate' })}
+                                        disabled={processMutation.isPending || !canProcess}
+                                        className={cn(
+                                            'px-2 py-2 rounded-xl border text-[10px] transition-colors',
+                                            canProcess
+                                                ? 'bg-violet-500/15 border-violet-500/30 text-violet-300 hover:bg-violet-500/25'
+                                                : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed'
+                                        )}
+                                    >
+                                        ترجمة
+                                    </button>
+                                    <button
+                                        onClick={() => processMutation.mutate({ articleId: article.id, action: 'fact_check' })}
+                                        disabled={processMutation.isPending || !canProcess}
+                                        className={cn(
+                                            'px-2 py-2 rounded-xl border text-[10px] transition-colors',
+                                            canProcess
+                                                ? 'bg-fuchsia-500/15 border-fuchsia-500/30 text-fuchsia-300 hover:bg-fuchsia-500/25'
+                                                : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed'
+                                        )}
+                                    >
+                                        تحقق
+                                    </button>
+                                </div>
                             </div>
                         );
                     })
@@ -416,6 +473,30 @@ export default function NewsPage() {
                     >
                         <ChevronLeft className="w-4 h-4" />
                     </button>
+                </div>
+            )}
+
+            {actionResult && (
+                <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setActionResult(null)}>
+                    <div
+                        className="w-full max-w-3xl rounded-2xl border border-white/10 bg-gray-900 p-4"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="flex items-center justify-between mb-3">
+                            <h3 className="text-sm font-semibold text-white">
+                                نتيجة الإجراء: {actionResult.action} (#{actionResult.articleId})
+                            </h3>
+                            <button
+                                onClick={() => setActionResult(null)}
+                                className="px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-xs text-gray-300 hover:text-white"
+                            >
+                                إغلاق
+                            </button>
+                        </div>
+                        <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap text-xs text-gray-200 bg-black/30 rounded-xl p-3">
+                            {actionResult.result}
+                        </pre>
+                    </div>
                 </div>
             )}
         </div>
