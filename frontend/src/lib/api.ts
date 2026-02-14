@@ -118,6 +118,24 @@ export interface AgentStatus {
     description: string;
 }
 
+export interface WorkspaceDraft {
+    id: number;
+    article_id: number;
+    work_id: string;
+    source_action: string;
+    title: string | null;
+    body: string;
+    note: string | null;
+    status: string;
+    version: number;
+    created_by: string;
+    updated_by: string | null;
+    applied_by: string | null;
+    applied_at: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
 export const newsApi = {
     list: (params?: {
         page?: number; per_page?: number;
@@ -149,8 +167,8 @@ export const editorialApi = {
         action: string;
         value?: string;
     }) => api.post(`/editorial/${articleId}/process`, data),
-    drafts: (articleId: number) => api.get(`/editorial/${articleId}/drafts`),
-    draft: (articleId: number, draftId: number) => api.get(`/editorial/${articleId}/drafts/${draftId}`),
+    drafts: (articleId: number) => api.get<WorkspaceDraft[]>(`/editorial/${articleId}/drafts`),
+    draft: (articleId: number, draftId: number) => api.get<WorkspaceDraft>(`/editorial/${articleId}/drafts/${draftId}`),
     createDraft: (articleId: number, data: {
         title?: string;
         body: string;
@@ -166,9 +184,9 @@ export const editorialApi = {
     applyDraft: (articleId: number, draftId: number) =>
         api.post(`/editorial/${articleId}/drafts/${draftId}/apply`),
     workspaceDrafts: (params?: { status?: string; limit?: number }) =>
-        api.get('/editorial/workspace/drafts', { params }),
+        api.get<WorkspaceDraft[]>('/editorial/workspace/drafts', { params }),
     workspaceDraft: (workId: string) =>
-        api.get(`/editorial/workspace/drafts/${workId}`),
+        api.get<WorkspaceDraft>(`/editorial/workspace/drafts/${workId}`),
     applyWorkspaceDraft: (workId: string) =>
         api.post(`/editorial/workspace/drafts/${workId}/apply`),
     decisions: (articleId: number) => api.get(`/editorial/${articleId}/decisions`),

@@ -384,31 +384,6 @@ async def process_article(
     raise HTTPException(400, "????? ??? ?????")
 
 
-@router.get("/{article_id}/drafts")
-async def list_drafts(
-    article_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    _require_roles(
-        current_user,
-        {
-            UserRole.director,
-            UserRole.editor_chief,
-            UserRole.journalist,
-            UserRole.social_media,
-            UserRole.print_editor,
-        },
-    )
-    result = await db.execute(
-        select(EditorialDraft)
-        .where(EditorialDraft.article_id == article_id)
-        .order_by(EditorialDraft.updated_at.desc(), EditorialDraft.id.desc())
-    )
-    drafts = result.scalars().all()
-    return [_draft_to_dict(d) for d in drafts]
-
-
 @router.get("/workspace/drafts")
 async def workspace_drafts(
     status: str = "draft",
@@ -685,6 +660,210 @@ async def apply_draft_by_work_id(
     )
     await db.commit()
     return {"article_id": article.id, "work_id": work_id, "applied": True, "draft": _draft_to_dict(draft)}
+
+
+
+
+@router.get("/{article_id}/drafts")
+async def list_drafts(
+    article_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(
+        current_user,
+        {
+            UserRole.director,
+            UserRole.editor_chief,
+            UserRole.journalist,
+            UserRole.social_media,
+            UserRole.print_editor,
+        },
+    )
+    result = await db.execute(
+        select(EditorialDraft)
+        .where(EditorialDraft.article_id == article_id)
+        .order_by(EditorialDraft.updated_at.desc(), EditorialDraft.id.desc())
+    )
+    drafts = result.scalars().all()
+    return [_draft_to_dict(d) for d in drafts]
+
+
+@router.get("/{article_id}/drafts/{draft_id}")
+async def get_draft(
+    article_id: int,
+    draft_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(
+        current_user,
+        {
+            UserRole.director,
+            UserRole.editor_chief,
+            UserRole.journalist,
+            UserRole.social_media,
+            UserRole.print_editor,
+        },
+    )
+    result = await db.execute(
+        select(EditorialDraft).where(
+            EditorialDraft.id == draft_id,
+            EditorialDraft.article_id == article_id,
+        )
+    )
+    draft = result.scalar_one_or_none()
+    if not draft:
+        raise HTTPException(404, "Draft not found")
+    return _draft_to_dict(draft)
+
+
+@router.post("/{article_id}/drafts")
+async def create_draft(
+    article_id: int,
+    payload: DraftUpsertRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(
+        current_user,
+        {
+            UserRole.director,
+            UserRole.editor_chief,
+            UserRole.journalist,
+            UserRole.social_media,
+            UserRole.print_editor,
+        },
+    )
+    article_result = await db.execute(select(Article).where(Article.id == article_id))
+    article = article_result.scalar_one_or_none()
+    if not article:
+        raise HTTPException(404, "Article not found")
+
+    source_action = payload.source_action or "manual"
+    version_result = await db.execute(
+        select(func.coalesce(func.max(EditorialDraft.version), 0)).where(
+            EditorialDraft.article_id == article_id,
+            EditorialDraft.source_action == source_action,
+        )
+    )
+    next_version = int(version_result.scalar_one() or 0) + 1
+    draft = EditorialDraft(
+        article_id=article_id,
+        work_id=_new_work_id(),
+        source_action=source_action,
+        title=payload.title or article.title_ar or article.original_title,
+        body=payload.body,
+        note=payload.note or "manual_draft",
+        status="draft",
+        version=next_version,
+        created_by=current_user.full_name_ar,
+        updated_by=current_user.full_name_ar,
+    )
+    db.add(draft)
+    await db.commit()
+    await db.refresh(draft)
+    return _draft_to_dict(draft)
+
+
+@router.put("/{article_id}/drafts/{draft_id}")
+async def update_draft(
+    article_id: int,
+    draft_id: int,
+    payload: DraftUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(
+        current_user,
+        {
+            UserRole.director,
+            UserRole.editor_chief,
+            UserRole.journalist,
+            UserRole.social_media,
+            UserRole.print_editor,
+        },
+    )
+
+    draft_result = await db.execute(
+        select(EditorialDraft).where(
+            EditorialDraft.id == draft_id,
+            EditorialDraft.article_id == article_id,
+        )
+    )
+    draft = draft_result.scalar_one_or_none()
+    if not draft:
+        raise HTTPException(404, "Draft not found")
+    if draft.status != "draft":
+        raise HTTPException(409, "Cannot update non-draft state")
+    if payload.version != draft.version:
+        raise HTTPException(409, f"Draft version conflict. current={draft.version}")
+
+    draft.title = payload.title or draft.title
+    draft.body = payload.body
+    draft.note = payload.note
+    draft.updated_by = current_user.full_name_ar
+    draft.version += 1
+    await db.commit()
+    await db.refresh(draft)
+    return _draft_to_dict(draft)
+
+
+@router.post("/{article_id}/drafts/{draft_id}/apply")
+async def apply_draft(
+    article_id: int,
+    draft_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(
+        current_user,
+        {
+            UserRole.director,
+            UserRole.editor_chief,
+            UserRole.journalist,
+            UserRole.social_media,
+            UserRole.print_editor,
+        },
+    )
+    article_result = await db.execute(select(Article).where(Article.id == article_id))
+    article = article_result.scalar_one_or_none()
+    if not article:
+        raise HTTPException(404, "Article not found")
+
+    draft_result = await db.execute(
+        select(EditorialDraft).where(
+            EditorialDraft.id == draft_id,
+            EditorialDraft.article_id == article_id,
+        )
+    )
+    draft = draft_result.scalar_one_or_none()
+    if not draft:
+        raise HTTPException(404, "Draft not found")
+    if draft.status != "draft":
+        raise HTTPException(409, "Draft already applied or archived")
+
+    if draft.title:
+        article.title_ar = draft.title
+    if draft.body:
+        article.body_html = draft.body
+    draft.status = "applied"
+    draft.applied_by = current_user.full_name_ar
+    draft.applied_at = datetime.utcnow()
+    draft.updated_by = current_user.full_name_ar
+
+    db.add(
+        EditorDecision(
+            article_id=article_id,
+            editor_name=current_user.full_name_ar,
+            decision="process:apply_draft",
+            reason=f"draft_id:{draft_id}",
+            edited_title=draft.title,
+            edited_body=draft.body,
+        )
+    )
+    await db.commit()
+    return {"article_id": article_id, "draft_id": draft_id, "applied": True, "draft": _draft_to_dict(draft)}
 
 
 @router.get("/{article_id}/decisions", response_model=list[EditorDecisionResponse])
