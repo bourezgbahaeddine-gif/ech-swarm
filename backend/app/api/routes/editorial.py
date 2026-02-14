@@ -199,6 +199,11 @@ async def process_article(
             prompt = f"اكتب نسختين موجزتين للسوشيال ميديا لهذا الخبر دون إثارة:\n\n{text}"
 
         output = await ai_service.generate_text(prompt)
+        if not output or not output.strip():
+            raise HTTPException(
+                status_code=503,
+                detail="تعذرت المعالجة الذكية. تحقق من إعدادات GEMINI_API_KEY أو مزود الذكاء.",
+            )
         db.add(
             EditorDecision(
                 article_id=article_id,
