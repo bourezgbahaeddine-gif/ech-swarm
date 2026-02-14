@@ -5,6 +5,8 @@ Multi-channel notification delivery (Telegram, Slack).
 """
 
 import httpx
+import html
+import re
 from typing import Optional
 
 from app.core.config import get_settings
@@ -17,6 +19,30 @@ settings = get_settings()
 
 class NotificationService:
     """Send alerts to editorial team via Telegram/Slack."""
+
+    @staticmethod
+    def _clean_text(text: str, max_len: int = 600) -> str:
+        if not text:
+            return "-"
+        normalized = re.sub(r"\s+", " ", text).strip()
+        return html.escape(normalized[:max_len])
+
+    @staticmethod
+    def _category_label(category: str) -> str:
+        labels = {
+            "local_algeria": "محلي - الجزائر",
+            "international": "دولي",
+            "politics": "سياسة",
+            "economy": "اقتصاد",
+            "sports": "رياضة",
+            "technology": "تكنولوجيا",
+            "health": "صحة",
+            "culture": "ثقافة",
+            "environment": "بيئة",
+            "society": "مجتمع",
+            "general": "عام",
+        }
+        return labels.get((category or "").strip().lower(), category or "عام")
 
     async def send_telegram(
         self,
@@ -77,12 +103,15 @@ class NotificationService:
 
     async def send_breaking_alert(self, title: str, summary: str, source: str, url: str):
         """Send a breaking news alert to all channels."""
+        safe_title = self._clean_text(title, 300)
+        safe_summary = self._clean_text(summary, 700)
+        safe_source = self._clean_text(source, 120)
         message = (
-            f"?? <b>????</b>\n\n"
-            f"<b>{title}</b>\n\n"
-            f"{summary}\n\n"
-            f"?? ??????: {source}\n"
-            f"?? <a href=\"{url}\">??????</a>"
+            f"🚨 <b>خبر عاجل</b>\n\n"
+            f"<b>{safe_title}</b>\n\n"
+            f"{safe_summary}\n\n"
+            f"📰 المصدر: {safe_source}\n"
+            f"🔗 <a href=\"{url}\">قراءة الخبر</a>"
         )
 
         channel_alerts = await settings_service.get_value(
@@ -102,17 +131,21 @@ class NotificationService:
         category: str,
     ):
         """Send a candidate article to editors for review."""
-        stars = "?" * min(importance, 5)
+        safe_title = self._clean_text(title, 300)
+        safe_summary = self._clean_text(summary, 900)
+        safe_source = self._clean_text(source, 120)
+        category_label = self._category_label(category)
+        stars = "★" * min(max(importance // 2, 1), 5)
         message = (
-            f"?? <b>??? ????? ?????</b> #{article_id}\n\n"
-            f"<b>{title}</b>\n\n"
-            f"{summary}\n\n"
-            f"?? ?????: {category}\n"
-            f"?? ???????: {stars} ({importance}/10)\n"
-            f"?? ??????: {source}\n\n"
-            f"? ????????: <code>approve {article_id}</code>\n"
-            f"? ?????: <code>reject {article_id}</code>\n"
-            f"?? ?????? ???????: <code>rewrite {article_id}</code>"
+            f"🗞️ <b>خبر جديد يحتاج مراجعة</b> #{article_id}\n\n"
+            f"<b>{safe_title}</b>\n\n"
+            f"{safe_summary}\n\n"
+            f"🏷️ التصنيف: {category_label}\n"
+            f"⭐ الأهمية: {stars} ({importance}/10)\n"
+            f"📰 المصدر: {safe_source}\n\n"
+            f"✅ اعتماد: <code>approve {article_id}</code>\n"
+            f"❌ رفض: <code>reject {article_id}</code>\n"
+            f"✍️ إعادة صياغة: <code>rewrite {article_id}</code>"
         )
 
         await self.send_telegram(message)
@@ -120,15 +153,15 @@ class NotificationService:
     async def send_daily_report(self, stats: dict):
         """Send daily pipeline statistics report."""
         message = (
-            f"?? <b>????? ???? - ???? ?????? ??????</b>\n\n"
-            f"?? ??????? ???????: {stats.get('total', 0)}\n"
-            f"?? ??????: {stats.get('duplicates', 0)}\n"
-            f"? ??? ????????: {stats.get('approved', 0)}\n"
-            f"? ?? ?????: {stats.get('rejected', 0)}\n"
-            f"?? ?? ?????: {stats.get('published', 0)}\n"
-            f"?? ????????? AI: {stats.get('ai_calls', 0)}\n"
-            f"? ????? ????????: {stats.get('avg_time_ms', 0)}ms\n"
-            f"?? ?????: {stats.get('errors', 0)}"
+            f"📊 <b>التقرير اليومي - غرفة الشروق الذكية</b>\n\n"
+            f"📰 إجمالي الأخبار: {stats.get('total', 0)}\n"
+            f"🔁 المكررات: {stats.get('duplicates', 0)}\n"
+            f"✅ المعتمدة: {stats.get('approved', 0)}\n"
+            f"❌ المرفوضة: {stats.get('rejected', 0)}\n"
+            f"📤 المنشورة: {stats.get('published', 0)}\n"
+            f"🤖 استدعاءات الذكاء: {stats.get('ai_calls', 0)}\n"
+            f"⏱️ متوسط المعالجة: {stats.get('avg_time_ms', 0)}ms\n"
+            f"⚠️ الأخطاء: {stats.get('errors', 0)}"
         )
 
         await self.send_telegram(message)
