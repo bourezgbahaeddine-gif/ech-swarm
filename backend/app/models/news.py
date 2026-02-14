@@ -182,6 +182,7 @@ class EditorialDraft(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     article_id = Column(Integer, ForeignKey("articles.id"), nullable=False, index=True)
+    work_id = Column(String(64), nullable=False, unique=True, index=True)
     source_action = Column(String(100), nullable=False, default="manual")
     title = Column(String(1024), nullable=True)
     body = Column(Text, nullable=False)

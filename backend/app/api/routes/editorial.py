@@ -7,6 +7,7 @@ Human-in-the-loop editorial decision and article processing endpoints.
 from datetime import datetime
 import re
 from typing import Literal, Optional
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -100,6 +101,7 @@ def _draft_to_dict(draft: EditorialDraft) -> dict:
     return {
         "id": draft.id,
         "article_id": draft.article_id,
+        "work_id": draft.work_id,
         "source_action": draft.source_action,
         "title": draft.title,
         "body": draft.body,
@@ -113,6 +115,10 @@ def _draft_to_dict(draft: EditorialDraft) -> dict:
         "created_at": draft.created_at,
         "updated_at": draft.updated_at,
     }
+
+
+def _new_work_id() -> str:
+    return f"WRK-{datetime.utcnow():%Y%m%d}-{uuid4().hex[:10].upper()}"
 
 
 @router.post("/{article_id}/decide", response_model=EditorDecisionResponse)
@@ -302,6 +308,7 @@ async def process_article(
         next_version = int(version_result.scalar_one() or 0) + 1
         draft_decision = EditorialDraft(
             article_id=article_id,
+            work_id=_new_work_id(),
             source_action=payload.action,
             title=article.title_ar or article.original_title,
             body=output,
@@ -402,6 +409,56 @@ async def list_drafts(
     return [_draft_to_dict(d) for d in drafts]
 
 
+@router.get("/workspace/drafts")
+async def workspace_drafts(
+    status: str = "draft",
+    limit: int = 100,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(
+        current_user,
+        {
+            UserRole.director,
+            UserRole.editor_chief,
+            UserRole.journalist,
+            UserRole.social_media,
+            UserRole.print_editor,
+        },
+    )
+    result = await db.execute(
+        select(EditorialDraft)
+        .where(EditorialDraft.status == status)
+        .order_by(EditorialDraft.updated_at.desc(), EditorialDraft.id.desc())
+        .limit(max(1, min(limit, 500)))
+    )
+    drafts = result.scalars().all()
+    return [_draft_to_dict(d) for d in drafts]
+
+
+@router.get("/workspace/drafts/{work_id}")
+async def workspace_draft_by_work_id(
+    work_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(
+        current_user,
+        {
+            UserRole.director,
+            UserRole.editor_chief,
+            UserRole.journalist,
+            UserRole.social_media,
+            UserRole.print_editor,
+        },
+    )
+    result = await db.execute(select(EditorialDraft).where(EditorialDraft.work_id == work_id))
+    draft = result.scalar_one_or_none()
+    if not draft:
+        raise HTTPException(404, "Draft not found")
+    return _draft_to_dict(draft)
+
+
 @router.get("/{article_id}/drafts/{draft_id}")
 async def get_draft(
     article_id: int,
@@ -463,6 +520,7 @@ async def create_draft(
     next_version = int(version_result.scalar_one() or 0) + 1
     draft = EditorialDraft(
         article_id=article_id,
+        work_id=_new_work_id(),
         source_action=source_action,
         title=payload.title or article.title_ar or article.original_title,
         body=payload.body,
@@ -576,6 +634,57 @@ async def apply_draft(
     )
     await db.commit()
     return {"article_id": article_id, "draft_id": draft_id, "applied": True, "draft": _draft_to_dict(draft)}
+
+
+@router.post("/workspace/drafts/{work_id}/apply")
+async def apply_draft_by_work_id(
+    work_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(
+        current_user,
+        {
+            UserRole.director,
+            UserRole.editor_chief,
+            UserRole.journalist,
+            UserRole.social_media,
+            UserRole.print_editor,
+        },
+    )
+    draft_result = await db.execute(select(EditorialDraft).where(EditorialDraft.work_id == work_id))
+    draft = draft_result.scalar_one_or_none()
+    if not draft:
+        raise HTTPException(404, "Draft not found")
+    if draft.status != "draft":
+        raise HTTPException(409, "Draft already applied or archived")
+
+    article_result = await db.execute(select(Article).where(Article.id == draft.article_id))
+    article = article_result.scalar_one_or_none()
+    if not article:
+        raise HTTPException(404, "Article not found")
+
+    if draft.title:
+        article.title_ar = draft.title
+    if draft.body:
+        article.body_html = draft.body
+    draft.status = "applied"
+    draft.applied_by = current_user.full_name_ar
+    draft.applied_at = datetime.utcnow()
+    draft.updated_by = current_user.full_name_ar
+
+    db.add(
+        EditorDecision(
+            article_id=article.id,
+            editor_name=current_user.full_name_ar,
+            decision="process:apply_draft",
+            reason=f"work_id:{work_id}",
+            edited_title=draft.title,
+            edited_body=draft.body,
+        )
+    )
+    await db.commit()
+    return {"article_id": article.id, "work_id": work_id, "applied": True, "draft": _draft_to_dict(draft)}
 
 
 @router.get("/{article_id}/decisions", response_model=list[EditorDecisionResponse])

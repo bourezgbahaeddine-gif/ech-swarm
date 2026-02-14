@@ -21,6 +21,7 @@ def upgrade() -> None:
         "editorial_drafts",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
         sa.Column("article_id", sa.Integer(), nullable=False),
+        sa.Column("work_id", sa.String(length=64), nullable=False),
         sa.Column("source_action", sa.String(length=100), nullable=False, server_default="manual"),
         sa.Column("title", sa.String(length=1024), nullable=True),
         sa.Column("body", sa.Text(), nullable=False),
@@ -35,9 +36,11 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(), nullable=True),
         sa.ForeignKeyConstraint(["article_id"], ["articles.id"]),
         sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("work_id"),
         sa.UniqueConstraint("article_id", "source_action", "version", name="uq_draft_article_action_version"),
     )
     op.create_index("ix_editorial_drafts_article_id", "editorial_drafts", ["article_id"], unique=False)
+    op.create_index("ix_editorial_drafts_work_id", "editorial_drafts", ["work_id"], unique=True)
     op.create_index(
         "ix_editorial_drafts_article_status",
         "editorial_drafts",
@@ -47,6 +50,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_index("ix_editorial_drafts_work_id", table_name="editorial_drafts")
     op.drop_index("ix_editorial_drafts_article_status", table_name="editorial_drafts")
     op.drop_index("ix_editorial_drafts_article_id", table_name="editorial_drafts")
     op.drop_table("editorial_drafts")

@@ -27,6 +27,7 @@ export default function NewsPage() {
         articleId: number;
         action: string;
         draftId?: number;
+        workId?: string;
         version?: number;
         title: string;
         body: string;
@@ -98,6 +99,7 @@ export default function NewsPage() {
                 articleId: vars.articleId,
                 action: vars.action,
                 draftId: typeof draft?.id === 'number' ? draft.id : undefined,
+                workId: typeof draft?.work_id === 'string' ? draft.work_id : undefined,
                 version: typeof draft?.version === 'number' ? draft.version : undefined,
                 title: typeof draft?.title === 'string' && draft.title.trim() ? draft.title : '',
                 body: draft?.body || resultText || 'تم تنفيذ الإجراء بنجاح',
@@ -135,6 +137,7 @@ export default function NewsPage() {
             setDraftEditor((prev) => prev ? {
                 ...prev,
                 draftId: res.data?.id || prev.draftId,
+                workId: res.data?.work_id || prev.workId,
                 version: res.data?.version || prev.version,
             } : prev);
             setErrorMessage(null);
@@ -565,6 +568,11 @@ export default function NewsPage() {
                             <h3 className="text-sm font-semibold text-white">
                                 مسودة {draftEditor.action} (#{draftEditor.articleId})
                             </h3>
+                            {draftEditor.workId && (
+                                <span className="text-xs text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-2 py-1 rounded-lg">
+                                    {draftEditor.workId}
+                                </span>
+                            )}
                         </div>
                         <div className="space-y-3">
                             <input
