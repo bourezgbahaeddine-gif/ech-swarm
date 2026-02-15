@@ -7,7 +7,7 @@ import { cn, formatRelativeTime, getCategoryLabel } from '@/lib/utils';
 import { useAuth } from '@/lib/auth';
 import {
     UserCheck, CheckCircle, XCircle, RotateCw,
-    Star, Zap, RefreshCw,
+    Star, Zap, RefreshCw, Timer,
 } from 'lucide-react';
 
 export default function EditorialPage() {
@@ -31,6 +31,26 @@ export default function EditorialPage() {
         if (!iso) return false;
         const deltaMs = Date.now() - new Date(iso).getTime();
         return deltaMs >= 0 && deltaMs <= minutes * 60 * 1000;
+    };
+    const waitingMinutes = (iso: string | null) => {
+        if (!iso) return 0;
+        return Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+    };
+    const hasLocalSignal = (article: ArticleBrief) => {
+        const text = `${article.title_ar || ''} ${article.original_title || ''} ${article.source_name || ''}`.toLowerCase();
+        return ['الجزائر', 'algeria', 'algérie', 'algerie', 'aps', 'echorouk', 'el khabar', 'tsa'].some((k) => text.includes(k));
+    };
+    const hasTrustedSource = (article: ArticleBrief) => {
+        const src = (article.source_name || '').toLowerCase();
+        return ['aps', 'bbc', 'reuters', 'france24', 'le monde', 'the guardian', 'echorouk', 'el khabar'].some((k) => src.includes(k));
+    };
+    const priorityScore = (article: ArticleBrief) => {
+        let score = article.importance_score || 0;
+        if (article.is_breaking) score += 8;
+        if (hasLocalSignal(article)) score += 4;
+        if (hasTrustedSource(article)) score += 2;
+        score += Math.min(10, Math.floor(waitingMinutes(article.created_at || article.crawled_at) / 10));
+        return score;
     };
 
     const extractErrorDetail = (err: unknown, fallback: string): string => {
@@ -91,11 +111,19 @@ export default function EditorialPage() {
     const articles = useMemo(() => {
         const rows = (pendingData?.data || []) as ArticleBrief[];
         const q = search.trim().toLowerCase();
-        if (!q) return rows;
-        return rows.filter((a) =>
+        const filtered = q ? rows.filter((a) =>
             `${a.title_ar || ''} ${a.original_title || ''} ${a.source_name || ''}`.toLowerCase().includes(q)
-        );
+        ) : rows;
+        return [...filtered].sort((a, b) => priorityScore(b) - priorityScore(a));
     }, [pendingData?.data, search]);
+
+    const editorialStats = useMemo(() => {
+        const urgent = articles.filter((a) => a.is_breaking || (a.importance_score || 0) >= 8).length;
+        const local = articles.filter((a) => hasLocalSignal(a)).length;
+        const trusted = articles.filter((a) => hasTrustedSource(a)).length;
+        const slaBreached = articles.filter((a) => waitingMinutes(a.created_at || a.crawled_at) > 20).length;
+        return { urgent, local, trusted, slaBreached };
+    }, [articles]);
 
     const toggleSelected = (id: number) => {
         setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -125,6 +153,25 @@ export default function EditorialPage() {
             )}
 
             <div className="rounded-2xl border border-white/10 bg-gray-900/40 p-4 space-y-3">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <div className="rounded-xl bg-red-500/10 border border-red-500/20 p-3">
+                        <p className="text-[11px] text-red-300">عاجل/مرتفع</p>
+                        <p className="text-xl font-bold text-white">{editorialStats.urgent}</p>
+                    </div>
+                    <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 p-3">
+                        <p className="text-[11px] text-emerald-300">إشارة محلية</p>
+                        <p className="text-xl font-bold text-white">{editorialStats.local}</p>
+                    </div>
+                    <div className="rounded-xl bg-sky-500/10 border border-sky-500/20 p-3">
+                        <p className="text-[11px] text-sky-300">مصادر موثوقة</p>
+                        <p className="text-xl font-bold text-white">{editorialStats.trusted}</p>
+                    </div>
+                    <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-3">
+                        <p className="text-[11px] text-amber-300">متجاوز SLA</p>
+                        <p className="text-xl font-bold text-white">{editorialStats.slaBreached}</p>
+                    </div>
+                </div>
+
                 <div className="flex flex-wrap items-center gap-2">
                     <input
                         type="text"
@@ -144,6 +191,25 @@ export default function EditorialPage() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
+                    <button
+                        disabled={!canApproveReject || bulkMutation.isPending || articles.length === 0}
+                        onClick={() => {
+                            const policyIds = articles
+                                .filter((a) => normalizeStatus(a.status) === 'candidate')
+                                .filter((a) => hasLocalSignal(a))
+                                .filter((a) => hasTrustedSource(a))
+                                .filter((a) => (a.importance_score || 0) >= 7 || a.is_breaking)
+                                .map((a) => a.id);
+                            if (policyIds.length === 0) {
+                                setErrorMessage('لا توجد مواد مطابقة لسياسة الاعتماد السريع حالياً');
+                                return;
+                            }
+                            bulkMutation.mutate({ ids: policyIds, decision: 'approve' });
+                        }}
+                        className="px-3 py-2 rounded-xl bg-cyan-500/20 text-cyan-200 disabled:opacity-40 text-xs"
+                    >
+                        اعتماد سريع حسب السياسة
+                    </button>
                     <button
                         disabled={!canApproveReject || selectedIds.length === 0 || bulkMutation.isPending}
                         onClick={() => bulkMutation.mutate({ ids: selectedIds, decision: 'approve' })}
@@ -240,6 +306,11 @@ export default function EditorialPage() {
                                             <span className="text-[10px] text-gray-600 mr-auto">
                                                 {formatRelativeTime(article.created_at || article.crawled_at)}
                                             </span>
+                                            {waitingMinutes(article.created_at || article.crawled_at) > 20 && (
+                                                <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-[10px] font-bold text-amber-300 flex items-center gap-1">
+                                                    <Timer className="w-3 h-3" /> SLA
+                                                </span>
+                                            )}
                                         </div>
 
                                         <h3 className="text-base font-semibold text-white leading-relaxed" dir="rtl">
