@@ -74,8 +74,11 @@ WEAK_TERMS = {
     "رئيس", "الجمهورية", "يستقبل", "قال", "أكد", "حول", "بعد", "قبل", "اليوم", "غدا", "أمس", "هذا", "هذه", "هناك",
     "الذي", "التي", "ذلك", "تلك", "على", "إلى", "من", "في", "عن", "مع", "ضد", "خلال", "ضمن", "عند", "حتى",
     # French
-    "avec", "sans", "pour", "dans", "sur", "apres", "avant", "selon", "plus", "moins", "tout", "cette", "ceci",
-    "president", "republique",
+    "avec", "sans", "pour", "dans", "sur", "apres", "avant", "selon", "plus", "moins", "tout", "tous", "toute",
+    "cette", "ceci", "cela", "celui", "celle", "elles", "ils", "nous", "vous", "leur", "leurs", "nos", "vos",
+    "les", "des", "du", "de", "d", "la", "le", "un", "une", "et", "est", "sont", "ont", "avait", "avaient",
+    "etaient", "etre", "qui", "que", "quoi", "dont", "ou", "où", "qu", "au", "aux", "en", "a",
+    "courant", "president", "republique",
     # English
     "the", "a", "an", "and", "or", "to", "of", "in", "on", "for", "with", "from", "by", "at", "as",
     "today", "yesterday", "tomorrow", "says", "said", "president",
@@ -173,12 +176,33 @@ class TrendRadarAgent:
                         return []
                     content = await resp.text()
                     feed = feedparser.parse(content)
-                    terms: list[str] = []
+                    terms_counter: Counter[str] = Counter()
                     for entry in feed.entries[:30]:
-                        title = normalize_text(entry.get("title", ""))
+                        raw_title = entry.get("title", "")
+                        title = normalize_text(self._strip_publisher_suffix(raw_title))
                         if title:
-                            terms.extend(self._extract_candidate_terms(title))
-                    return list(dict.fromkeys(terms))
+                            for term in self._extract_candidate_terms(title):
+                                terms_counter[term] += 1
+
+                    ranked = sorted(
+                        terms_counter.items(),
+                        key=lambda kv: (
+                            0 if " " in kv[0] else 1,  # prioritize phrases
+                            -kv[1],                    # then frequency
+                            -len(kv[0]),               # then richer term
+                        ),
+                    )
+                    out: list[str] = []
+                    for term, freq in ranked:
+                        if self._is_weak_term(term):
+                            continue
+                        # single words require repetition, phrases can pass with one hit
+                        if " " not in term and freq < 2:
+                            continue
+                        out.append(term)
+                        if len(out) >= 40:
+                            break
+                    return out
         except Exception as e:
             logger.warning("geo_news_fallback_error", geo=geo, error=str(e))
             return []
@@ -344,7 +368,7 @@ class TrendRadarAgent:
         normalized = normalize_text(text)
         tokens = [
             t for t in re.split(r"[^\w\u0600-\u06FF]+", normalized)
-            if t and len(t) > 2 and not t.isdigit() and t not in WEAK_TERMS
+            if t and len(t) > 2 and not self._is_weak_term(t)
         ]
         terms: list[str] = []
         terms.extend(tokens)
@@ -356,6 +380,15 @@ class TrendRadarAgent:
                     terms.append(phrase)
         return list(dict.fromkeys(terms))
 
+    def _strip_publisher_suffix(self, raw_title: str) -> str:
+        """Remove trailing publisher/source suffix from Google News titles."""
+        if not raw_title:
+            return ""
+        for sep in [" - ", " | ", " — ", " – ", " · "]:
+            if sep in raw_title:
+                raw_title = raw_title.split(sep)[0]
+        return raw_title.strip()
+
     def _is_weak_term(self, term: str) -> bool:
         t = normalize_text(term).strip()
         if not t:
@@ -365,6 +398,8 @@ class TrendRadarAgent:
         if t.isdigit():
             return True
         if re.fullmatch(r"\d{2,4}", t):
+            return True
+        if t.startswith("http") or t.startswith("www"):
             return True
         if len(t) <= 2:
             return True
