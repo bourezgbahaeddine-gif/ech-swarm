@@ -97,12 +97,24 @@ export default function NewsPage() {
 
     const refreshPipeline = useMutation({
         mutationFn: async () => {
+            const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
             await dashboardApi.triggerScout();
+            // Jobs are queued asynchronously on the backend.
+            // Give Scout a short head-start, then queue Router.
+            await sleep(6000);
             await dashboardApi.triggerRouter();
+            // Wait briefly for first batch to be written before refetch.
+            await sleep(5000);
         },
         onSuccess: async () => {
+            setPage(1);
             await queryClient.invalidateQueries({ queryKey: ['news'] });
             await queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
+            // One extra refetch pass to catch late writes from queued jobs.
+            setTimeout(() => {
+                queryClient.invalidateQueries({ queryKey: ['news'] });
+                queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
+            }, 5000);
             setErrorMessage(null);
             setInfoMessage('تم تحديث الأخبار وجلب آخر العناصر');
         },
