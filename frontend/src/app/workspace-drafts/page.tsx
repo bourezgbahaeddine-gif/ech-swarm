@@ -1,29 +1,65 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { editorialApi, type WorkspaceDraft } from '@/lib/api';
-import { cn, formatRelativeTime, truncate } from '@/lib/utils';
-import { Search, CheckCircle2, FileText, Filter } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
+import { CheckCircle2, Copy, FileText, Filter, Search, Sparkles, Wand2 } from 'lucide-react';
+
+import { editorialApi, newsApi, type WorkspaceDraft } from '@/lib/api';
+import { journalistServicesApi } from '@/lib/journalist-services-api';
+import { useAuth } from '@/lib/auth';
+import { cn, formatRelativeTime, truncate } from '@/lib/utils';
+
+type AIToolResult = {
+    rewrite?: string;
+    summary?: string;
+    proofread?: string;
+    keywords?: string;
+    metadata?: string;
+    imagePrompt?: string;
+    infographicPrompt?: string;
+};
 
 export default function WorkspaceDraftsPage() {
     const queryClient = useQueryClient();
     const searchParams = useSearchParams();
+    const { user } = useAuth();
+
     const [status, setStatus] = useState('draft');
     const [q, setQ] = useState('');
     const [articleIdFilter, setArticleIdFilter] = useState(searchParams.get('article_id') || '');
     const [selected, setSelected] = useState<WorkspaceDraft | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [ok, setOk] = useState<string | null>(null);
+
+    const [workingTitle, setWorkingTitle] = useState('');
+    const [workingBody, setWorkingBody] = useState('');
+    const [seoTitle, setSeoTitle] = useState('');
+    const [seoDescription, setSeoDescription] = useState('');
+    const [seoKeywords, setSeoKeywords] = useState('');
+    const [imageAlt, setImageAlt] = useState('');
+    const [imagePrompt, setImagePrompt] = useState('');
+    const [infographicPrompt, setInfographicPrompt] = useState('');
+    const [aiResult, setAiResult] = useState<AIToolResult>({});
+
+    const [busyAction, setBusyAction] = useState('');
+
     const initialWorkId = searchParams.get('work_id') || '';
 
     const { data, isLoading } = useQuery({
         queryKey: ['workspace-drafts', status, articleIdFilter],
-        queryFn: () => editorialApi.workspaceDrafts({
-            status,
-            limit: 200,
-            article_id: articleIdFilter ? Number(articleIdFilter) : undefined,
-        }),
+        queryFn: () =>
+            editorialApi.workspaceDrafts({
+                status,
+                limit: 200,
+                article_id: articleIdFilter ? Number(articleIdFilter) : undefined,
+            }),
+    });
+
+    const { data: articleData } = useQuery({
+        queryKey: ['workspace-article', selected?.article_id],
+        queryFn: () => newsApi.get(selected!.article_id),
+        enabled: !!selected?.article_id,
     });
 
     const applyMutation = useMutation({
@@ -33,6 +69,7 @@ export default function WorkspaceDraftsPage() {
             queryClient.invalidateQueries({ queryKey: ['news'] });
             setSelected(null);
             setError(null);
+            setOk('تم تطبيق المسودة على الخبر بنجاح');
         },
         onError: (err: any) => setError(err?.response?.data?.detail || 'تعذر تطبيق المسودة'),
     });
@@ -43,11 +80,65 @@ export default function WorkspaceDraftsPage() {
             queryClient.invalidateQueries({ queryKey: ['workspace-drafts'] });
             setSelected(null);
             setError(null);
+            setOk('تمت الأرشفة');
         },
         onError: (err: any) => setError(err?.response?.data?.detail || 'تعذر أرشفة المسودة'),
     });
 
+    const saveMutation = useMutation({
+        mutationFn: async () => {
+            if (!selected) throw new Error('لا توجد مسودة محددة');
+            return editorialApi.updateDraft(selected.article_id, selected.id, {
+                title: workingTitle,
+                body: workingBody,
+                note: 'updated_in_workspace',
+                version: selected.version,
+            });
+        },
+        onSuccess: (res) => {
+            queryClient.invalidateQueries({ queryKey: ['workspace-drafts'] });
+            const updated = res.data;
+            setSelected((prev) =>
+                prev
+                    ? {
+                          ...prev,
+                          title: updated?.title ?? prev.title,
+                          body: updated?.body ?? prev.body,
+                          version: updated?.version ?? prev.version,
+                          updated_at: updated?.updated_at ?? prev.updated_at,
+                      }
+                    : prev,
+            );
+            setOk('تم حفظ التعديلات');
+            setError(null);
+        },
+        onError: (err: any) => setError(err?.response?.data?.detail || 'تعذر حفظ المسودة'),
+    });
+
+    const createVersionMutation = useMutation({
+        mutationFn: async () => {
+            if (!selected) throw new Error('لا توجد مسودة محددة');
+            return editorialApi.createDraft(selected.article_id, {
+                title: workingTitle,
+                body: workingBody,
+                source_action: 'editorial_magic_workspace',
+                note: 'new_version_from_workspace',
+            });
+        },
+        onSuccess: (res) => {
+            queryClient.invalidateQueries({ queryKey: ['workspace-drafts'] });
+            const created = res.data;
+            setOk('تم إنشاء نسخة جديدة من المسودة');
+            setError(null);
+            if (created?.work_id) {
+                setStatus('draft');
+            }
+        },
+        onError: (err: any) => setError(err?.response?.data?.detail || 'تعذر إنشاء نسخة جديدة'),
+    });
+
     const drafts = data?.data || [];
+
     const filtered = useMemo(() => {
         const needle = q.trim().toLowerCase();
         if (!needle) return drafts;
@@ -55,7 +146,7 @@ export default function WorkspaceDraftsPage() {
             d.work_id.toLowerCase().includes(needle) ||
             String(d.article_id).includes(needle) ||
             (d.title || '').toLowerCase().includes(needle) ||
-            (d.source_action || '').toLowerCase().includes(needle)
+            (d.source_action || '').toLowerCase().includes(needle),
         );
     }, [drafts, q]);
 
@@ -74,20 +165,141 @@ export default function WorkspaceDraftsPage() {
         setSelected(finalList[0]);
     }, [finalList, initialWorkId, selected]);
 
+    useEffect(() => {
+        if (!selected) return;
+        setWorkingTitle(selected.title || '');
+        setWorkingBody(selected.body || '');
+        setSeoTitle('');
+        setSeoDescription('');
+        setSeoKeywords('');
+        setImageAlt('');
+        setImagePrompt('');
+        setInfographicPrompt('');
+        setAiResult({});
+    }, [selected?.id]);
+
+    const wpPackage = useMemo(() => {
+        const title = (workingTitle || selected?.title || '').trim();
+        const body = (workingBody || '').trim();
+        const blocks = body
+            .split(/\n{2,}/)
+            .map((p) => p.trim())
+            .filter(Boolean)
+            .map((p) => `<p>${p}</p>`)
+            .join('\n\n');
+
+        const metaLines = [
+            `SEO Title: ${seoTitle || title}`,
+            `Meta Description: ${seoDescription || '—'}`,
+            `Focus Keywords: ${seoKeywords || '—'}`,
+            `Image ALT: ${imageAlt || '—'}`,
+        ].join('\n');
+
+        return `<!-- WP-READY-COPY -->\n<h1>${title}</h1>\n\n${blocks}\n\n<!-- SEO-MANUAL -->\n${metaLines}`;
+    }, [workingBody, workingTitle, selected?.title, seoTitle, seoDescription, seoKeywords, imageAlt]);
+
+    const runAI = async (action: 'rewrite' | 'summary' | 'proofread' | 'keywords' | 'metadata' | 'imagePrompt' | 'infographicPrompt') => {
+        const text = `${workingTitle}\n\n${workingBody}`.trim() || articleData?.data?.original_content || selected?.body || '';
+        if (!text) {
+            setError('لا يوجد نص لمعالجته');
+            return;
+        }
+
+        setBusyAction(action);
+        setError(null);
+
+        try {
+            if (action === 'rewrite') {
+                const res = await journalistServicesApi.tonality(text);
+                const result = res?.data?.result || '';
+                setAiResult((prev) => ({ ...prev, rewrite: result }));
+                if (result) setWorkingBody(result);
+            }
+
+            if (action === 'summary') {
+                const res = await journalistServicesApi.social(text, 'general');
+                setAiResult((prev) => ({ ...prev, summary: res?.data?.result || '' }));
+            }
+
+            if (action === 'proofread') {
+                const res = await journalistServicesApi.proofread(text);
+                const result = res?.data?.result || '';
+                setAiResult((prev) => ({ ...prev, proofread: result }));
+                if (result) setWorkingBody(result);
+            }
+
+            if (action === 'keywords') {
+                const res = await journalistServicesApi.keywords(text);
+                const result = res?.data?.result || '';
+                setAiResult((prev) => ({ ...prev, keywords: result }));
+                setSeoKeywords(result);
+            }
+
+            if (action === 'metadata') {
+                const res = await journalistServicesApi.metadata(text);
+                const result = res?.data?.result || '';
+                setAiResult((prev) => ({ ...prev, metadata: result }));
+                const titleMatch = result.match(/SEO\s*Title\s*[:：]\s*(.+)/i);
+                const descMatch = result.match(/Meta\s*Description\s*[:：]\s*(.+)/i);
+                if (titleMatch?.[1]) setSeoTitle(titleMatch[1].trim());
+                if (descMatch?.[1]) setSeoDescription(descMatch[1].trim());
+            }
+
+            if (action === 'imagePrompt') {
+                const res = await journalistServicesApi.imagePrompt(
+                    text,
+                    'documentary',
+                    selected?.article_id,
+                    user?.full_name_ar || 'editor',
+                );
+                const result = res?.data?.result || '';
+                setAiResult((prev) => ({ ...prev, imagePrompt: result }));
+                setImagePrompt(result.split(/\n{2,}/)[0] || result);
+                setImageAlt(
+                    `صورة توضيحية لموضوع: ${(workingTitle || selected?.title || articleData?.data?.title_ar || articleData?.data?.original_title || 'المقال').slice(0, 90)}`,
+                );
+            }
+
+            if (action === 'infographicPrompt') {
+                const analyzed = await journalistServicesApi.infographicAnalyze(
+                    text,
+                    selected?.article_id,
+                    user?.full_name_ar || 'editor',
+                );
+                const res = await journalistServicesApi.infographicPrompt(
+                    analyzed?.data?.data || {},
+                    selected?.article_id,
+                    user?.full_name_ar || 'editor',
+                );
+                const result = res?.data?.result || '';
+                setAiResult((prev) => ({ ...prev, infographicPrompt: result }));
+                setInfographicPrompt(result);
+            }
+
+            setOk('تم تنفيذ أداة الذكاء الاصطناعي بنجاح');
+        } catch (err: any) {
+            setError(err?.response?.data?.detail || 'فشل تنفيذ أداة الذكاء الاصطناعي');
+        } finally {
+            setBusyAction('');
+        }
+    };
+
+    const copyText = async (text: string, message: string) => {
+        await navigator.clipboard.writeText(text || '');
+        setOk(message);
+    };
+
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between gap-3">
                 <div>
                     <h1 className="text-2xl font-bold text-white">Workspace Drafts</h1>
-                    <p className="text-sm text-gray-400 mt-1">{finalList.length} مسودة</p>
+                    <p className="text-sm text-gray-400 mt-1">أداة تحرير متكاملة من المسودة إلى نسخة النشر</p>
                 </div>
             </div>
 
-            {error && (
-                <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-200">
-                    {error}
-                </div>
-            )}
+            {error && <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-200">{error}</div>}
+            {ok && <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200">{ok}</div>}
 
             <div className="flex flex-wrap items-center gap-3 p-3 rounded-2xl border border-white/5 bg-gray-800/30">
                 <div className="relative min-w-[260px] flex-1">
@@ -119,93 +331,211 @@ export default function WorkspaceDraftsPage() {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                {isLoading ? (
-                    Array.from({ length: 6 }).map((_, i) => (
-                        <div key={i} className="h-48 rounded-2xl bg-gray-800/30 border border-white/5 animate-pulse" />
-                    ))
-                ) : finalList.length > 0 ? (
-                    finalList.map((d) => (
-                        <button
-                            key={d.id}
-                            onClick={() => setSelected(d)}
-                            className={cn(
-                                'text-right rounded-2xl border p-4 bg-gradient-to-br from-gray-800/40 to-gray-900/70 transition-colors',
-                                selected?.id === d.id || d.work_id === initialWorkId ? 'border-emerald-500/40' : 'border-white/10 hover:border-white/20'
-                            )}
-                        >
-                            <div className="flex items-center justify-between gap-2 mb-2">
-                                <span className="text-xs px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300">
-                                    {d.work_id}
-                                </span>
-                                <span className="text-xs text-gray-400">#{d.article_id}</span>
-                            </div>
-                            <h3 className="text-sm font-semibold text-white line-clamp-2" dir="rtl">
-                                {d.title || 'بدون عنوان'}
-                            </h3>
-                            <p className="text-xs text-gray-400 mt-2 line-clamp-3" dir="rtl">
-                                {truncate(d.body || '', 180)}
-                            </p>
-                            <div className="mt-3 flex items-center justify-between text-[11px] text-gray-500">
-                                <span>{d.source_action}</span>
-                                <span>{formatRelativeTime(d.updated_at)}</span>
-                            </div>
-                        </button>
-                    ))
-                ) : (
-                    <div className="col-span-full rounded-2xl border border-white/5 bg-gray-800/20 p-8 text-center text-gray-400">
-                        لا توجد مسودات
-                    </div>
-                )}
-            </div>
-
-            {selected && (
-                <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3">
-                    <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 text-white">
-                            <FileText className="w-4 h-4 text-emerald-300" />
-                            <span className="text-sm font-semibold">{selected.work_id}</span>
-                        </div>
-                        <button
-                            onClick={() => applyMutation.mutate(selected.work_id)}
-                            disabled={applyMutation.isPending || selected.status !== 'draft'}
-                            className={cn(
-                                'px-3 py-2 rounded-xl text-xs border flex items-center gap-2',
-                                selected.status === 'draft'
-                                    ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-200'
-                                    : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed'
-                            )}
-                        >
-                            <CheckCircle2 className="w-4 h-4" />
-                            تطبيق مباشر
-                        </button>
-                        <button
-                            onClick={() => archiveMutation.mutate(selected.work_id)}
-                            disabled={archiveMutation.isPending || selected.status === 'archived'}
-                            className={cn(
-                                'px-3 py-2 rounded-xl text-xs border',
-                                selected.status !== 'archived'
-                                    ? 'bg-amber-500/20 border-amber-500/30 text-amber-200'
-                                    : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed'
-                            )}
-                        >
-                            أرشفة
-                        </button>
-                    </div>
-                    <div className="text-xs text-gray-400 flex flex-wrap gap-3">
-                        <span>Article: #{selected.article_id}</span>
-                        <span>Status: {selected.status}</span>
-                        <span>Version: {selected.version}</span>
-                        <span>By: {selected.created_by}</span>
-                    </div>
-                    <div className="rounded-xl border border-white/10 bg-black/30 p-3">
-                        <h4 className="text-sm text-white font-medium mb-2" dir="rtl">{selected.title || 'بدون عنوان'}</h4>
-                        <pre className="whitespace-pre-wrap text-xs text-gray-200 max-h-[360px] overflow-auto" dir="rtl">
-                            {selected.body}
-                        </pre>
-                    </div>
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                <div className="xl:col-span-1 space-y-3 max-h-[80vh] overflow-auto pr-1">
+                    {isLoading ? (
+                        Array.from({ length: 6 }).map((_, i) => (
+                            <div key={i} className="h-40 rounded-2xl bg-gray-800/30 border border-white/5 animate-pulse" />
+                        ))
+                    ) : finalList.length > 0 ? (
+                        finalList.map((d) => (
+                            <button
+                                key={d.id}
+                                onClick={() => setSelected(d)}
+                                className={cn(
+                                    'w-full text-right rounded-2xl border p-4 bg-gradient-to-br from-gray-800/40 to-gray-900/70 transition-colors',
+                                    selected?.id === d.id || d.work_id === initialWorkId ? 'border-emerald-500/40' : 'border-white/10 hover:border-white/20',
+                                )}
+                            >
+                                <div className="flex items-center justify-between gap-2 mb-2">
+                                    <span className="text-xs px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300">{d.work_id}</span>
+                                    <span className="text-xs text-gray-400">#{d.article_id}</span>
+                                </div>
+                                <h3 className="text-sm font-semibold text-white line-clamp-2" dir="rtl">{d.title || 'بدون عنوان'}</h3>
+                                <p className="text-xs text-gray-400 mt-2 line-clamp-3" dir="rtl">{truncate(d.body || '', 160)}</p>
+                                <div className="mt-3 flex items-center justify-between text-[11px] text-gray-500">
+                                    <span>{d.source_action}</span>
+                                    <span>{formatRelativeTime(d.updated_at)}</span>
+                                </div>
+                            </button>
+                        ))
+                    ) : (
+                        <div className="rounded-2xl border border-white/5 bg-gray-800/20 p-8 text-center text-gray-400">لا توجد مسودات</div>
+                    )}
                 </div>
-            )}
+
+                <div className="xl:col-span-2 space-y-4">
+                    {selected ? (
+                        <>
+                            <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2 text-white">
+                                        <FileText className="w-4 h-4 text-emerald-300" />
+                                        <span className="text-sm font-semibold">{selected.work_id}</span>
+                                        <span className="text-xs text-gray-400">Article #{selected.article_id}</span>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        <button
+                                            onClick={() => saveMutation.mutate()}
+                                            disabled={saveMutation.isPending}
+                                            className="px-3 py-2 rounded-xl text-xs border bg-violet-500/20 border-violet-500/30 text-violet-200"
+                                        >
+                                            حفظ التعديلات
+                                        </button>
+                                        <button
+                                            onClick={() => createVersionMutation.mutate()}
+                                            disabled={createVersionMutation.isPending}
+                                            className="px-3 py-2 rounded-xl text-xs border bg-sky-500/20 border-sky-500/30 text-sky-200"
+                                        >
+                                            إنشاء نسخة جديدة
+                                        </button>
+                                        <button
+                                            onClick={() => applyMutation.mutate(selected.work_id)}
+                                            disabled={applyMutation.isPending || selected.status !== 'draft'}
+                                            className={cn(
+                                                'px-3 py-2 rounded-xl text-xs border flex items-center gap-2',
+                                                selected.status === 'draft'
+                                                    ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-200'
+                                                    : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed',
+                                            )}
+                                        >
+                                            <CheckCircle2 className="w-4 h-4" />
+                                            تطبيق على الخبر
+                                        </button>
+                                        <button
+                                            onClick={() => archiveMutation.mutate(selected.work_id)}
+                                            disabled={archiveMutation.isPending || selected.status === 'archived'}
+                                            className={cn(
+                                                'px-3 py-2 rounded-xl text-xs border',
+                                                selected.status !== 'archived'
+                                                    ? 'bg-amber-500/20 border-amber-500/30 text-amber-200'
+                                                    : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed',
+                                            )}
+                                        >
+                                            أرشفة
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <input
+                                        value={workingTitle}
+                                        onChange={(e) => setWorkingTitle(e.target.value)}
+                                        className="h-10 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white"
+                                        placeholder="عنوان المقال"
+                                        dir="rtl"
+                                    />
+                                    <input
+                                        value={seoTitle}
+                                        onChange={(e) => setSeoTitle(e.target.value)}
+                                        className="h-10 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white"
+                                        placeholder="SEO Title"
+                                        dir="rtl"
+                                    />
+                                </div>
+
+                                <textarea
+                                    value={workingBody}
+                                    onChange={(e) => setWorkingBody(e.target.value)}
+                                    className="w-full min-h-[260px] p-3 rounded-xl bg-black/30 border border-white/10 text-sm text-gray-100"
+                                    dir="rtl"
+                                />
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <textarea
+                                        value={seoDescription}
+                                        onChange={(e) => setSeoDescription(e.target.value)}
+                                        className="min-h-[90px] p-3 rounded-xl bg-white/5 border border-white/10 text-xs text-white"
+                                        placeholder="Meta Description"
+                                        dir="rtl"
+                                    />
+                                    <textarea
+                                        value={seoKeywords}
+                                        onChange={(e) => setSeoKeywords(e.target.value)}
+                                        className="min-h-[90px] p-3 rounded-xl bg-white/5 border border-white/10 text-xs text-white"
+                                        placeholder="Focus Keywords (comma separated)"
+                                        dir="rtl"
+                                    />
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <textarea
+                                        value={imageAlt}
+                                        onChange={(e) => setImageAlt(e.target.value)}
+                                        className="min-h-[80px] p-3 rounded-xl bg-white/5 border border-white/10 text-xs text-white"
+                                        placeholder="وصف الصورة / ALT text"
+                                        dir="rtl"
+                                    />
+                                    <textarea
+                                        value={imagePrompt}
+                                        onChange={(e) => setImagePrompt(e.target.value)}
+                                        className="min-h-[80px] p-3 rounded-xl bg-white/5 border border-white/10 text-xs text-white"
+                                        placeholder="Prompt توليد صورة"
+                                        dir="rtl"
+                                    />
+                                </div>
+
+                                <textarea
+                                    value={infographicPrompt}
+                                    onChange={(e) => setInfographicPrompt(e.target.value)}
+                                    className="w-full min-h-[90px] p-3 rounded-xl bg-white/5 border border-white/10 text-xs text-white"
+                                    placeholder="Prompt إنفوغراف"
+                                    dir="rtl"
+                                />
+                            </div>
+
+                            <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3">
+                                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                                    <Sparkles className="w-4 h-4 text-emerald-300" />
+                                    أدوات الذكاء الاصطناعي للمحرر
+                                </h3>
+                                <div className="flex flex-wrap gap-2">
+                                    <button onClick={() => runAI('rewrite')} disabled={busyAction !== ''} className="px-3 py-2 rounded-xl text-xs bg-emerald-500/20 border border-emerald-500/30 text-emerald-200">إعادة صياغة صحفية</button>
+                                    <button onClick={() => runAI('proofread')} disabled={busyAction !== ''} className="px-3 py-2 rounded-xl text-xs bg-sky-500/20 border border-sky-500/30 text-sky-200">تدقيق لغوي</button>
+                                    <button onClick={() => runAI('summary')} disabled={busyAction !== ''} className="px-3 py-2 rounded-xl text-xs bg-violet-500/20 border border-violet-500/30 text-violet-200">ملخص شبكات</button>
+                                    <button onClick={() => runAI('keywords')} disabled={busyAction !== ''} className="px-3 py-2 rounded-xl text-xs bg-amber-500/20 border border-amber-500/30 text-amber-200">كلمات SEO</button>
+                                    <button onClick={() => runAI('metadata')} disabled={busyAction !== ''} className="px-3 py-2 rounded-xl text-xs bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-200">Meta SEO</button>
+                                    <button onClick={() => runAI('imagePrompt')} disabled={busyAction !== ''} className="px-3 py-2 rounded-xl text-xs bg-cyan-500/20 border border-cyan-500/30 text-cyan-200">اقتراح صورة</button>
+                                    <button onClick={() => runAI('infographicPrompt')} disabled={busyAction !== ''} className="px-3 py-2 rounded-xl text-xs bg-rose-500/20 border border-rose-500/30 text-rose-200">اقتراح إنفوغراف</button>
+                                </div>
+                                {busyAction && <p className="text-xs text-gray-400">جاري التنفيذ: {busyAction}</p>}
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                                        <h4 className="text-xs text-gray-400 mb-2">آخر مخرجات AI</h4>
+                                        <pre className="whitespace-pre-wrap text-xs text-gray-200 max-h-56 overflow-auto" dir="rtl">
+                                            {JSON.stringify(aiResult, null, 2)}
+                                        </pre>
+                                    </div>
+                                    <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
+                                        <h4 className="text-xs text-gray-400">نسخة WordPress جاهزة للنسخ</h4>
+                                        <button
+                                            onClick={() => copyText(wpPackage, 'تم نسخ نسخة WordPress')}
+                                            className="px-3 py-2 rounded-xl text-xs bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 inline-flex items-center gap-2"
+                                        >
+                                            <Copy className="w-4 h-4" />
+                                            نسخ النسخة الجاهزة
+                                        </button>
+                                        <pre className="whitespace-pre-wrap text-xs text-gray-200 max-h-56 overflow-auto" dir="rtl">{wpPackage}</pre>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="rounded-2xl border border-white/10 bg-gray-900/40 p-4">
+                                <h3 className="text-sm text-gray-200 mb-2 flex items-center gap-2">
+                                    <Wand2 className="w-4 h-4 text-emerald-300" />
+                                    مرجع الخبر الأصلي
+                                </h3>
+                                <p className="text-xs text-gray-400">المصدر: {articleData?.data?.source_name || '—'}</p>
+                                <p className="text-xs text-gray-400">الرابط: {articleData?.data?.original_url || '—'}</p>
+                                <p className="text-sm text-gray-200 mt-2" dir="rtl">{articleData?.data?.summary || articleData?.data?.original_title || '—'}</p>
+                            </div>
+                        </>
+                    ) : (
+                        <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-8 text-center text-gray-400">اختر مسودة من القائمة</div>
+                    )}
+                </div>
+            </div>
         </div>
     );
 }
