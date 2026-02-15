@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.models import Article, NewsStatus, NewsCategory, UrgencyLevel
+from app.models import Article, Source, NewsStatus, NewsCategory, UrgencyLevel
 from app.services.ai_service import ai_service
 from app.services.cache_service import cache_service
 from app.services.notification_service import notification_service
@@ -85,6 +85,15 @@ LOCAL_SIGNAL_KEYWORDS = [
     "وهران", "الجزائر العاصمة", "قسنطينة", "سطيف", "عنابة", "تلمسان", "بجاية",
 ]
 
+LOCAL_SOURCE_KEYWORDS = [
+    "algeria", "algérie", "algerie", "dz", "aps", "tsa", "echorouk", "el khabar", "elwatan",
+    "الجزائر", "الجزائرية", "الشروق", "الخبر", "النهار", "وكالة الأنباء الجزائرية",
+]
+
+ARABIC_CHAR_RE = re.compile(r"[ء-ي]")
+ROUTER_SOURCE_QUOTA = 6
+ROUTER_CANDIDATE_SOURCE_QUOTA = 3
+
 
 class RouterAgent:
     """
@@ -97,19 +106,21 @@ class RouterAgent:
         """Process a batch of NEW articles through triage."""
         stats = {"processed": 0, "candidates": 0, "ai_calls": 0, "breaking": 0}
 
-        # Get unprocessed articles
+        # Pull a wider pool, then apply source quotas + local-priority ordering.
         result = await db.execute(
-            select(Article)
+            select(Article, Source)
+            .outerjoin(Source, Article.source_id == Source.id)
             .where(Article.status == NewsStatus.NEW)
             .order_by(Article.crawled_at.desc())
             .with_for_update(skip_locked=True)
-            .limit(limit)
+            .limit(limit * 4)
         )
-        articles = result.scalars().all()
+        rows = result.all()
+        selected = self._select_articles_for_batch(rows, limit)
 
-        for article in articles:
+        for article, source in selected:
             try:
-                await self._classify_article(db, article, stats)
+                await self._classify_article(db, article, source, stats)
                 stats["processed"] += 1
             except Exception as e:
                 logger.error("router_article_error",
@@ -122,7 +133,7 @@ class RouterAgent:
         logger.info("router_batch_complete", **stats)
         return stats
 
-    async def _classify_article(self, db: AsyncSession, article: Article, stats: dict):
+    async def _classify_article(self, db: AsyncSession, article: Article, source: Optional[Source], stats: dict):
         """Classify a single article using rules + AI fallback."""
 
         text = f"{article.original_title} {article.original_content or ''}"
@@ -134,6 +145,13 @@ class RouterAgent:
             article.status = NewsStatus.ARCHIVED
             article.importance_score = 0
             article.rejection_reason = f"auto_filtered:{noisy_reason}"
+            return
+
+        # Step 0b: Arabic sources should produce Arabic headlines.
+        if self._is_arabic_source(article, source) and not ARABIC_CHAR_RE.search(article.original_title or ""):
+            article.status = NewsStatus.REJECTED
+            article.importance_score = 0
+            article.rejection_reason = "auto_filtered:arabic_source_non_arabic_title"
             return
 
         # ── Step 1: Rule-Based Classification (FREE) ──
@@ -225,6 +243,51 @@ class RouterAgent:
             article.status = NewsStatus.CLASSIFIED
             article.rejection_reason = "auto_filtered:low_editorial_value"
 
+    def _select_articles_for_batch(
+        self,
+        rows: list[tuple[Article, Optional[Source]]],
+        limit: int,
+    ) -> list[tuple[Article, Optional[Source]]]:
+        """Prioritize local relevance and prevent a single source from flooding the batch."""
+        if not rows:
+            return []
+
+        def score_row(row: tuple[Article, Optional[Source]]) -> tuple[int, int, datetime]:
+            article, source = row
+            text = f"{article.original_title or ''} {article.original_content or ''}".lower()
+            source_name = (source.name if source else article.source_name) or ""
+            has_local_signal = 1 if self._has_local_signal(text, source_name) else 0
+            local_source = 1 if any(k in source_name.lower() for k in LOCAL_SOURCE_KEYWORDS) else 0
+            crawled = article.crawled_at or datetime.min
+            return (local_source, has_local_signal, crawled)
+
+        rows_sorted = sorted(rows, key=score_row, reverse=True)
+        selected: list[tuple[Article, Optional[Source]]] = []
+        per_source_total: dict[str, int] = {}
+        per_source_candidate_like: dict[str, int] = {}
+
+        for article, source in rows_sorted:
+            if len(selected) >= limit:
+                break
+
+            source_key = str(source.id) if source and source.id else (article.source_name or "unknown")
+            total_count = per_source_total.get(source_key, 0)
+            if total_count >= ROUTER_SOURCE_QUOTA:
+                continue
+
+            text_lower = f"{article.original_title or ''} {article.original_content or ''}".lower()
+            source_name = (source.name if source else article.source_name) or ""
+            candidate_like = self._has_local_signal(text_lower, source_name)
+            if candidate_like and per_source_candidate_like.get(source_key, 0) >= ROUTER_CANDIDATE_SOURCE_QUOTA:
+                continue
+
+            selected.append((article, source))
+            per_source_total[source_key] = total_count + 1
+            if candidate_like:
+                per_source_candidate_like[source_key] = per_source_candidate_like.get(source_key, 0) + 1
+
+        return selected
+
     def _rule_based_category(self, text: str) -> Optional[NewsCategory]:
         """Determine category using keyword matching (no AI cost)."""
         if not text:
@@ -309,6 +372,14 @@ class RouterAgent:
             return True, "global_aggregator_non_local"
 
         return False, ""
+
+    def _is_arabic_source(self, article: Article, source: Optional[Source]) -> bool:
+        src_lang = (source.language if source and source.language else "").lower()
+        if src_lang == "ar":
+            return True
+        source_name = (source.name if source else article.source_name) or ""
+        source_name = source_name.lower()
+        return any(k in source_name for k in ["عربي", "العربية", "الجزيرة", "سكاي نيوز عربية", "الخبر", "الشروق", "النهار"])
 
 
 # Singleton
