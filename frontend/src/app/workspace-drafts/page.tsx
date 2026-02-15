@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'next/navigation';
-import { CheckCircle2, Copy, FileText, Filter, Search, Sparkles, Wand2 } from 'lucide-react';
+import { CheckCircle2, Copy, FileText, Filter, Loader2, Search, Sparkles, Wand2 } from 'lucide-react';
 
 import { editorialApi, newsApi, type WorkspaceDraft } from '@/lib/api';
 import { journalistServicesApi } from '@/lib/journalist-services-api';
@@ -44,6 +44,7 @@ export default function WorkspaceDraftsPage() {
     const [aiResult, setAiResult] = useState<AIToolResult>({});
 
     const [busyAction, setBusyAction] = useState('');
+    const [lastCopiedKey, setLastCopiedKey] = useState('');
 
     const initialWorkId = searchParams.get('work_id') || '';
 
@@ -202,15 +203,32 @@ export default function WorkspaceDraftsPage() {
             .map((p) => `<p>${p}</p>`)
             .join('\n\n');
 
-        const metaLines = [
+        return `<h1>${title}</h1>\n\n${blocks}\n\n<hr />\n<h3>بيانات SEO (إضافة يدوية)</h3>\n<p><strong>SEO Title:</strong> ${seoTitle || title}</p>\n<p><strong>Meta Description:</strong> ${seoDescription || '—'}</p>\n<p><strong>Focus Keywords:</strong> ${seoKeywords || '—'}</p>\n<p><strong>Image ALT:</strong> ${imageAlt || '—'}</p>`;
+    }, [workingBody, workingTitle, selected?.title, seoTitle, seoDescription, seoKeywords, imageAlt]);
+
+    const wpBodyOnlyPackage = useMemo(() => {
+        const title = (workingTitle || selected?.title || '').trim();
+        const body = (workingBody || '').trim();
+        const blocks = body
+            .split(/\n{2,}/)
+            .map((p) => p.trim())
+            .filter(Boolean)
+            .map((p) => `<p>${p}</p>`)
+            .join('\n\n');
+        return `<h1>${title}</h1>\n\n${blocks}`;
+    }, [workingBody, workingTitle, selected?.title]);
+
+    const seoManualPackage = useMemo(() => {
+        const title = (workingTitle || selected?.title || '').trim();
+        return [
             `SEO Title: ${seoTitle || title}`,
             `Meta Description: ${seoDescription || '—'}`,
             `Focus Keywords: ${seoKeywords || '—'}`,
             `Image ALT: ${imageAlt || '—'}`,
+            `Image Prompt: ${imagePrompt || '—'}`,
+            `Infographic Prompt: ${infographicPrompt || '—'}`,
         ].join('\n');
-
-        return `<h1>${title}</h1>\n\n${blocks}\n\n<hr />\n<h3>بيانات SEO (إضافة يدوية)</h3>\n<p><strong>SEO Title:</strong> ${seoTitle || title}</p>\n<p><strong>Meta Description:</strong> ${seoDescription || '—'}</p>\n<p><strong>Focus Keywords:</strong> ${seoKeywords || '—'}</p>\n<p><strong>Image ALT:</strong> ${imageAlt || '—'}</p>`;
-    }, [workingBody, workingTitle, selected?.title, seoTitle, seoDescription, seoKeywords, imageAlt]);
+    }, [workingTitle, selected?.title, seoTitle, seoDescription, seoKeywords, imageAlt, imagePrompt, infographicPrompt]);
 
     const runAI = async (action: 'rewrite' | 'summary' | 'proofread' | 'keywords' | 'metadata' | 'imagePrompt' | 'infographicPrompt') => {
         const text = `${workingTitle}\n\n${workingBody}`.trim() || articleData?.data?.original_content || selected?.body || '';
@@ -301,8 +319,17 @@ export default function WorkspaceDraftsPage() {
         }
     };
 
-    const copyText = async (text: string, message: string) => {
+    const runPublishingWorkflow = async () => {
+        await runAI('proofread');
+        await runAI('metadata');
+        await runAI('keywords');
+        await runAI('imagePrompt');
+    };
+
+    const copyText = async (key: string, text: string, message: string) => {
         await navigator.clipboard.writeText(text || '');
+        setLastCopiedKey(key);
+        setTimeout(() => setLastCopiedKey(''), 1600);
         setOk(message);
     };
 
@@ -397,14 +424,14 @@ export default function WorkspaceDraftsPage() {
                                             disabled={saveMutation.isPending}
                                             className="px-3 py-2 rounded-xl text-xs border bg-violet-500/20 border-violet-500/30 text-violet-200"
                                         >
-                                            حفظ التعديلات
+                                            حفظ
                                         </button>
                                         <button
                                             onClick={() => createVersionMutation.mutate()}
                                             disabled={createVersionMutation.isPending}
                                             className="px-3 py-2 rounded-xl text-xs border bg-sky-500/20 border-sky-500/30 text-sky-200"
                                         >
-                                            إنشاء نسخة جديدة
+                                            نسخة جديدة
                                         </button>
                                         <button
                                             onClick={() => applyMutation.mutate(selected.work_id)}
@@ -487,9 +514,9 @@ export default function WorkspaceDraftsPage() {
                                     />
                                 </div>
                                 <div className="flex flex-wrap gap-2">
-                                    <button onClick={() => copyText(seoTitle, 'تم نسخ SEO Title')} className="px-2 py-1 rounded-lg text-xs bg-white/10 text-gray-200">نسخ SEO Title</button>
-                                    <button onClick={() => copyText(seoDescription, 'تم نسخ Meta Description')} className="px-2 py-1 rounded-lg text-xs bg-white/10 text-gray-200">نسخ Meta</button>
-                                    <button onClick={() => copyText(seoKeywords, 'تم نسخ الكلمات المفتاحية')} className="px-2 py-1 rounded-lg text-xs bg-white/10 text-gray-200">نسخ Keywords</button>
+                                    <button onClick={() => copyText('seo_title', seoTitle, 'تم نسخ SEO Title')} className="px-2 py-1 rounded-lg text-xs bg-white/10 text-gray-200">{lastCopiedKey === 'seo_title' ? 'تم النسخ' : 'نسخ SEO Title'}</button>
+                                    <button onClick={() => copyText('seo_desc', seoDescription, 'تم نسخ Meta Description')} className="px-2 py-1 rounded-lg text-xs bg-white/10 text-gray-200">{lastCopiedKey === 'seo_desc' ? 'تم النسخ' : 'نسخ Meta'}</button>
+                                    <button onClick={() => copyText('seo_kw', seoKeywords, 'تم نسخ الكلمات المفتاحية')} className="px-2 py-1 rounded-lg text-xs bg-white/10 text-gray-200">{lastCopiedKey === 'seo_kw' ? 'تم النسخ' : 'نسخ Keywords'}</button>
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -509,8 +536,8 @@ export default function WorkspaceDraftsPage() {
                                     />
                                 </div>
                                 <div className="flex flex-wrap gap-2">
-                                    <button onClick={() => copyText(imageAlt, 'تم نسخ وصف الصورة')} className="px-2 py-1 rounded-lg text-xs bg-white/10 text-gray-200">نسخ ALT</button>
-                                    <button onClick={() => copyText(imagePrompt, 'تم نسخ برومبت الصورة')} className="px-2 py-1 rounded-lg text-xs bg-white/10 text-gray-200">نسخ Prompt صورة</button>
+                                    <button onClick={() => copyText('image_alt', imageAlt, 'تم نسخ وصف الصورة')} className="px-2 py-1 rounded-lg text-xs bg-white/10 text-gray-200">{lastCopiedKey === 'image_alt' ? 'تم النسخ' : 'نسخ ALT'}</button>
+                                    <button onClick={() => copyText('image_prompt', imagePrompt, 'تم نسخ برومبت الصورة')} className="px-2 py-1 rounded-lg text-xs bg-white/10 text-gray-200">{lastCopiedKey === 'image_prompt' ? 'تم النسخ' : 'نسخ Prompt صورة'}</button>
                                 </div>
 
                                 <textarea
@@ -520,7 +547,7 @@ export default function WorkspaceDraftsPage() {
                                     placeholder="Prompt إنفوغراف"
                                     dir="rtl"
                                 />
-                                <button onClick={() => copyText(infographicPrompt, 'تم نسخ برومبت الإنفوغراف')} className="px-2 py-1 rounded-lg text-xs bg-white/10 text-gray-200">نسخ Prompt إنفوغراف</button>
+                                <button onClick={() => copyText('infographic_prompt', infographicPrompt, 'تم نسخ برومبت الإنفوغراف')} className="px-2 py-1 rounded-lg text-xs bg-white/10 text-gray-200">{lastCopiedKey === 'infographic_prompt' ? 'تم النسخ' : 'نسخ Prompt إنفوغراف'}</button>
                             </div>
 
                             <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3">
@@ -528,6 +555,17 @@ export default function WorkspaceDraftsPage() {
                                     <Sparkles className="w-4 h-4 text-emerald-300" />
                                     أدوات الذكاء الاصطناعي للمحرر
                                 </h3>
+                                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 flex flex-wrap items-center justify-between gap-2">
+                                    <div className="text-xs text-emerald-100">تشغيل الحزمة الذكية: تدقيق + SEO + كلمات مفتاحية + Prompt صورة</div>
+                                    <button
+                                        onClick={runPublishingWorkflow}
+                                        disabled={busyAction !== ''}
+                                        className="px-3 py-2 rounded-xl text-xs border bg-emerald-500/20 border-emerald-500/40 text-emerald-100 inline-flex items-center gap-2"
+                                    >
+                                        {busyAction ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                                        تجهيز نسخة للنشر
+                                    </button>
+                                </div>
                                 <div className="flex flex-wrap gap-2">
                                     <button onClick={() => runAI('rewrite')} disabled={busyAction !== ''} className="px-3 py-2 rounded-xl text-xs bg-emerald-500/20 border border-emerald-500/30 text-emerald-200">إعادة صياغة صحفية</button>
                                     <button onClick={() => runAI('proofread')} disabled={busyAction !== ''} className="px-3 py-2 rounded-xl text-xs bg-sky-500/20 border border-sky-500/30 text-sky-200">تدقيق لغوي</button>
@@ -544,10 +582,10 @@ export default function WorkspaceDraftsPage() {
                                         <div className="flex items-center justify-between mb-2">
                                             <h4 className="text-xs text-gray-400">آخر مخرجات AI</h4>
                                             <button
-                                                onClick={() => copyText(JSON.stringify(aiResult, null, 2), 'تم نسخ مخرجات AI')}
+                                                onClick={() => copyText('ai_result', JSON.stringify(aiResult, null, 2), 'تم نسخ مخرجات AI')}
                                                 className="px-2 py-1 rounded-lg text-[10px] bg-white/10 text-gray-200"
                                             >
-                                                نسخ
+                                                {lastCopiedKey === 'ai_result' ? 'تم النسخ' : 'نسخ'}
                                             </button>
                                         </div>
                                         <pre className="whitespace-pre-wrap text-xs text-gray-200 max-h-56 overflow-auto" dir="rtl">
@@ -556,13 +594,27 @@ export default function WorkspaceDraftsPage() {
                                     </div>
                                     <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
                                         <h4 className="text-xs text-gray-400">نسخة WordPress جاهزة للنسخ (متوافقة مع Gutenberg)</h4>
-                                        <button
-                                            onClick={() => copyText(wpPackage, 'تم نسخ نسخة WordPress')}
-                                            className="px-3 py-2 rounded-xl text-xs bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 inline-flex items-center gap-2"
-                                        >
-                                            <Copy className="w-4 h-4" />
-                                            نسخ النسخة الجاهزة
-                                        </button>
+                                        <div className="flex flex-wrap gap-2">
+                                            <button
+                                                onClick={() => copyText('wp_full', wpPackage, 'تم نسخ النسخة الكاملة للووردبريس')}
+                                                className="px-3 py-2 rounded-xl text-xs bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 inline-flex items-center gap-2"
+                                            >
+                                                <Copy className="w-4 h-4" />
+                                                {lastCopiedKey === 'wp_full' ? 'تم النسخ' : 'نسخ النسخة الكاملة'}
+                                            </button>
+                                            <button
+                                                onClick={() => copyText('wp_body', wpBodyOnlyPackage, 'تم نسخ متن المقال فقط')}
+                                                className="px-3 py-2 rounded-xl text-xs bg-sky-500/20 border border-sky-500/30 text-sky-200"
+                                            >
+                                                {lastCopiedKey === 'wp_body' ? 'تم النسخ' : 'نسخ المقال فقط'}
+                                            </button>
+                                            <button
+                                                onClick={() => copyText('wp_seo', seoManualPackage, 'تم نسخ باقة SEO والوسائط')}
+                                                className="px-3 py-2 rounded-xl text-xs bg-amber-500/20 border border-amber-500/30 text-amber-200"
+                                            >
+                                                {lastCopiedKey === 'wp_seo' ? 'تم النسخ' : 'نسخ SEO + وسائط'}
+                                            </button>
+                                        </div>
                                         <pre className="whitespace-pre-wrap text-xs text-gray-200 max-h-56 overflow-auto" dir="rtl">{wpPackage}</pre>
                                     </div>
                                 </div>
