@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
 import { newsApi, editorialApi, type ArticleBrief } from '@/lib/api';
 import { cn, formatRelativeTime, getCategoryLabel } from '@/lib/utils';
 import { useAuth } from '@/lib/auth';
@@ -13,9 +14,10 @@ import {
 export default function EditorialPage() {
     const queryClient = useQueryClient();
     const { user } = useAuth();
+    const router = useRouter();
 
     const [selectedArticle, setSelectedArticle] = useState<number | null>(null);
-    const [editorName] = useState(user?.full_name_ar || 'رئيس التحرير');
+    const editorName = user?.full_name_ar || 'رئيس التحرير';
     const [rejectReason, setRejectReason] = useState('');
     const [search, setSearch] = useState('');
     const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -23,7 +25,7 @@ export default function EditorialPage() {
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
     const normalizeStatus = (status: string) => (status || '').toLowerCase();
-    const role = user?.role || '';
+    const role = (user?.role || '').toLowerCase();
     const canApproveReject = role === 'director' || role === 'editor_chief';
     const canRewrite = ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'].includes(role);
 
@@ -70,8 +72,32 @@ export default function EditorialPage() {
     });
 
     const decideMutation = useMutation({
-        mutationFn: ({ articleId, decision, reason }: { articleId: number; decision: string; reason?: string }) =>
-            editorialApi.decide(articleId, { editor_name: editorName, decision, reason }),
+        mutationFn: async ({
+            articleId,
+            decision,
+            reason,
+            title,
+            summary,
+        }: {
+            articleId: number;
+            decision: string;
+            reason?: string;
+            title?: string;
+            summary?: string;
+        }) => {
+            await editorialApi.decide(articleId, { editor_name: editorName, decision, reason });
+            if (decision === 'approve') {
+                const seedBody = (summary || title || 'مسودة تحريرية').trim();
+                const draftRes = await editorialApi.createDraft(articleId, {
+                    title,
+                    body: seedBody,
+                    note: 'handoff_after_approval',
+                    source_action: 'approved_handoff',
+                });
+                return { workId: draftRes.data?.work_id || null };
+            }
+            return { workId: null };
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['pending-editorial'] });
             queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
@@ -330,7 +356,24 @@ export default function EditorialPage() {
                                 <div className="px-5 pb-5 border-t border-white/5 pt-4 animate-fade-in-up">
                                     <div className="flex flex-wrap items-center gap-3">
                                         <button
-                                            onClick={() => decideMutation.mutate({ articleId: article.id, decision: 'approve' })}
+                                            onClick={() =>
+                                                decideMutation.mutate(
+                                                    {
+                                                        articleId: article.id,
+                                                        decision: 'approve',
+                                                        title: article.title_ar || article.original_title,
+                                                        summary: article.summary || undefined,
+                                                    },
+                                                    {
+                                                        onSuccess: (result) => {
+                                                            const target = result?.workId
+                                                                ? `/workspace-drafts?article_id=${article.id}&work_id=${result.workId}`
+                                                                : `/workspace-drafts?article_id=${article.id}`;
+                                                            router.push(target);
+                                                        },
+                                                    },
+                                                )
+                                            }
                                             disabled={decideMutation.isPending || !canApproveReject || !['candidate', 'classified'].includes(normalizeStatus(article.status))}
                                             className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-colors text-sm font-medium disabled:opacity-50"
                                         >
