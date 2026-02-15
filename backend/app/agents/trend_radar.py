@@ -114,7 +114,22 @@ class TrendRadarAgent:
 
             alerts: list[TrendAlert] = []
             for trend in verified_trends[:limit]:
-                alert = await self._analyze_trend(trend, geo=geo)
+                # Non-DZ scans should stay responsive and avoid long AI latency.
+                if geo != "DZ":
+                    alert = TrendAlert(
+                        keyword=trend["keyword"],
+                        source_signals=trend["source_signals"],
+                        strength=trend["strength"],
+                        category=trend.get("category", "general"),
+                        geography=trend.get("geography", geo),
+                        reason=f"اتجاه متصاعد في {GEO_LABELS.get(trend.get('geography', geo), geo)} يحتاج متابعة تحريرية.",
+                        suggested_angles=[
+                            f"ما أسباب صعود {trend['keyword']} الآن؟",
+                            f"الأثر المحلي/الإقليمي المرتبط بـ {trend['keyword']}",
+                        ],
+                    )
+                else:
+                    alert = await self._analyze_trend(trend, geo=geo)
                 if alert:
                     alerts.append(alert)
 

@@ -5,6 +5,7 @@ Dashboard stats, agent triggers, and pipeline monitoring.
 """
 
 from datetime import datetime, timedelta
+import asyncio
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Query
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -204,8 +205,18 @@ async def trigger_trend_scan(
     """Run Trend Radar scan (sync when wait=true, async otherwise)."""
     _assert_agent_control_permission(current_user)
     if wait:
-        alerts = await trend_radar_agent.scan(geo=geo, category=category, limit=limit)
-        return {"message": "Trend scan completed", "alerts": [a.model_dump(mode="json") for a in alerts]}
+        try:
+            alerts = await asyncio.wait_for(
+                trend_radar_agent.scan(geo=geo, category=category, limit=limit),
+                timeout=25,
+            )
+            return {"message": "Trend scan completed", "alerts": [a.model_dump(mode="json") for a in alerts]}
+        except TimeoutError:
+            payload = await cache_service.get_json(f"trends:last:{geo.upper()}:{category.lower()}")
+            return {
+                "message": "Trend scan timeout - returning latest cached result",
+                "alerts": (payload or {}).get("alerts", []),
+            }
 
     background_tasks.add_task(_run_trends_scan, geo.upper(), category.lower(), limit)
     return {"message": "Trend scan queued"}
