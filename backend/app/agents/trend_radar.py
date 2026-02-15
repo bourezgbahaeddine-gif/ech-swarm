@@ -54,6 +54,10 @@ GEO_LABELS: dict[str, str] = {
     "GLOBAL": "دولي",
 }
 
+# For non-DZ scans, we relax cross-verification by providing
+# geo-scoped fallback candidates from Google Trends itself.
+NON_DZ_MIN_TRENDS = 6
+
 WEAK_TERMS = {
     # Arabic
     "رئيس", "الجمهورية", "يستقبل", "قال", "أكد", "حول", "بعد", "قبل", "اليوم", "غدا", "أمس", "هذا", "هذه", "هناك",
@@ -88,6 +92,16 @@ class TrendRadarAgent:
                 category_filter=category,
             )
 
+            # For non-DZ geographies, competitor/burst overlap can be low.
+            # Promote top Google trends as fallback so newsroom still gets signals.
+            if geo != "DZ" and len(verified_trends) < NON_DZ_MIN_TRENDS:
+                verified_trends = self._expand_non_dz_fallback(
+                    verified_trends=verified_trends,
+                    google_trends=google_trends,
+                    geo=geo,
+                    category_filter=category,
+                )
+
             if not verified_trends:
                 logger.info("no_verified_trends", geo=geo, category=category)
                 return []
@@ -113,6 +127,35 @@ class TrendRadarAgent:
         except Exception as e:
             logger.error("trend_scan_error", geo=geo, category=category, error=str(e))
             return []
+
+    def _expand_non_dz_fallback(
+        self,
+        verified_trends: list[dict],
+        google_trends: list[str],
+        geo: str,
+        category_filter: str,
+    ) -> list[dict]:
+        existing = {normalize_text(v["keyword"]) for v in verified_trends}
+        for trend in google_trends:
+            norm = normalize_text(trend)
+            if not norm or norm in existing or self._is_weak_term(norm):
+                continue
+            category = self._categorize_keyword(norm)
+            if category_filter != "all" and category != category_filter:
+                continue
+            verified_trends.append(
+                {
+                    "keyword": norm,
+                    "source_signals": ["google_trends", "geo_fallback"],
+                    "strength": 5,
+                    "category": category,
+                    "geography": self._detect_geography(norm, geo),
+                }
+            )
+            existing.add(norm)
+            if len(verified_trends) >= NON_DZ_MIN_TRENDS:
+                break
+        return verified_trends
 
     async def _fetch_google_trends(self, geo: str) -> list[str]:
         """Fetch trending searches from Google Trends."""
@@ -343,6 +386,11 @@ class TrendRadarAgent:
                     strength=trend_data["strength"],
                     category=trend_data.get("category", "general"),
                     geography=trend_data.get("geography", geo),
+                    reason=f"تصاعد اهتمام الجمهور بموضوع {keyword} في {GEO_LABELS.get(trend_data.get('geography', geo), geo)}.",
+                    suggested_angles=[
+                        f"ما الذي يدفع صعود {keyword} الآن؟",
+                        f"كيف يؤثر {keyword} على الجمهور محليًا؟",
+                    ],
                 )
 
             prompt = f"""Role: Chief editorial trend analyst for Echorouk.
@@ -389,7 +437,18 @@ Return strict JSON:
             return alert
         except Exception as e:
             logger.warning("trend_analysis_error", keyword=keyword, error=str(e))
-            return None
+            return TrendAlert(
+                keyword=keyword,
+                source_signals=trend_data["source_signals"],
+                strength=trend_data["strength"],
+                category=trend_data.get("category", "general"),
+                geography=trend_data.get("geography", geo),
+                reason=f"إشارة ترند مؤكدة حول {keyword} وتحتاج متابعة تحريرية سريعة.",
+                suggested_angles=[
+                    f"الخلفية الخبرية وراء {keyword}",
+                    f"زاوية بيانات/تأثير مرتبطة بـ {keyword}",
+                ],
+            )
 
     async def _send_alert(self, alert: TrendAlert):
         """Send trend alert to editorial team."""
