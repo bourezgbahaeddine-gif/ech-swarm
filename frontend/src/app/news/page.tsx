@@ -178,8 +178,22 @@ export default function NewsPage() {
             default: return 'border-white/10 text-gray-300 bg-white/5';
         }
     };
+    const getStatusLabel = (status: string) => {
+        const s = (status || '').toLowerCase();
+        const labels: Record<string, string> = {
+            new: 'جديد',
+            cleaned: 'منظف',
+            classified: 'مصنف',
+            candidate: 'مرشح',
+            approved: 'مقبول',
+            rejected: 'مرفوض',
+            published: 'منشور',
+            archived: 'مؤرشف',
+        };
+        return labels[s] || status;
+    };
 
-    const role = user?.role || '';
+    const role = (user?.role || '').toLowerCase();
     const canApproveReject = role === 'director' || role === 'editor_chief';
     const canRewrite = ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'].includes(role);
     const canProcess = canRewrite;
@@ -349,7 +363,8 @@ export default function NewsPage() {
                     ))
                 ) : articles.length > 0 ? (
                     articles.map((article: ArticleBrief) => {
-                        const canReview = article.status === 'candidate' || article.status === 'classified';
+                        const normalizedStatus = (article.status || '').toLowerCase();
+                        const canReview = normalizedStatus === 'candidate' || normalizedStatus === 'classified';
 
                         return (
                             <div
@@ -398,8 +413,8 @@ export default function NewsPage() {
                                 </div>
 
                                 <div className="mt-4 flex flex-wrap items-center gap-2">
-                                    <span className={cn('px-2 py-0.5 rounded-md text-[10px] font-medium border', getStatusColor(article.status))}>
-                                        {article.status}
+                                    <span className={cn('px-2 py-0.5 rounded-md text-[10px] font-medium border', getStatusColor((article.status || '').toLowerCase()))}>
+                                        {getStatusLabel(article.status)}
                                     </span>
                                     <span className={cn('px-2 py-0.5 rounded-md text-[10px] font-medium border', categoryColor(article.category))}>
                                         {getCategoryLabel(article.category)}

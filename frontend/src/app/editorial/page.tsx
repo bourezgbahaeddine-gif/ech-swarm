@@ -1,30 +1,52 @@
 ﻿'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { newsApi, editorialApi, type ArticleBrief } from '@/lib/api';
 import { cn, formatRelativeTime, getCategoryLabel } from '@/lib/utils';
+import { useAuth } from '@/lib/auth';
 import {
     UserCheck, CheckCircle, XCircle, RotateCw,
-    Star, Zap,
+    Star, Zap, RefreshCw,
 } from 'lucide-react';
 
 export default function EditorialPage() {
     const queryClient = useQueryClient();
+    const { user } = useAuth();
+
     const [selectedArticle, setSelectedArticle] = useState<number | null>(null);
-    const [editorName] = useState('رئيس التحرير');
+    const [editorName] = useState(user?.full_name_ar || 'رئيس التحرير');
     const [rejectReason, setRejectReason] = useState('');
-    const now = Date.now();
+    const [search, setSearch] = useState('');
+    const [selectedIds, setSelectedIds] = useState<number[]>([]);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+    const normalizeStatus = (status: string) => (status || '').toLowerCase();
+    const role = user?.role || '';
+    const canApproveReject = role === 'director' || role === 'editor_chief';
+    const canRewrite = ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'].includes(role);
 
     const isFresh = (iso: string | null, minutes = 10) => {
         if (!iso) return false;
-        const deltaMs = now - new Date(iso).getTime();
+        const deltaMs = Date.now() - new Date(iso).getTime();
         return deltaMs >= 0 && deltaMs <= minutes * 60 * 1000;
+    };
+
+    const extractErrorDetail = (err: unknown, fallback: string): string => {
+        if (typeof err === 'object' && err !== null) {
+            const maybeResponse = (err as { response?: { data?: { detail?: unknown } } }).response;
+            const detail = maybeResponse?.data?.detail;
+            if (typeof detail === 'string' && detail.trim()) {
+                return detail;
+            }
+        }
+        return fallback;
     };
 
     const { data: pendingData, isLoading } = useQuery({
         queryKey: ['pending-editorial'],
-        queryFn: () => newsApi.pending(30),
+        queryFn: () => newsApi.pending(50),
     });
 
     const decideMutation = useMutation({
@@ -35,10 +57,49 @@ export default function EditorialPage() {
             queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
             setSelectedArticle(null);
             setRejectReason('');
+            setErrorMessage(null);
+            setSuccessMessage('تم تنفيذ القرار بنجاح');
+        },
+        onError: (err: unknown) => {
+            setErrorMessage(extractErrorDetail(err, 'تعذر تنفيذ القرار'));
+            setSuccessMessage(null);
         },
     });
 
-    const articles = pendingData?.data || [];
+    const bulkMutation = useMutation({
+        mutationFn: async ({ ids, decision, reason }: { ids: number[]; decision: string; reason?: string }) => {
+            await Promise.all(
+                ids.map((articleId) =>
+                    editorialApi.decide(articleId, { editor_name: editorName, decision, reason })
+                )
+            );
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['pending-editorial'] });
+            queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
+            setSelectedIds([]);
+            setRejectReason('');
+            setErrorMessage(null);
+            setSuccessMessage('تم تنفيذ القرار الجماعي بنجاح');
+        },
+        onError: (err: unknown) => {
+            setErrorMessage(extractErrorDetail(err, 'تعذر تنفيذ القرار الجماعي'));
+            setSuccessMessage(null);
+        },
+    });
+
+    const articles = useMemo(() => {
+        const rows = (pendingData?.data || []) as ArticleBrief[];
+        const q = search.trim().toLowerCase();
+        if (!q) return rows;
+        return rows.filter((a) =>
+            `${a.title_ar || ''} ${a.original_title || ''} ${a.source_name || ''}`.toLowerCase().includes(q)
+        );
+    }, [pendingData?.data, search]);
+
+    const toggleSelected = (id: number) => {
+        setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    };
 
     return (
         <div className="space-y-6">
@@ -50,6 +111,69 @@ export default function EditorialPage() {
                 <p className="text-sm text-gray-500 mt-1">
                     {articles.length} خبر بانتظار قراركم
                 </p>
+            </div>
+
+            {errorMessage && (
+                <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                    {errorMessage}
+                </div>
+            )}
+            {successMessage && (
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+                    {successMessage}
+                </div>
+            )}
+
+            <div className="rounded-2xl border border-white/10 bg-gray-900/40 p-4 space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                    <input
+                        type="text"
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="بحث في العنوان/المصدر..."
+                        className="h-10 flex-1 min-w-[220px] rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white placeholder:text-gray-500"
+                        dir="rtl"
+                    />
+                    <button
+                        onClick={() => queryClient.invalidateQueries({ queryKey: ['pending-editorial'] })}
+                        className="h-10 px-3 rounded-xl bg-white/5 border border-white/10 text-xs text-gray-300 hover:text-white flex items-center gap-2"
+                    >
+                        <RefreshCw className="w-4 h-4" />
+                        تحديث
+                    </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                    <button
+                        disabled={!canApproveReject || selectedIds.length === 0 || bulkMutation.isPending}
+                        onClick={() => bulkMutation.mutate({ ids: selectedIds, decision: 'approve' })}
+                        className="px-3 py-2 rounded-xl bg-emerald-500/20 text-emerald-300 disabled:opacity-40 text-xs"
+                    >
+                        موافقة جماعية ({selectedIds.length})
+                    </button>
+                    <button
+                        disabled={!canRewrite || selectedIds.length === 0 || bulkMutation.isPending}
+                        onClick={() => bulkMutation.mutate({ ids: selectedIds, decision: 'rewrite' })}
+                        className="px-3 py-2 rounded-xl bg-amber-500/20 text-amber-300 disabled:opacity-40 text-xs"
+                    >
+                        إعادة صياغة جماعية
+                    </button>
+                    <button
+                        disabled={!canApproveReject || selectedIds.length === 0 || bulkMutation.isPending}
+                        onClick={() => bulkMutation.mutate({ ids: selectedIds, decision: 'reject', reason: rejectReason || undefined })}
+                        className="px-3 py-2 rounded-xl bg-red-500/20 text-red-300 disabled:opacity-40 text-xs"
+                    >
+                        رفض جماعي
+                    </button>
+                    <input
+                        type="text"
+                        value={rejectReason}
+                        onChange={(e) => setRejectReason(e.target.value)}
+                        placeholder="سبب الرفض الجماعي (اختياري)"
+                        className="h-9 min-w-[220px] rounded-xl bg-white/5 border border-white/10 px-3 text-xs text-white placeholder:text-gray-500"
+                        dir="rtl"
+                    />
+                </div>
             </div>
 
             <div className="space-y-3">
@@ -75,6 +199,20 @@ export default function EditorialPage() {
                                 onClick={() => setSelectedArticle(selectedArticle === article.id ? null : article.id)}
                             >
                                 <div className="flex items-start gap-4">
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            toggleSelected(article.id);
+                                        }}
+                                        className={cn(
+                                            'mt-1 h-5 w-5 rounded border',
+                                            selectedIds.includes(article.id)
+                                                ? 'border-emerald-400 bg-emerald-500/40'
+                                                : 'border-white/20 bg-white/5'
+                                        )}
+                                        aria-label={`select-${article.id}`}
+                                    />
+
                                     <div className={cn(
                                         'w-12 h-12 rounded-xl flex flex-col items-center justify-center flex-shrink-0',
                                         article.importance_score >= 8 ? 'bg-red-500/20 text-red-400' :
@@ -122,8 +260,8 @@ export default function EditorialPage() {
                                     <div className="flex flex-wrap items-center gap-3">
                                         <button
                                             onClick={() => decideMutation.mutate({ articleId: article.id, decision: 'approve' })}
-                                            disabled={decideMutation.isPending}
-                                            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-colors text-sm font-medium"
+                                            disabled={decideMutation.isPending || !canApproveReject || !['candidate', 'classified'].includes(normalizeStatus(article.status))}
+                                            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-colors text-sm font-medium disabled:opacity-50"
                                         >
                                             <CheckCircle className="w-4 h-4" />
                                             موافقة
@@ -131,8 +269,8 @@ export default function EditorialPage() {
 
                                         <button
                                             onClick={() => decideMutation.mutate({ articleId: article.id, decision: 'rewrite' })}
-                                            disabled={decideMutation.isPending}
-                                            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 transition-colors text-sm font-medium"
+                                            disabled={decideMutation.isPending || !canRewrite || !['candidate', 'classified'].includes(normalizeStatus(article.status))}
+                                            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 transition-colors text-sm font-medium disabled:opacity-50"
                                         >
                                             <RotateCw className="w-4 h-4" />
                                             إعادة صياغة
@@ -149,8 +287,8 @@ export default function EditorialPage() {
                                             />
                                             <button
                                                 onClick={() => decideMutation.mutate({ articleId: article.id, decision: 'reject', reason: rejectReason })}
-                                                disabled={decideMutation.isPending}
-                                                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors text-sm font-medium"
+                                                disabled={decideMutation.isPending || !canApproveReject || !['candidate', 'classified'].includes(normalizeStatus(article.status))}
+                                                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors text-sm font-medium disabled:opacity-50"
                                             >
                                                 <XCircle className="w-4 h-4" />
                                                 رفض
