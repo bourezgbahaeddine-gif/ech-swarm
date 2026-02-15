@@ -35,6 +35,7 @@ export default function NewsPage() {
         body: string;
     } | null>(null);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [infoMessage, setInfoMessage] = useState<string | null>(null);
     const editorName = user?.full_name_ar || 'رئيس التحرير';
 
     useEffect(() => {
@@ -57,24 +58,40 @@ export default function NewsPage() {
 
     const triggerScout = useMutation({
         mutationFn: () => dashboardApi.triggerScout(),
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['news'] }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['news'] });
+            setErrorMessage(null);
+            setInfoMessage('تم تشغيل الكشاف بنجاح');
+        },
         onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'فشل تشغيل الكشاف'),
     });
 
     const triggerRouter = useMutation({
         mutationFn: () => dashboardApi.triggerRouter(),
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['news'] }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['news'] });
+            setErrorMessage(null);
+            setInfoMessage('تم تشغيل الموجّه بنجاح');
+        },
         onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'فشل تشغيل الموجّه'),
     });
 
     const triggerScribe = useMutation({
         mutationFn: () => dashboardApi.triggerScribe(),
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['news'] }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['news'] });
+            setErrorMessage(null);
+            setInfoMessage('تم تشغيل الكاتب بنجاح');
+        },
         onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'فشل تشغيل الكاتب'),
     });
 
     const triggerTrends = useMutation({
         mutationFn: () => dashboardApi.triggerTrends(),
+        onSuccess: () => {
+            setErrorMessage(null);
+            setInfoMessage('تم تشغيل الرادار بنجاح');
+        },
         onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'فشل تشغيل الرادار'),
     });
 
@@ -237,6 +254,17 @@ export default function NewsPage() {
                     </button>
                 </div>
             )}
+            {infoMessage && (
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200 flex items-center justify-between">
+                    <span>{infoMessage}</span>
+                    <button
+                        onClick={() => setInfoMessage(null)}
+                        className="px-2 py-1 rounded-md bg-white/10 hover:bg-white/20 text-xs"
+                    >
+                        إغلاق
+                    </button>
+                </div>
+            )}
             <div className="flex flex-col gap-4">
                 <div className="flex items-center justify-between">
                     <div>
@@ -263,7 +291,7 @@ export default function NewsPage() {
                             className="px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-xs text-emerald-300 hover:bg-emerald-500/25 transition-colors flex items-center gap-2"
                         >
                             <Rocket className="w-4 h-4" />
-                            تشغيل الكشاف
+                            {triggerScout.isPending ? 'جاري التشغيل...' : 'تشغيل الكشاف'}
                         </button>
                         <button
                             onClick={() => triggerRouter.mutate()}
@@ -271,7 +299,7 @@ export default function NewsPage() {
                             className="px-3 py-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-xs text-amber-300 hover:bg-amber-500/25 transition-colors flex items-center gap-2"
                         >
                             <Route className="w-4 h-4" />
-                            تشغيل الموجّه
+                            {triggerRouter.isPending ? 'جاري التشغيل...' : 'تشغيل الموجّه'}
                         </button>
                         <button
                             onClick={() => triggerScribe.mutate()}
@@ -279,7 +307,7 @@ export default function NewsPage() {
                             className="px-3 py-2 rounded-xl bg-sky-500/15 border border-sky-500/30 text-xs text-sky-300 hover:bg-sky-500/25 transition-colors flex items-center gap-2"
                         >
                             <PenSquare className="w-4 h-4" />
-                            تشغيل الكاتب
+                            {triggerScribe.isPending ? 'جاري التشغيل...' : 'تشغيل الكاتب'}
                         </button>
                         <button
                             onClick={() => triggerTrends.mutate()}
@@ -287,7 +315,7 @@ export default function NewsPage() {
                             className="px-3 py-2 rounded-xl bg-violet-500/15 border border-violet-500/30 text-xs text-violet-300 hover:bg-violet-500/25 transition-colors flex items-center gap-2"
                         >
                             <Radar className="w-4 h-4" />
-                            تشغيل الرادار
+                            {triggerTrends.isPending ? 'جاري التشغيل...' : 'تشغيل الرادار'}
                         </button>
                     </div>
                 </div>
