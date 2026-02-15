@@ -26,6 +26,7 @@ feedparser==6.0.11
 trafilatura==2.0.0
 beautifulsoup4==4.12.3
 aiohttp==3.11.11
+certifi==2025.1.31
 
 # ── Text Processing ──
 python-Levenshtein==0.26.1

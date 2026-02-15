@@ -10,6 +10,7 @@ Single Responsibility: Fetch & Store RAW only.
 import time
 import asyncio
 import random
+import ssl
 from datetime import datetime
 from types import SimpleNamespace
 from typing import Optional, Iterable
@@ -17,6 +18,7 @@ from urllib.parse import urljoin, urlparse
 
 import feedparser
 import aiohttp
+import certifi
 from bs4 import BeautifulSoup
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +33,12 @@ from app.services.cache_service import cache_service
 
 logger = get_logger("agent.scout")
 settings = get_settings()
+DEFAULT_HEADERS = {"User-Agent": "Mozilla/5.0 (EchoroukSwarm/1.0)"}
+
+
+def _aiohttp_ssl_context():
+    """Use certifi CA bundle to avoid missing system CA issues in slim containers."""
+    return ssl.create_default_context(cafile=certifi.where())
 
 
 class ScoutAgent:
@@ -58,7 +66,8 @@ class ScoutAgent:
         max_new_per_run = settings.scout_max_new_per_run
 
         try:
-            async with aiohttp.ClientSession() as session:
+            connector = aiohttp.TCPConnector(ssl=_aiohttp_ssl_context())
+            async with aiohttp.ClientSession(connector=connector) as session:
                 if settings.scout_use_freshrss:
                     await self._fetch_from_freshrss(db, stats, session)
                     run.status = "success"
@@ -71,44 +80,44 @@ class ScoutAgent:
                     logger.info("scout_run_complete", **stats, mode="freshrss")
                     return stats
 
-            # Get enabled sources
-            result = await db.execute(
-                select(Source).where(Source.enabled == True).order_by(Source.priority.desc())
-            )
-            sources = result.scalars().all()
+                # Get enabled sources
+                result = await db.execute(
+                    select(Source).where(Source.enabled == True).order_by(Source.priority.desc())
+                )
+                sources = result.scalars().all()
 
-            if not sources:
-                logger.warning("no_sources_enabled")
-                run.status = "success"
-                run.finished_at = datetime.utcnow()
-                run.details = {"warning": "No enabled sources"}
-                await db.commit()
-                return stats
+                if not sources:
+                    logger.warning("no_sources_enabled")
+                    run.status = "success"
+                    run.finished_at = datetime.utcnow()
+                    run.details = {"warning": "No enabled sources"}
+                    await db.commit()
+                    return stats
 
-            logger.info("scout_run_started", sources_count=len(sources))
+                logger.info("scout_run_started", sources_count=len(sources))
 
-            # Shuffle sources to avoid starvation and keep feed balanced
-            random.shuffle(sources)
+                # Shuffle sources to avoid starvation and keep feed balanced
+                random.shuffle(sources)
 
-            # Process sources in batches to avoid overwhelming the network
-            batch_size = settings.scout_batch_size
-            semaphore = asyncio.Semaphore(settings.scout_concurrency)
-            for i in range(0, len(sources), batch_size):
-                batch = sources[i:i + batch_size]
-                tasks = [
-                    self._fetch_source(source.id, stats, session, semaphore)
-                    for source in batch
-                ]
-                await asyncio.gather(*tasks, return_exceptions=True)
+                # Process sources in batches to avoid overwhelming the network
+                batch_size = settings.scout_batch_size
+                semaphore = asyncio.Semaphore(settings.scout_concurrency)
+                for i in range(0, len(sources), batch_size):
+                    batch = sources[i:i + batch_size]
+                    tasks = [
+                        self._fetch_source(source.id, stats, session, semaphore)
+                        for source in batch
+                    ]
+                    await asyncio.gather(*tasks, return_exceptions=True)
 
-                # Global cap to keep editorial feed smooth
-                if stats["new"] >= max_new_per_run:
-                    logger.info("scout_run_cap_reached", max_new=max_new_per_run)
-                    break
+                    # Global cap to keep editorial feed smooth
+                    if stats["new"] >= max_new_per_run:
+                        logger.info("scout_run_cap_reached", max_new=max_new_per_run)
+                        break
 
-                # Small delay between batches (backpressure)
-                if i + batch_size < len(sources):
-                    await asyncio.sleep(0.5)
+                    # Small delay between batches (backpressure)
+                    if i + batch_size < len(sources):
+                        await asyncio.sleep(0.5)
 
             # Update run record
             run.status = "success"
@@ -249,7 +258,11 @@ class ScoutAgent:
         """Parse an RSS feed with timeout and error handling."""
         timeout = timeout or settings.rss_fetch_timeout
         try:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+            async with session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=timeout),
+                headers=DEFAULT_HEADERS,
+            ) as resp:
                 if resp.status != 200:
                     logger.warning("feed_http_error", url=url, status=resp.status)
                     return None
@@ -272,7 +285,11 @@ class ScoutAgent:
         timeout = timeout or settings.rss_fetch_timeout
         url = source.url
         try:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+            async with session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=timeout),
+                headers=DEFAULT_HEADERS,
+            ) as resp:
                 if resp.status != 200:
                     logger.warning("scrape_http_error", url=url, status=resp.status)
                     return []
