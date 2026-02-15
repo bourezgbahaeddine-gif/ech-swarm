@@ -95,6 +95,20 @@ export default function NewsPage() {
         onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'فشل تشغيل الرادار'),
     });
 
+    const refreshPipeline = useMutation({
+        mutationFn: async () => {
+            await dashboardApi.triggerScout();
+            await dashboardApi.triggerRouter();
+        },
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: ['news'] });
+            await queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
+            setErrorMessage(null);
+            setInfoMessage('تم تحديث الأخبار وجلب آخر العناصر');
+        },
+        onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'فشل تحديث الأخبار'),
+    });
+
     const decideMutation = useMutation({
         mutationFn: async ({
             articleId,
@@ -199,7 +213,7 @@ export default function NewsPage() {
         onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'تعذر تطبيق المسودة على الخبر'),
     });
 
-    const refresh = () => queryClient.invalidateQueries({ queryKey: ['news'] });
+    const refresh = () => refreshPipeline.mutate();
 
     const articles = data?.data?.items || [];
     const totalPages = data?.data?.pages || 0;
@@ -280,10 +294,11 @@ export default function NewsPage() {
                     <div className="flex flex-wrap items-center gap-2">
                         <button
                             onClick={refresh}
+                            disabled={refreshPipeline.isPending}
                             className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-gray-300 hover:text-white hover:border-white/20 transition-colors flex items-center gap-2"
                         >
                             <RefreshCw className="w-4 h-4" />
-                            تحديث
+                            {refreshPipeline.isPending ? 'جاري التحديث...' : 'تحديث'}
                         </button>
                         <button
                             onClick={() => triggerScout.mutate()}
