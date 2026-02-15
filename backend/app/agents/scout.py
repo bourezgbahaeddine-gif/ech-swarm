@@ -167,21 +167,54 @@ class ScoutAgent:
     @staticmethod
     def _entry_source_name(entry) -> str:
         """Best-effort source extraction from FreshRSS item."""
+        def clean_name(value: str) -> str:
+            return (value or "").strip()
+
+        def source_from_link(url: str) -> str:
+            if not url:
+                return ""
+            host = (urlparse(url).netloc or "").lower()
+            if host.startswith("www."):
+                host = host[4:]
+            if not host:
+                return ""
+            return host.split(":")[0]
+
         if isinstance(entry, dict):
             src = entry.get("source")
             if isinstance(src, dict):
-                title = src.get("title")
+                title = clean_name(src.get("title", ""))
                 if title:
                     return title
-            if entry.get("author"):
-                return str(entry.get("author"))
+                href = clean_name(src.get("href", ""))
+                inferred = source_from_link(href)
+                if inferred:
+                    return inferred
+            author = clean_name(str(entry.get("author", "")))
+            if author:
+                return author
+            inferred = source_from_link(clean_name(str(entry.get("link", ""))))
+            if inferred:
+                return inferred
         else:
             if hasattr(entry, "source") and entry.source:
                 src = entry.source
-                if isinstance(src, dict) and src.get("title"):
-                    return src.get("title")
+                if isinstance(src, dict):
+                    title = clean_name(src.get("title", ""))
+                    if title:
+                        return title
+                    href = clean_name(src.get("href", ""))
+                    inferred = source_from_link(href)
+                    if inferred:
+                        return inferred
             if hasattr(entry, "author") and entry.author:
-                return str(entry.author)
+                author = clean_name(str(entry.author))
+                if author:
+                    return author
+            link = clean_name(entry.get("link", ""))
+            inferred = source_from_link(link)
+            if inferred:
+                return inferred
         return "FreshRSS"
 
     async def _fetch_source(

@@ -85,6 +85,21 @@ LOCAL_SIGNAL_KEYWORDS = [
     "وهران", "الجزائر العاصمة", "قسنطينة", "سطيف", "عنابة", "تلمسان", "بجاية",
 ]
 
+LOW_VALUE_EDITORIAL_PATTERNS = [
+    r"\bpromo\b",
+    r"\bsponsored\b",
+    r"\badvertisement\b",
+    r"\bcoupon\b",
+    r"\bdiscount\b",
+    r"\bcasino\b",
+    r"\bbetting\b",
+    r"اشتر[يى]",
+    r"تخفيضات",
+    r"عرض خاص",
+    r"ممول",
+    r"إعلان",
+]
+
 LOCAL_SOURCE_KEYWORDS = [
     "algeria", "algérie", "algerie", "dz", "aps", "tsa", "echorouk", "el khabar", "elwatan",
     "الجزائر", "الجزائرية", "الشروق", "الخبر", "النهار", "وكالة الأنباء الجزائرية",
@@ -219,6 +234,13 @@ class RouterAgent:
 
         # ── Step 4: Determine if Candidate ──
         has_local_signal = self._has_local_signal(text_lower, article.source_name or "")
+        quality_ok, quality_reason = self._editorial_quality_gate(article, text_lower, has_local_signal)
+        if not quality_ok:
+            article.status = NewsStatus.ARCHIVED
+            article.importance_score = 0
+            article.rejection_reason = f"auto_filtered:{quality_reason}"
+            return
+
         is_candidate = (
             article.importance_score >= settings.editorial_min_importance
             or article.is_breaking
@@ -385,6 +407,23 @@ class RouterAgent:
         source_name = (source.name if source else article.source_name) or ""
         source_name = source_name.lower()
         return any(k in source_name for k in ["عربي", "العربية", "الجزيرة", "سكاي نيوز عربية", "الخبر", "الشروق", "النهار"])
+
+    def _editorial_quality_gate(self, article: Article, text_lower: str, has_local_signal: bool) -> tuple[bool, str]:
+        """
+        Additional quality gate before pushing to editorial stream.
+        """
+        if not article.is_breaking and settings.editorial_require_local_signal and not has_local_signal:
+            return False, "non_local_editorial_noise"
+
+        for pattern in LOW_VALUE_EDITORIAL_PATTERNS:
+            if re.search(pattern, text_lower):
+                return False, "promotional_or_ad_noise"
+
+        title = (article.original_title or "").strip()
+        if len(title) < 16 and not article.is_breaking:
+            return False, "weak_headline"
+
+        return True, ""
 
 
 # Singleton
