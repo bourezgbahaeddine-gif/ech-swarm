@@ -1,4 +1,4 @@
-"""
+﻿"""
 Echorouk AI Swarm — Journalist Services
 =======================================
 Editor/Fact-check/SEO/Multimedia tools for journalists.
@@ -14,15 +14,33 @@ from app.services.ai_service import ai_service
 
 router = APIRouter(prefix="/services", tags=["Journalist Services"])
 
+CONSTITUTION_BASE = (
+    "التزم بدستور الشروق التحريري: دقة، توازن، حياد، وضوح، عدم الإثارة، "
+    "صياغة مهنية قابلة للنشر، ومنع الحشو أو التعليقات خارج النص المطلوب."
+)
+
+
+def _target_language(payload: dict) -> str:
+    lang = (payload.get("language") or "ar").lower().strip()
+    if lang not in {"ar", "fr", "en"}:
+        return "ar"
+    return lang
+
+
+def _lang_name(lang: str) -> str:
+    return {"ar": "العربية الفصحى", "fr": "الفرنسية", "en": "الإنجليزية"}[lang]
+
 
 @router.post("/editor/tonality")
 async def editor_tonality(payload: dict):
     text = payload.get("text", "")
+    lang = _target_language(payload)
     if not text:
         raise HTTPException(400, "Missing text")
     prompt = (
-        "Rewrite the following Arabic headline/text to be sober, non-sensational, "
-        "and compliant with a newsroom editorial guide. Provide 3 alternatives."
+        f"{CONSTITUTION_BASE}\n"
+        f"أعد صياغة النص التالي بلغة {_lang_name(lang)} بنبرة مهنية غير مثيرة.\n"
+        "أعط 3 بدائل قصيرة صالحة للنشر فقط، بدون شرح إضافي أو عناوين تقنية."
         f"\n\nText:\n{text}"
     )
     result = await ai_service.generate_text(prompt)
@@ -32,12 +50,14 @@ async def editor_tonality(payload: dict):
 @router.post("/editor/inverted-pyramid")
 async def editor_inverted_pyramid(payload: dict):
     text = payload.get("text", "")
+    lang = _target_language(payload)
     if not text:
         raise HTTPException(400, "Missing text")
     prompt = (
-        "Rewrite the following news text in Arabic using the inverted pyramid style. "
-        "Start with a concise lead answering: who, what, where, when, why, how. "
-        "Then order details by importance."
+        f"{CONSTITUTION_BASE}\n"
+        f"أعد كتابة الخبر التالي بلغة {_lang_name(lang)} وفق أسلوب الهرم المقلوب.\n"
+        "ابدأ بفقرة تمهيدية تجيب من/ماذا/أين/متى/لماذا/كيف، ثم التفاصيل حسب الأهمية.\n"
+        "أعد النص النهائي فقط."
         f"\n\nText:\n{text}"
     )
     result = await ai_service.generate_text(prompt)
@@ -47,11 +67,14 @@ async def editor_inverted_pyramid(payload: dict):
 @router.post("/editor/proofread")
 async def editor_proofread(payload: dict):
     text = payload.get("text", "")
+    lang = _target_language(payload)
     if not text:
         raise HTTPException(400, "Missing text")
     prompt = (
-        "Proofread the following Arabic text. Fix grammar and spelling mistakes only. "
-        "Return the corrected text."
+        f"{CONSTITUTION_BASE}\n"
+        f"دقق النص التالي بلغة {_lang_name(lang)}.\n"
+        "صحح الأخطاء الإملائية والنحوية وعلامات الترقيم فقط دون تغيير المعنى.\n"
+        "أعد النص المصحح فقط."
         f"\n\nText:\n{text}"
     )
     result = await ai_service.generate_text(prompt)
@@ -62,11 +85,13 @@ async def editor_proofread(payload: dict):
 async def editor_social_summary(payload: dict):
     text = payload.get("text", "")
     platform = payload.get("platform", "general")
+    lang = _target_language(payload)
     if not text:
         raise HTTPException(400, "Missing text")
     prompt = (
-        "Summarize the following news in Arabic for social media without clickbait. "
-        f"Platform: {platform}. Provide 2 short variants (1-2 sentences)."
+        f"{CONSTITUTION_BASE}\n"
+        f"لخّص الخبر التالي بلغة {_lang_name(lang)} لمنصة {platform} دون تهويل أو clickbait.\n"
+        "أعط بديلين قصيرين (1-2 جملة) جاهزين للنشر."
         f"\n\nText:\n{text}"
     )
     result = await ai_service.generate_text(prompt)
@@ -87,12 +112,13 @@ async def factcheck_vision(payload: dict):
 async def factcheck_consistency(payload: dict):
     text = payload.get("text", "")
     reference = payload.get("reference", "")
+    lang = _target_language(payload)
     if not text:
         raise HTTPException(400, "Missing text")
     prompt = (
-        "Check the following Arabic news text for historical or factual inconsistencies. "
-        "If a reference context is provided, compare against it. "
-        "List any contradictions and suggest corrections.\n\n"
+        f"{CONSTITUTION_BASE}\n"
+        f"تحقق من اتساق النص التالي بلغة {_lang_name(lang)} واكتشف التناقضات أو الأخطاء المحتملة.\n"
+        "إذا وُجد مرجع فقارن معه بدقة، ثم اقترح تصحيحات قصيرة قابلة للنشر.\n\n"
         f"Reference:\n{reference}\n\nText:\n{text}"
     )
     result = await ai_service.generate_text(prompt)
@@ -102,11 +128,13 @@ async def factcheck_consistency(payload: dict):
 @router.post("/factcheck/extract")
 async def factcheck_extract(payload: dict):
     text = payload.get("text", "")
+    lang = _target_language(payload)
     if not text:
         raise HTTPException(400, "Missing text")
     prompt = (
-        "Extract the most important points from the following document in Arabic. "
-        "Return a bullet list and a 3-sentence executive summary."
+        f"{CONSTITUTION_BASE}\n"
+        f"استخرج أهم النقاط من النص التالي بلغة {_lang_name(lang)}.\n"
+        "أعد نقاطًا مرتبة + خلاصة تنفيذية من 3 جمل."
         f"\n\nText:\n{text}"
     )
     result = await ai_service.generate_text(prompt)
@@ -116,11 +144,13 @@ async def factcheck_extract(payload: dict):
 @router.post("/seo/keywords")
 async def seo_keywords(payload: dict):
     text = payload.get("text", "")
+    lang = _target_language(payload)
     if not text:
         raise HTTPException(400, "Missing text")
     prompt = (
-        "Generate 10 long-tail SEO keywords in Arabic related to the following news. "
-        "Return as a comma-separated list."
+        f"{CONSTITUTION_BASE}\n"
+        f"ولّد 10 كلمات مفتاحية SEO طويلة الذيل بلغة {_lang_name(lang)} مرتبطة بالخبر التالي.\n"
+        "أعدها كسطر واحد مفصول بفواصل."
         f"\n\nText:\n{text}"
     )
     result = await ai_service.generate_text(prompt)
@@ -131,11 +161,13 @@ async def seo_keywords(payload: dict):
 async def seo_internal_links(payload: dict):
     text = payload.get("text", "")
     archive_titles = payload.get("archive_titles", [])
+    lang = _target_language(payload)
     if not text:
         raise HTTPException(400, "Missing text")
     prompt = (
-        "Suggest 5 internal links from the provided archive titles that match this news. "
-        "Return the titles only.\n\n"
+        f"{CONSTITUTION_BASE}\n"
+        f"اقترح 5 روابط داخلية مناسبة من الأرشيف بلغة {_lang_name(lang)}.\n"
+        "أعد عناوين المقالات فقط.\n\n"
         f"News:\n{text}\n\nArchive Titles:\n{archive_titles}"
     )
     result = await ai_service.generate_text(prompt)
@@ -145,14 +177,16 @@ async def seo_internal_links(payload: dict):
 @router.post("/seo/metadata")
 async def seo_metadata(payload: dict):
     text = payload.get("text", "")
+    lang = _target_language(payload)
     if not text:
         raise HTTPException(400, "Missing text")
     prompt = (
-        "Write SEO metadata in Arabic for this news: "
-        "1) SEO Title (<=60 chars) "
-        "2) Meta Description (<=160 chars) "
-        "3) Slug (latin, kebab-case). "
-        "Return as JSON with keys: seo_title, meta_description, slug.\n\n"
+        f"{CONSTITUTION_BASE}\n"
+        f"اكتب بيانات SEO بلغة {_lang_name(lang)} لهذا الخبر:\n"
+        "1) SEO Title (<=60)\n"
+        "2) Meta Description (<=160)\n"
+        "3) Slug (latin kebab-case).\n"
+        "أعد فقط JSON بالمفاتيح: seo_title, meta_description, slug.\n\n"
         f"Text:\n{text}"
     )
     result = await ai_service.generate_text(prompt)
@@ -162,11 +196,13 @@ async def seo_metadata(payload: dict):
 @router.post("/multimedia/video-script")
 async def multimedia_video_script(payload: dict):
     text = payload.get("text", "")
+    lang = _target_language(payload)
     if not text:
         raise HTTPException(400, "Missing text")
     prompt = (
-        "Create a short Arabic video script (60-90 seconds) from this news. "
-        "Include scenes and on-screen text suggestions."
+        f"{CONSTITUTION_BASE}\n"
+        f"أنشئ سكريبت فيديو قصير (60-90 ثانية) بلغة {_lang_name(lang)} من هذا الخبر.\n"
+        "ضمّن المشاهد المقترحة والنص الظاهر على الشاشة."
         f"\n\nText:\n{text}"
     )
     result = await ai_service.generate_text(prompt)
@@ -176,11 +212,13 @@ async def multimedia_video_script(payload: dict):
 @router.post("/multimedia/sentiment")
 async def multimedia_sentiment(payload: dict):
     text = payload.get("text", "")
+    lang = _target_language(payload)
     if not text:
         raise HTTPException(400, "Missing text")
     prompt = (
-        "Analyze audience sentiment for the following Arabic comments/news. "
-        "Return a brief report with sentiment (positive/neutral/negative) and key themes."
+        f"{CONSTITUTION_BASE}\n"
+        f"حلّل الانطباع العام للنص التالي بلغة {_lang_name(lang)}.\n"
+        "أعد تقريرًا مختصرًا: الاتجاه العام + أهم الموضوعات."
         f"\n\nText:\n{text}"
     )
     result = await ai_service.generate_text(prompt)
@@ -191,11 +229,14 @@ async def multimedia_sentiment(payload: dict):
 async def multimedia_translate(payload: dict):
     text = payload.get("text", "")
     source_lang = payload.get("source_lang", "auto")
+    lang = _target_language(payload)
     if not text:
         raise HTTPException(400, "Missing text")
     prompt = (
-        "Translate the following text to Arabic Fusha, preserving meaning precisely. "
-        f"Source language: {source_lang}.\n\nText:\n{text}"
+        f"{CONSTITUTION_BASE}\n"
+        f"ترجم النص التالي من {source_lang} إلى {_lang_name(lang)} مع الحفاظ الكامل على المعنى والسياق الصحفي.\n"
+        "أعد النص النهائي فقط دون ملاحظات.\n\n"
+        f"Text:\n{text}"
     )
     result = await ai_service.generate_text(prompt)
     return {"result": result}
@@ -205,6 +246,7 @@ async def multimedia_translate(payload: dict):
 async def multimedia_image_prompt(payload: dict, db: AsyncSession = Depends(get_db)):
     text = payload.get("text", "")
     style = payload.get("style", "cinematic")
+    lang = _target_language(payload)
     article_id = payload.get("article_id")
     created_by = payload.get("created_by")
     if not text:
@@ -225,9 +267,10 @@ Use this 10-point structure in each prompt:
 10) Dimensions (--ar)
 
 Constraints:
+- Respect Echorouk editorial constitution (accuracy, no sensationalism).
 - Visual semiotics: strong hook, viral-ready, journalistic realism.
 - Keep text area clean; avoid clutter.
-- Output in Arabic only.
+- Output in {_lang_name(lang)} only.
 - Provide 3 variants.
 
 News text:
@@ -236,7 +279,6 @@ News text:
 Preferred style: {style}
 """
     result = await ai_service.generate_text(prompt)
-    # Save prompt
     if result:
         from app.models.constitution import ImagePrompt
         db.add(ImagePrompt(
@@ -252,16 +294,17 @@ Preferred style: {style}
 @router.post("/multimedia/infographic/analyze")
 async def infographic_analyze(payload: dict, db: AsyncSession = Depends(get_db)):
     text = payload.get("text", "")
+    lang = _target_language(payload)
     article_id = payload.get("article_id")
     created_by = payload.get("created_by")
     if not text:
         raise HTTPException(400, "Missing text")
 
     prompt = f"""
-Analyze the following Arabic news and extract structured data for an infographic.
+Analyze the following news in {_lang_name(lang)} and extract structured data for an infographic.
 Return JSON only with this schema:
 {{
-  "title": "short Arabic title",
+  "title": "short title in target language",
   "items": [{{"id": "1", "label": "label", "value": "value"}}],
   "type": "timeline|ranking|comparison|numbers|map|steps|profile|stats|quote|impact",
   "theme": "dark|light|orange|mono",
@@ -287,23 +330,24 @@ Text:
 @router.post("/multimedia/infographic/prompt")
 async def infographic_prompt(payload: dict, db: AsyncSession = Depends(get_db)):
     data = payload.get("data", {})
+    lang = _target_language(payload)
     article_id = payload.get("article_id")
     created_by = payload.get("created_by")
     if not data:
         raise HTTPException(400, "Missing data")
     prompt = f"""
-You are a visual prompt engineer for an Arabic newsroom.
+You are a visual prompt engineer for Echorouk newsroom.
 Build a rich visual prompt for an infographic using this data:
 {data}
 
 Include camera, lighting, composition, and typography (IBM Plex Sans Arabic).
-Output only the final prompt text in Arabic.
+Respect Echorouk editorial constitution.
+Output only the final prompt text in {_lang_name(lang)}.
 """
     result = await ai_service.generate_text(prompt)
     if result:
         from app.models.constitution import InfographicData
         import json
-        # create a new record with prompt only
         db.add(InfographicData(
             article_id=article_id,
             data_json=json.dumps(data, ensure_ascii=False),
@@ -319,5 +363,4 @@ async def infographic_render(payload: dict):
     prompt = payload.get("prompt", "")
     if not prompt:
         raise HTTPException(400, "Missing prompt")
-    # Placeholder: return prompt for now (image generation hook)
     return {"image_url": "", "prompt": prompt}

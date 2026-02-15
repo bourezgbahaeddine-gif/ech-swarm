@@ -40,6 +40,7 @@ export default function WorkspaceDraftsPage() {
     const [imageAlt, setImageAlt] = useState('');
     const [imagePrompt, setImagePrompt] = useState('');
     const [infographicPrompt, setInfographicPrompt] = useState('');
+    const [selectedLanguage, setSelectedLanguage] = useState<'ar' | 'fr' | 'en'>('ar');
     const [aiResult, setAiResult] = useState<AIToolResult>({});
 
     const [busyAction, setBusyAction] = useState('');
@@ -176,7 +177,20 @@ export default function WorkspaceDraftsPage() {
         setImagePrompt('');
         setInfographicPrompt('');
         setAiResult({});
+        const title = `${selected.title || ''} ${selected.body || ''}`;
+        const hasArabic = /[\u0600-\u06FF]/.test(title);
+        const hasFrench = /[éèêàùçôîïâ]/i.test(title);
+        setSelectedLanguage(hasArabic ? 'ar' : hasFrench ? 'fr' : 'en');
     }, [selected?.id]);
+
+    const cleanAiText = (raw: string) => {
+        if (!raw) return '';
+        let t = raw.trim();
+        t = t.replace(/^```[\s\S]*?\n/, '').replace(/```$/, '').trim();
+        t = t.replace(/^(here('?s| is)|note:|explanation:).*/gim, '').trim();
+        t = t.replace(/\*\*/g, '').replace(/^[-*]\s+/gm, '');
+        return t.trim();
+    };
 
     const wpPackage = useMemo(() => {
         const title = (workingTitle || selected?.title || '').trim();
@@ -195,7 +209,7 @@ export default function WorkspaceDraftsPage() {
             `Image ALT: ${imageAlt || '—'}`,
         ].join('\n');
 
-        return `<!-- WP-READY-COPY -->\n<h1>${title}</h1>\n\n${blocks}\n\n<!-- SEO-MANUAL -->\n${metaLines}`;
+        return `<h1>${title}</h1>\n\n${blocks}\n\n<hr />\n<h3>بيانات SEO (إضافة يدوية)</h3>\n<p><strong>SEO Title:</strong> ${seoTitle || title}</p>\n<p><strong>Meta Description:</strong> ${seoDescription || '—'}</p>\n<p><strong>Focus Keywords:</strong> ${seoKeywords || '—'}</p>\n<p><strong>Image ALT:</strong> ${imageAlt || '—'}</p>`;
     }, [workingBody, workingTitle, selected?.title, seoTitle, seoDescription, seoKeywords, imageAlt]);
 
     const runAI = async (action: 'rewrite' | 'summary' | 'proofread' | 'keywords' | 'metadata' | 'imagePrompt' | 'infographicPrompt') => {
@@ -210,34 +224,34 @@ export default function WorkspaceDraftsPage() {
 
         try {
             if (action === 'rewrite') {
-                const res = await journalistServicesApi.tonality(text);
-                const result = res?.data?.result || '';
+                const res = await journalistServicesApi.tonality(text, selectedLanguage);
+                const result = cleanAiText(res?.data?.result || '');
                 setAiResult((prev) => ({ ...prev, rewrite: result }));
                 if (result) setWorkingBody(result);
             }
 
             if (action === 'summary') {
-                const res = await journalistServicesApi.social(text, 'general');
-                setAiResult((prev) => ({ ...prev, summary: res?.data?.result || '' }));
+                const res = await journalistServicesApi.social(text, 'general', selectedLanguage);
+                setAiResult((prev) => ({ ...prev, summary: cleanAiText(res?.data?.result || '') }));
             }
 
             if (action === 'proofread') {
-                const res = await journalistServicesApi.proofread(text);
-                const result = res?.data?.result || '';
+                const res = await journalistServicesApi.proofread(text, selectedLanguage);
+                const result = cleanAiText(res?.data?.result || '');
                 setAiResult((prev) => ({ ...prev, proofread: result }));
                 if (result) setWorkingBody(result);
             }
 
             if (action === 'keywords') {
-                const res = await journalistServicesApi.keywords(text);
-                const result = res?.data?.result || '';
+                const res = await journalistServicesApi.keywords(text, selectedLanguage);
+                const result = cleanAiText(res?.data?.result || '');
                 setAiResult((prev) => ({ ...prev, keywords: result }));
                 setSeoKeywords(result);
             }
 
             if (action === 'metadata') {
-                const res = await journalistServicesApi.metadata(text);
-                const result = res?.data?.result || '';
+                const res = await journalistServicesApi.metadata(text, selectedLanguage);
+                const result = cleanAiText(res?.data?.result || '');
                 setAiResult((prev) => ({ ...prev, metadata: result }));
                 const titleMatch = result.match(/SEO\s*Title\s*[:：]\s*(.+)/i);
                 const descMatch = result.match(/Meta\s*Description\s*[:：]\s*(.+)/i);
@@ -251,8 +265,9 @@ export default function WorkspaceDraftsPage() {
                     'documentary',
                     selected?.article_id,
                     user?.full_name_ar || 'editor',
+                    selectedLanguage,
                 );
-                const result = res?.data?.result || '';
+                const result = cleanAiText(res?.data?.result || '');
                 setAiResult((prev) => ({ ...prev, imagePrompt: result }));
                 setImagePrompt(result.split(/\n{2,}/)[0] || result);
                 setImageAlt(
@@ -265,13 +280,15 @@ export default function WorkspaceDraftsPage() {
                     text,
                     selected?.article_id,
                     user?.full_name_ar || 'editor',
+                    selectedLanguage,
                 );
                 const res = await journalistServicesApi.infographicPrompt(
                     analyzed?.data?.data || {},
                     selected?.article_id,
                     user?.full_name_ar || 'editor',
+                    selectedLanguage,
                 );
-                const result = res?.data?.result || '';
+                const result = cleanAiText(res?.data?.result || '');
                 setAiResult((prev) => ({ ...prev, infographicPrompt: result }));
                 setInfographicPrompt(result);
             }
@@ -433,6 +450,18 @@ export default function WorkspaceDraftsPage() {
                                         dir="rtl"
                                     />
                                 </div>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xs text-gray-400">لغة التحرير:</span>
+                                    <select
+                                        value={selectedLanguage}
+                                        onChange={(e) => setSelectedLanguage(e.target.value as 'ar' | 'fr' | 'en')}
+                                        className="h-9 px-3 rounded-xl bg-white/5 border border-white/10 text-xs text-gray-200"
+                                    >
+                                        <option value="ar">العربية</option>
+                                        <option value="fr">Français</option>
+                                        <option value="en">English</option>
+                                    </select>
+                                </div>
 
                                 <textarea
                                     value={workingBody}
@@ -457,6 +486,11 @@ export default function WorkspaceDraftsPage() {
                                         dir="rtl"
                                     />
                                 </div>
+                                <div className="flex flex-wrap gap-2">
+                                    <button onClick={() => copyText(seoTitle, 'تم نسخ SEO Title')} className="px-2 py-1 rounded-lg text-xs bg-white/10 text-gray-200">نسخ SEO Title</button>
+                                    <button onClick={() => copyText(seoDescription, 'تم نسخ Meta Description')} className="px-2 py-1 rounded-lg text-xs bg-white/10 text-gray-200">نسخ Meta</button>
+                                    <button onClick={() => copyText(seoKeywords, 'تم نسخ الكلمات المفتاحية')} className="px-2 py-1 rounded-lg text-xs bg-white/10 text-gray-200">نسخ Keywords</button>
+                                </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                     <textarea
@@ -474,6 +508,10 @@ export default function WorkspaceDraftsPage() {
                                         dir="rtl"
                                     />
                                 </div>
+                                <div className="flex flex-wrap gap-2">
+                                    <button onClick={() => copyText(imageAlt, 'تم نسخ وصف الصورة')} className="px-2 py-1 rounded-lg text-xs bg-white/10 text-gray-200">نسخ ALT</button>
+                                    <button onClick={() => copyText(imagePrompt, 'تم نسخ برومبت الصورة')} className="px-2 py-1 rounded-lg text-xs bg-white/10 text-gray-200">نسخ Prompt صورة</button>
+                                </div>
 
                                 <textarea
                                     value={infographicPrompt}
@@ -482,6 +520,7 @@ export default function WorkspaceDraftsPage() {
                                     placeholder="Prompt إنفوغراف"
                                     dir="rtl"
                                 />
+                                <button onClick={() => copyText(infographicPrompt, 'تم نسخ برومبت الإنفوغراف')} className="px-2 py-1 rounded-lg text-xs bg-white/10 text-gray-200">نسخ Prompt إنفوغراف</button>
                             </div>
 
                             <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3">
@@ -502,13 +541,21 @@ export default function WorkspaceDraftsPage() {
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                     <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                                        <h4 className="text-xs text-gray-400 mb-2">آخر مخرجات AI</h4>
+                                        <div className="flex items-center justify-between mb-2">
+                                            <h4 className="text-xs text-gray-400">آخر مخرجات AI</h4>
+                                            <button
+                                                onClick={() => copyText(JSON.stringify(aiResult, null, 2), 'تم نسخ مخرجات AI')}
+                                                className="px-2 py-1 rounded-lg text-[10px] bg-white/10 text-gray-200"
+                                            >
+                                                نسخ
+                                            </button>
+                                        </div>
                                         <pre className="whitespace-pre-wrap text-xs text-gray-200 max-h-56 overflow-auto" dir="rtl">
                                             {JSON.stringify(aiResult, null, 2)}
                                         </pre>
                                     </div>
                                     <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
-                                        <h4 className="text-xs text-gray-400">نسخة WordPress جاهزة للنسخ</h4>
+                                        <h4 className="text-xs text-gray-400">نسخة WordPress جاهزة للنسخ (متوافقة مع Gutenberg)</h4>
                                         <button
                                             onClick={() => copyText(wpPackage, 'تم نسخ نسخة WordPress')}
                                             className="px-3 py-2 rounded-xl text-xs bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 inline-flex items-center gap-2"
