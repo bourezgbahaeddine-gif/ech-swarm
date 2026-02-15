@@ -106,16 +106,21 @@ class RouterAgent:
         """Process a batch of NEW articles through triage."""
         stats = {"processed": 0, "candidates": 0, "ai_calls": 0, "breaking": 0}
 
-        # Pull a wider pool, then apply source quotas + local-priority ordering.
+        # Pull a wider pool, lock only article rows, then enrich with sources.
         result = await db.execute(
-            select(Article, Source)
-            .outerjoin(Source, Article.source_id == Source.id)
+            select(Article)
             .where(Article.status == NewsStatus.NEW)
             .order_by(Article.crawled_at.desc())
             .with_for_update(skip_locked=True)
             .limit(limit * 4)
         )
-        rows = result.all()
+        articles = result.scalars().all()
+        source_ids = {a.source_id for a in articles if a.source_id is not None}
+        source_map: dict[int, Source] = {}
+        if source_ids:
+            source_rows = await db.execute(select(Source).where(Source.id.in_(source_ids)))
+            source_map = {s.id: s for s in source_rows.scalars().all()}
+        rows = [(a, source_map.get(a.source_id)) for a in articles]
         selected = self._select_articles_for_batch(rows, limit)
 
         for article, source in selected:
