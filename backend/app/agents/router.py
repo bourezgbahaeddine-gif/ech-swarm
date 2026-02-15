@@ -394,8 +394,12 @@ class RouterAgent:
             if re.search(pattern, text_lower):
                 return True, "game_or_puzzle_noise"
 
-        # Common low-value aggregator stream that floods newsroom
-        if (article.source_name or "").lower().startswith("google news") and not self._has_local_signal(text_lower, article.source_name or ""):
+        # Common low-value aggregator streams that flood newsroom
+        source_lower = (article.source_name or "").lower()
+        if (
+            ("google news" in source_lower or "news.google.com" in source_lower)
+            and not self._has_local_signal(text_lower, article.source_name or "")
+        ):
             return True, "global_aggregator_non_local"
 
         return False, ""
