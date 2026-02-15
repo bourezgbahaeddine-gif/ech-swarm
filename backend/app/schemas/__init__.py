@@ -204,6 +204,8 @@ class TrendAlert(BaseModel):
     keyword: str
     source_signals: list[str] = []
     strength: int = Field(5, ge=1, le=10)
+    category: str = "general"
+    geography: str = "DZ"
     reason: Optional[str] = None
     suggested_angles: list[str] = []
     archive_matches: list[str] = []

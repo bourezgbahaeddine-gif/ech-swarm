@@ -99,6 +99,8 @@ export interface TrendAlert {
     keyword: string;
     source_signals: string[];
     strength: number;
+    category: string;
+    geography: string;
     reason: string | null;
     suggested_angles: string[];
     archive_matches: string[];
@@ -204,7 +206,10 @@ export const dashboardApi = {
     triggerScout: () => api.post('/dashboard/agents/scout/run'),
     triggerRouter: () => api.post('/dashboard/agents/router/run'),
     triggerScribe: () => api.post('/dashboard/agents/scribe/run'),
-    triggerTrends: () => api.post<{ alerts: TrendAlert[] }>('/dashboard/agents/trends/scan'),
+    triggerTrends: (params?: { geo?: string; category?: string; limit?: number; wait?: boolean }) =>
+        api.post<{ message: string; alerts?: TrendAlert[] }>('/dashboard/agents/trends/scan', null, { params }),
+    latestTrends: (params?: { geo?: string; category?: string }) =>
+        api.get<{ alerts: TrendAlert[] }>('/dashboard/agents/trends/latest', { params }),
 };
 
 // ── Auth API ──

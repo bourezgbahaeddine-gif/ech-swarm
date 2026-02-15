@@ -5,7 +5,7 @@ Dashboard stats, agent triggers, and pipeline monitoring.
 """
 
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Query
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -149,9 +149,9 @@ async def _run_scribe_pipeline():
         logger.info("scribe_pipeline_completed", stats=stats)
 
 
-async def _run_trends_scan():
-    alerts = await trend_radar_agent.scan()
-    logger.info("trends_scan_completed", alerts_count=len(alerts))
+async def _run_trends_scan(geo: str, category: str, limit: int):
+    alerts = await trend_radar_agent.scan(geo=geo, category=category, limit=limit)
+    logger.info("trends_scan_completed", alerts_count=len(alerts), geo=geo, category=category, limit=limit)
 
 
 def _assert_agent_control_permission(user: User) -> None:
@@ -195,12 +195,32 @@ async def trigger_scribe(
 @router.post("/agents/trends/scan")
 async def trigger_trend_scan(
     background_tasks: BackgroundTasks,
+    geo: str = Query("DZ", min_length=2, max_length=16),
+    category: str = Query("all", min_length=2, max_length=32),
+    limit: int = Query(12, ge=1, le=30),
+    wait: bool = Query(False),
     current_user: User = Depends(get_current_user),
 ):
-    """Queue Trend Radar scan in background and return immediately."""
+    """Run Trend Radar scan (sync when wait=true, async otherwise)."""
     _assert_agent_control_permission(current_user)
-    background_tasks.add_task(_run_trends_scan)
+    if wait:
+        alerts = await trend_radar_agent.scan(geo=geo, category=category, limit=limit)
+        return {"message": "Trend scan completed", "alerts": [a.model_dump(mode="json") for a in alerts]}
+
+    background_tasks.add_task(_run_trends_scan, geo.upper(), category.lower(), limit)
     return {"message": "Trend scan queued"}
+
+
+@router.get("/agents/trends/latest")
+async def get_latest_trend_scan(
+    geo: str = Query("DZ", min_length=2, max_length=16),
+    category: str = Query("all", min_length=2, max_length=32),
+    current_user: User = Depends(get_current_user),
+):
+    """Fetch latest cached trend scan payload for a geography/category."""
+    _assert_agent_control_permission(current_user)
+    payload = await cache_service.get_json(f"trends:last:{geo.upper()}:{category.lower()}")
+    return payload or {"alerts": []}
 
 
 @router.get("/agents/status")
