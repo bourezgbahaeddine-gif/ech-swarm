@@ -236,7 +236,11 @@ class RouterAgent:
         has_local_signal = self._has_local_signal(text_lower, article.source_name or "")
         quality_ok, quality_reason = self._editorial_quality_gate(article, text_lower, has_local_signal)
         if not quality_ok:
-            article.status = NewsStatus.ARCHIVED
+            # Keep Google News items for monitoring, but do not push them to editorial candidates.
+            if self._is_google_aggregator(article.source_name or ""):
+                article.status = NewsStatus.CLASSIFIED
+            else:
+                article.status = NewsStatus.ARCHIVED
             article.importance_score = 0
             article.rejection_reason = f"auto_filtered:{quality_reason}"
             return
@@ -248,6 +252,16 @@ class RouterAgent:
         )
         if settings.editorial_require_local_signal and not (article.is_breaking or article.urgency == UrgencyLevel.BREAKING):
             is_candidate = is_candidate and has_local_signal
+
+        # Google News is used as discovery/monitoring input:
+        # do not escalate to candidate unless it is clearly local or breaking.
+        if (
+            self._is_google_aggregator(article.source_name or "")
+            and not has_local_signal
+            and not article.is_breaking
+            and article.urgency != UrgencyLevel.BREAKING
+        ):
+            is_candidate = False
 
         if is_candidate:
             article.status = NewsStatus.CANDIDATE
@@ -394,14 +408,6 @@ class RouterAgent:
             if re.search(pattern, text_lower):
                 return True, "game_or_puzzle_noise"
 
-        # Common low-value aggregator streams that flood newsroom
-        source_lower = (article.source_name or "").lower()
-        if (
-            ("google news" in source_lower or "news.google.com" in source_lower)
-            and not self._has_local_signal(text_lower, article.source_name or "")
-        ):
-            return True, "global_aggregator_non_local"
-
         return False, ""
 
     def _is_arabic_source(self, article: Article, source: Optional[Source]) -> bool:
@@ -428,6 +434,11 @@ class RouterAgent:
             return False, "weak_headline"
 
         return True, ""
+
+    @staticmethod
+    def _is_google_aggregator(source_name: str) -> bool:
+        source_lower = (source_name or "").lower()
+        return "google news" in source_lower or "news.google.com" in source_lower
 
 
 # Singleton
