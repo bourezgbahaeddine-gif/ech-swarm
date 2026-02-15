@@ -8,6 +8,7 @@ RSS burst detection, and competitor feeds.
 from collections import Counter
 from datetime import timedelta
 from typing import Optional
+import re
 
 import aiohttp
 import feedparser
@@ -51,6 +52,18 @@ GEO_LABELS: dict[str, str] = {
     "US": "الولايات المتحدة",
     "GB": "المملكة المتحدة",
     "GLOBAL": "دولي",
+}
+
+WEAK_TERMS = {
+    # Arabic
+    "رئيس", "الجمهورية", "يستقبل", "قال", "أكد", "حول", "بعد", "قبل", "اليوم", "غدا", "أمس", "هذا", "هذه", "هناك",
+    "الذي", "التي", "ذلك", "تلك", "على", "إلى", "من", "في", "عن", "مع", "ضد", "خلال", "ضمن", "عند", "حتى",
+    # French
+    "avec", "sans", "pour", "dans", "sur", "apres", "avant", "selon", "plus", "moins", "tout", "cette", "ceci",
+    "president", "republique",
+    # English
+    "the", "a", "an", "and", "or", "to", "of", "in", "on", "for", "with", "from", "by", "at", "as",
+    "today", "yesterday", "tomorrow", "says", "said", "president",
 }
 
 
@@ -131,8 +144,7 @@ class TrendRadarAgent:
                             for entry in feed.entries[:12]:
                                 title = normalize_text(entry.get("title", ""))
                                 if title:
-                                    words = title.split()
-                                    keywords.extend([w for w in words if len(w) > 3])
+                                    keywords.extend(self._extract_candidate_terms(title))
                     except Exception:
                         continue
         except Exception as e:
@@ -147,9 +159,14 @@ class TrendRadarAgent:
         word_counts = Counter()
         for title in recent_titles:
             normalized = normalize_text(title)
-            words = [w for w in normalized.split() if len(w) > 3]
-            word_counts.update(words)
-        return [word for word, count in word_counts.items() if count >= 3]
+            word_counts.update(self._extract_candidate_terms(normalized))
+        # Keep bursts that repeat enough to be meaningful
+        bursts: list[str] = []
+        for term, count in word_counts.items():
+            threshold = 2 if " " in term else 3
+            if count >= threshold and not self._is_weak_term(term):
+                bursts.append(term)
+        return bursts
 
     def _cross_validate(
         self,
@@ -169,12 +186,16 @@ class TrendRadarAgent:
         for trend in all_google:
             if not trend or len(trend) < 3:
                 continue
+            trend = normalize_text(trend)
+            if self._is_weak_term(trend):
+                continue
             sources = ["google_trends"]
-            trend_words = trend.split()
+            trend_terms = self._extract_candidate_terms(trend)
+            trend_terms.append(trend)
 
-            if any(word in competitor_set for word in trend_words):
+            if any(term in competitor_set for term in trend_terms):
                 sources.append("competitors")
-            if any(word in burst_set for word in trend_words):
+            if any(term in burst_set for term in trend_terms):
                 sources.append("rss_burst")
 
             if len(sources) < 2:
@@ -195,6 +216,8 @@ class TrendRadarAgent:
             )
 
         for burst_word in rss_bursts:
+            if self._is_weak_term(burst_word):
+                continue
             if burst_word in competitor_set and burst_word not in [v["keyword"] for v in verified]:
                 category = self._categorize_keyword(burst_word)
                 if category_filter != "all" and category != category_filter:
@@ -209,8 +232,71 @@ class TrendRadarAgent:
                     }
                 )
 
+        verified = self._merge_similar_trends(verified)
         verified.sort(key=lambda x: x["strength"], reverse=True)
         return verified
+
+    def _extract_candidate_terms(self, text: str) -> list[str]:
+        normalized = normalize_text(text)
+        tokens = [
+            t for t in re.split(r"[^\w\u0600-\u06FF]+", normalized)
+            if t and len(t) > 2 and not t.isdigit() and t not in WEAK_TERMS
+        ]
+        terms: list[str] = []
+        terms.extend(tokens)
+        # bi-grams and tri-grams improve editorial quality vs single tokens
+        for n in (2, 3):
+            for i in range(0, max(0, len(tokens) - n + 1)):
+                phrase = " ".join(tokens[i:i + n]).strip()
+                if phrase and not self._is_weak_term(phrase):
+                    terms.append(phrase)
+        return list(dict.fromkeys(terms))
+
+    def _is_weak_term(self, term: str) -> bool:
+        t = normalize_text(term).strip()
+        if not t:
+            return True
+        if t in WEAK_TERMS:
+            return True
+        if t.isdigit():
+            return True
+        if re.fullmatch(r"\d{2,4}", t):
+            return True
+        if len(t) <= 2:
+            return True
+        # terms made only of very common words are weak
+        parts = [p for p in t.split() if p]
+        if parts and all(p in WEAK_TERMS for p in parts):
+            return True
+        return False
+
+    def _merge_similar_trends(self, trends: list[dict]) -> list[dict]:
+        merged: list[dict] = []
+        for trend in trends:
+            trend_tokens = set(self._extract_candidate_terms(trend["keyword"]))
+            if not trend_tokens:
+                continue
+            matched_idx = None
+            for idx, current in enumerate(merged):
+                current_tokens = set(self._extract_candidate_terms(current["keyword"]))
+                if not current_tokens:
+                    continue
+                inter = len(trend_tokens & current_tokens)
+                union = len(trend_tokens | current_tokens)
+                jaccard = inter / union if union else 0
+                if jaccard >= 0.6 or trend["keyword"] in current["keyword"] or current["keyword"] in trend["keyword"]:
+                    matched_idx = idx
+                    break
+            if matched_idx is None:
+                merged.append(trend)
+            else:
+                target = merged[matched_idx]
+                target["strength"] = min(10, max(target["strength"], trend["strength"]) + 1)
+                target["source_signals"] = sorted(set(target["source_signals"]) | set(trend["source_signals"]))
+                # keep richer keyword phrase
+                if len(trend["keyword"]) > len(target["keyword"]):
+                    target["keyword"] = trend["keyword"]
+        return merged
 
     def _categorize_keyword(self, keyword: str) -> str:
         normalized = normalize_text(keyword)
@@ -284,7 +370,9 @@ Return strict JSON:
 
             data = json.loads(result_text)
             await cache_service.increment_counter("ai_calls_today")
-            if not data.get("relevant", True):
+            angles = data.get("angles", []) or []
+            reason = (data.get("reason") or "").strip()
+            if (not data.get("relevant", True)) or (not reason and len(angles) < 2):
                 return None
 
             alert = TrendAlert(
@@ -293,23 +381,15 @@ Return strict JSON:
                 strength=trend_data["strength"],
                 category=trend_data.get("category", "general"),
                 geography=trend_data.get("geography", geo),
-                reason=data.get("reason", ""),
-                suggested_angles=data.get("angles", []),
+                reason=reason,
+                suggested_angles=angles,
                 archive_matches=data.get("archive_keywords", []),
             )
             await cache_service.set_json(cache_key, alert.model_dump(mode="json"), ttl=timedelta(minutes=30))
             return alert
         except Exception as e:
             logger.warning("trend_analysis_error", keyword=keyword, error=str(e))
-            fallback = TrendAlert(
-                keyword=keyword,
-                source_signals=trend_data["source_signals"],
-                strength=trend_data["strength"],
-                category=trend_data.get("category", "general"),
-                geography=trend_data.get("geography", geo),
-            )
-            await cache_service.set_json(cache_key, fallback.model_dump(mode="json"), ttl=timedelta(minutes=15))
-            return fallback
+            return None
 
     async def _send_alert(self, alert: TrendAlert):
         """Send trend alert to editorial team."""
