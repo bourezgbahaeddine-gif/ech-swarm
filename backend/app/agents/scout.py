@@ -449,14 +449,16 @@ class ScoutAgent:
 
         # ── Normalize & Store ──
 
-        # Parse publication date
-        published_at = None
-        if not isinstance(entry, dict):
-            if hasattr(entry, "published_parsed") and entry.published_parsed:
-                try:
-                    published_at = datetime(*entry.published_parsed[:6])
-                except (ValueError, TypeError):
-                    pass
+        # Parse publication date (works for FeedParserDict and objects)
+        published_at = self._extract_entry_datetime(entry)
+
+        # Freshness gate: skip very old items to avoid flooding newsroom with backlog.
+        if published_at:
+            max_age = settings.scout_max_article_age_hours
+            age_hours = (datetime.utcnow() - published_at).total_seconds() / 3600.0
+            if age_hours > max_age:
+                stats["duplicates"] += 1
+                return
 
         # Get content
         content = ""
@@ -512,6 +514,33 @@ class ScoutAgent:
                 logger.info("duplicate_detected_on_insert", unique_hash=unique_hash)
             else:
                 raise e
+
+    @staticmethod
+    def _extract_entry_datetime(entry) -> Optional[datetime]:
+        """
+        Parse publication datetime from feed entries across common feedparser shapes.
+        """
+        candidates = []
+        if isinstance(entry, dict):
+            candidates.extend([
+                entry.get("published_parsed"),
+                entry.get("updated_parsed"),
+                entry.get("created_parsed"),
+            ])
+        else:
+            candidates.extend([
+                getattr(entry, "published_parsed", None),
+                getattr(entry, "updated_parsed", None),
+                getattr(entry, "created_parsed", None),
+            ])
+
+        for value in candidates:
+            if value:
+                try:
+                    return datetime(*value[:6])
+                except (ValueError, TypeError):
+                    continue
+        return None
 
     async def fetch_single_source(self, db: AsyncSession, source_id: int) -> dict:
         """Fetch a single source on-demand."""

@@ -99,6 +99,7 @@ class Settings(BaseSettings):
     scout_batch_size: int = 8
     scout_concurrency: int = 8
     scout_max_new_per_run: int = 250
+    scout_max_article_age_hours: int = 72
 
     # ── TTS ──
     tts_voice: str = "ar-DZ-IsmaelNeural"
