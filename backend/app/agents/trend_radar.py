@@ -81,8 +81,14 @@ class TrendRadarAgent:
         limit = max(1, min(limit, 30))
         try:
             google_trends = await self._fetch_google_trends(geo)
-            competitor_keywords = await self._fetch_competitor_keywords()
-            rss_bursts = await self._detect_rss_bursts()
+            # Important: competitor feeds + RSS bursts are currently Algeria-centric.
+            # We must not pollute non-DZ scans with DZ signals.
+            if geo == "DZ":
+                competitor_keywords = await self._fetch_competitor_keywords()
+                rss_bursts = await self._detect_rss_bursts()
+            else:
+                competitor_keywords = []
+                rss_bursts = []
 
             verified_trends = self._cross_validate(
                 google_trends,
@@ -232,6 +238,9 @@ class TrendRadarAgent:
             trend = normalize_text(trend)
             if self._is_weak_term(trend):
                 continue
+            detected_geo = self._detect_geography(trend, geo)
+            if not self._is_geo_compatible(scan_geo=geo, detected_geo=detected_geo):
+                continue
             sources = ["google_trends"]
             trend_terms = self._extract_candidate_terms(trend)
             trend_terms.append(trend)
@@ -254,7 +263,7 @@ class TrendRadarAgent:
                     "source_signals": sources,
                     "strength": min(len(sources) * 3 + 2, 10),
                     "category": category,
-                    "geography": self._detect_geography(trend, geo),
+                    "geography": detected_geo,
                 }
             )
 
@@ -265,13 +274,16 @@ class TrendRadarAgent:
                 category = self._categorize_keyword(burst_word)
                 if category_filter != "all" and category != category_filter:
                     continue
+                detected_geo = self._detect_geography(burst_word, geo)
+                if not self._is_geo_compatible(scan_geo=geo, detected_geo=detected_geo):
+                    continue
                 verified.append(
                     {
                         "keyword": burst_word,
                         "source_signals": ["rss_burst", "competitors"],
                         "strength": 6,
                         "category": category,
-                        "geography": self._detect_geography(burst_word, geo),
+                        "geography": detected_geo,
                     }
                 )
 
@@ -365,6 +377,16 @@ class TrendRadarAgent:
         if "europe" in normalized or "أوروبا" in normalized:
             return "GLOBAL"
         return fallback_geo
+
+    def _is_geo_compatible(self, scan_geo: str, detected_geo: str) -> bool:
+        """Allow only trends that belong to selected geography (or global umbrella)."""
+        if scan_geo == "GLOBAL":
+            return True
+        if detected_geo == scan_geo:
+            return True
+        if detected_geo == "GLOBAL":
+            return True
+        return False
 
     async def _analyze_trend(self, trend_data: dict, geo: str) -> Optional[TrendAlert]:
         """Use AI to analyze a verified trend and suggest editorial angles."""
