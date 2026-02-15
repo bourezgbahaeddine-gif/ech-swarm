@@ -54,6 +54,17 @@ GEO_LABELS: dict[str, str] = {
     "GLOBAL": "دولي",
 }
 
+GEO_NEWS_RSS: dict[str, str] = {
+    "DZ": "https://news.google.com/rss?hl=ar&gl=DZ&ceid=DZ:ar",
+    "FR": "https://news.google.com/rss?hl=fr&gl=FR&ceid=FR:fr",
+    "MA": "https://news.google.com/rss?hl=ar&gl=MA&ceid=MA:ar",
+    "TN": "https://news.google.com/rss?hl=ar&gl=TN&ceid=TN:ar",
+    "EG": "https://news.google.com/rss?hl=ar&gl=EG&ceid=EG:ar",
+    "US": "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en",
+    "GB": "https://news.google.com/rss?hl=en-GB&gl=GB&ceid=GB:en",
+    "GLOBAL": "https://news.google.com/rss?hl=en&gl=US&ceid=US:en",
+}
+
 # For non-DZ scans, we relax cross-verification by providing
 # geo-scoped fallback candidates from Google Trends itself.
 NON_DZ_MIN_TRENDS = 6
@@ -81,6 +92,9 @@ class TrendRadarAgent:
         limit = max(1, min(limit, 30))
         try:
             google_trends = await self._fetch_google_trends(geo)
+            if not google_trends:
+                # Fallback source to avoid empty scans for non-DZ geos.
+                google_trends = await self._fetch_geo_news_trends(geo)
             # Important: competitor feeds + RSS bursts are currently Algeria-centric.
             # We must not pollute non-DZ scans with DZ signals.
             if geo == "DZ":
@@ -147,6 +161,26 @@ class TrendRadarAgent:
             return alerts
         except Exception as e:
             logger.error("trend_scan_error", geo=geo, category=category, error=str(e))
+            return []
+
+    async def _fetch_geo_news_trends(self, geo: str) -> list[str]:
+        """Fallback: fetch regional headlines from Google News RSS."""
+        url = GEO_NEWS_RSS.get(geo, GEO_NEWS_RSS["GLOBAL"])
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    if resp.status != 200:
+                        return []
+                    content = await resp.text()
+                    feed = feedparser.parse(content)
+                    terms: list[str] = []
+                    for entry in feed.entries[:30]:
+                        title = normalize_text(entry.get("title", ""))
+                        if title:
+                            terms.extend(self._extract_candidate_terms(title))
+                    return list(dict.fromkeys(terms))
+        except Exception as e:
+            logger.warning("geo_news_fallback_error", geo=geo, error=str(e))
             return []
 
     def _expand_non_dz_fallback(
