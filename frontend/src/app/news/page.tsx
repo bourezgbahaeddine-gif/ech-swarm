@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { newsApi, dashboardApi, editorialApi, type ArticleBrief } from '@/lib/api';
 import { cn, formatRelativeTime, getStatusColor, getCategoryLabel, truncate } from '@/lib/utils';
 import { useAuth } from '@/lib/auth';
@@ -16,11 +16,12 @@ import {
 export default function NewsPage() {
     const queryClient = useQueryClient();
     const router = useRouter();
+    const searchParams = useSearchParams();
     const { user } = useAuth();
     const [page, setPage] = useState(1);
     const [status, setStatus] = useState<string>('');
     const [category, setCategory] = useState<string>('');
-    const [search, setSearch] = useState('');
+    const [search, setSearch] = useState(searchParams.get('q') || '');
     const [debouncedSearch, setDebouncedSearch] = useState('');
     const [isBreaking, setIsBreaking] = useState<boolean | null>(null);
     const [selectedArticle, setSelectedArticle] = useState<number | null>(null);
@@ -37,6 +38,14 @@ export default function NewsPage() {
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [infoMessage, setInfoMessage] = useState<string | null>(null);
     const editorName = user?.full_name_ar || 'رئيس التحرير';
+
+    useEffect(() => {
+        const qp = searchParams.get('q') || '';
+        if (qp !== search) {
+            setSearch(qp);
+            setPage(1);
+        }
+    }, [searchParams, search]);
 
     useEffect(() => {
         const t = setTimeout(() => setDebouncedSearch(search.trim()), 400);

@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { dashboardApi, type TrendAlert } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -15,6 +15,8 @@ import {
     Radio,
     Globe2,
     Tags,
+    Copy,
+    ExternalLink,
 } from 'lucide-react';
 
 const GEO_OPTIONS = [
@@ -64,6 +66,14 @@ export default function TrendsPage() {
     const [geo, setGeo] = useState('DZ');
     const [category, setCategory] = useState('all');
     const [limit, setLimit] = useState(12);
+    const [copiedKeyword, setCopiedKeyword] = useState('');
+
+    const latestMutation = useMutation({
+        mutationFn: () => dashboardApi.latestTrends({ geo, category }),
+        onSuccess: (response) => {
+            setTrends(response.data?.alerts || []);
+        },
+    });
 
     const scanMutation = useMutation({
         mutationFn: () => dashboardApi.triggerTrends({ geo, category, limit, wait: true }),
@@ -73,25 +83,56 @@ export default function TrendsPage() {
         },
     });
 
+    useEffect(() => {
+        latestMutation.mutate();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [geo, category]);
+
+    const scoredTrends = useMemo(() => {
+        return [...trends]
+            .map((trend) => {
+                let editorialScore = trend.strength;
+                if (trend.geography === 'DZ') editorialScore += 2;
+                if (trend.category === 'politics' || trend.category === 'economy') editorialScore += 1;
+                return { ...trend, editorialScore: Math.min(editorialScore, 10) };
+            })
+            .sort((a, b) => b.editorialScore - a.editorialScore);
+    }, [trends]);
+
     const groupedByCategory = useMemo(() => {
         const buckets = new Map<string, TrendAlert[]>();
-        for (const item of trends) {
+        for (const item of scoredTrends) {
             const key = item.category || 'general';
             const prev = buckets.get(key) || [];
             prev.push(item);
             buckets.set(key, prev);
         }
         return Array.from(buckets.entries()).sort((a, b) => b[1].length - a[1].length);
-    }, [trends]);
+    }, [scoredTrends]);
 
     const groupedByGeo = useMemo(() => {
         const buckets = new Map<string, number>();
-        for (const item of trends) {
+        for (const item of scoredTrends) {
             const key = item.geography || 'GLOBAL';
             buckets.set(key, (buckets.get(key) || 0) + 1);
         }
         return Array.from(buckets.entries()).sort((a, b) => b[1] - a[1]);
-    }, [trends]);
+    }, [scoredTrends]);
+
+    const copyEditorialBrief = async (trend: TrendAlert & { editorialScore?: number }) => {
+        const text = [
+            `ترند: ${trend.keyword}`,
+            `أولوية التحرير: ${trend.editorialScore ?? trend.strength}/10`,
+            `التصنيف: ${CATEGORY_LABEL[trend.category] || trend.category}`,
+            `الجغرافيا: ${GEO_LABEL[trend.geography] || trend.geography}`,
+            `السبب: ${trend.reason || '—'}`,
+            `زوايا: ${(trend.suggested_angles || []).slice(0, 2).join(' | ') || '—'}`,
+            `أرشيف: ${(trend.archive_matches || []).join(', ') || '—'}`,
+        ].join('\n');
+        await navigator.clipboard.writeText(text);
+        setCopiedKeyword(trend.keyword);
+        setTimeout(() => setCopiedKeyword(''), 1500);
+    };
 
     return (
         <div className="space-y-6">
@@ -172,7 +213,7 @@ export default function TrendsPage() {
                 </div>
                 <div className="rounded-xl border border-white/10 bg-black/20 p-3 flex items-center justify-between">
                     <span className="text-xs text-gray-400">آخر مسح</span>
-                    <span className="text-sm text-emerald-300 font-semibold">{trends.length}</span>
+                    <span className="text-sm text-emerald-300 font-semibold">{scoredTrends.length}</span>
                 </div>
             </div>
 
@@ -200,7 +241,7 @@ export default function TrendsPage() {
                 </div>
             </div>
 
-            {trends.length > 0 && (
+            {scoredTrends.length > 0 && (
                 <>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <div className="rounded-2xl border border-white/10 bg-gray-900/40 p-4">
@@ -232,7 +273,7 @@ export default function TrendsPage() {
                     </div>
 
                     <div className="space-y-3">
-                        {trends.map((trend, index) => (
+                        {scoredTrends.map((trend, index) => (
                             <div
                                 key={`${trend.keyword}-${index}`}
                                 className="rounded-2xl bg-gradient-to-br from-gray-800/40 to-gray-900/60 border border-white/10 hover:border-emerald-500/30 transition-all p-5"
@@ -282,6 +323,26 @@ export default function TrendsPage() {
                                     </div>
                                 </div>
 
+                                <div className="mb-3 flex flex-wrap items-center gap-2">
+                                    <span className="px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-[10px] text-amber-300">
+                                        أولوية التحرير: {trend.editorialScore}/10
+                                    </span>
+                                    <a
+                                        href={`/news?q=${encodeURIComponent(trend.keyword)}`}
+                                        className="px-2 py-1 rounded-lg text-[11px] bg-white/10 border border-white/20 text-gray-200 inline-flex items-center gap-1"
+                                    >
+                                        <ExternalLink className="w-3 h-3" />
+                                        فتح في الأخبار
+                                    </a>
+                                    <button
+                                        onClick={() => copyEditorialBrief(trend)}
+                                        className="px-2 py-1 rounded-lg text-[11px] bg-cyan-500/15 border border-cyan-500/30 text-cyan-200 inline-flex items-center gap-1"
+                                    >
+                                        <Copy className="w-3 h-3" />
+                                        {copiedKeyword === trend.keyword ? 'تم نسخ الموجز' : 'نسخ موجز التحرير'}
+                                    </button>
+                                </div>
+
                                 {trend.reason && (
                                     <p className="text-sm text-gray-300 mb-3 leading-relaxed" dir="rtl">
                                         {trend.reason}
@@ -321,7 +382,7 @@ export default function TrendsPage() {
                 </>
             )}
 
-            {!scanMutation.isPending && trends.length === 0 && (
+            {!scanMutation.isPending && scoredTrends.length === 0 && (
                 <div className="text-center py-20 rounded-2xl bg-gray-800/20 border border-white/10">
                     <Radar className="w-16 h-16 text-gray-700 mx-auto mb-4" />
                     <h3 className="text-lg font-semibold text-white">اضغط "مسح الآن" لبدء الرادار</h3>

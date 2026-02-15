@@ -104,7 +104,7 @@ class TrendRadarAgent:
     async def _fetch_google_trends(self, geo: str) -> list[str]:
         """Fetch trending searches from Google Trends."""
         try:
-            params = {"geo": geo}
+            params = {"geo": geo} if geo != "GLOBAL" else {}
             async with aiohttp.ClientSession() as session:
                 async with session.get(GOOGLE_TRENDS_URL, params=params, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                     if resp.status != 200:
@@ -241,9 +241,12 @@ class TrendRadarAgent:
         """Use AI to analyze a verified trend and suggest editorial angles."""
         keyword = trend_data["keyword"]
         cache_key = f"trend:{geo}:{keyword}"
-        cached = await cache_service.get(cache_key)
+        cached = await cache_service.get_json(cache_key)
         if cached:
-            return None
+            try:
+                return TrendAlert.model_validate(cached)
+            except Exception:
+                pass
 
         try:
             gemini = ai_service._get_gemini()
@@ -284,8 +287,7 @@ Return strict JSON:
             if not data.get("relevant", True):
                 return None
 
-            await cache_service.set(cache_key, "analyzed", ttl=timedelta(minutes=30))
-            return TrendAlert(
+            alert = TrendAlert(
                 keyword=keyword,
                 source_signals=trend_data["source_signals"],
                 strength=trend_data["strength"],
@@ -295,15 +297,19 @@ Return strict JSON:
                 suggested_angles=data.get("angles", []),
                 archive_matches=data.get("archive_keywords", []),
             )
+            await cache_service.set_json(cache_key, alert.model_dump(mode="json"), ttl=timedelta(minutes=30))
+            return alert
         except Exception as e:
             logger.warning("trend_analysis_error", keyword=keyword, error=str(e))
-            return TrendAlert(
+            fallback = TrendAlert(
                 keyword=keyword,
                 source_signals=trend_data["source_signals"],
                 strength=trend_data["strength"],
                 category=trend_data.get("category", "general"),
                 geography=trend_data.get("geography", geo),
             )
+            await cache_service.set_json(cache_key, fallback.model_dump(mode="json"), ttl=timedelta(minutes=15))
+            return fallback
 
     async def _send_alert(self, alert: TrendAlert):
         """Send trend alert to editorial team."""
