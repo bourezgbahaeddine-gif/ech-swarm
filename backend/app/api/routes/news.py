@@ -22,6 +22,16 @@ from app.schemas import ArticleResponse, ArticleBrief, PaginatedResponse
 router = APIRouter(prefix="/news", tags=["News"])
 settings = get_settings()
 TOKEN_RE = re.compile(r"[\u0600-\u06FFa-zA-Z0-9]{2,}")
+SPACE_RE = re.compile(r"\s+")
+STOPWORDS = {
+    # Arabic
+    "في", "من", "على", "الى", "إلى", "عن", "مع", "هذا", "هذه", "ذلك", "تلك",
+    "بعد", "قبل", "بين", "حول", "حتى", "أو", "و", "التي", "الذي", "الذين",
+    # French
+    "les", "des", "dans", "avec", "pour", "sur", "une", "un", "du", "de", "et",
+    # English
+    "the", "and", "for", "with", "from", "into", "over", "under", "that", "this",
+}
 
 
 def _query_embedding(text: str, dim: int = 256) -> list[float]:
@@ -40,6 +50,12 @@ def _query_embedding(text: str, dim: int = 256) -> list[float]:
 
 def _tokenize(text: str) -> set[str]:
     return {m.group(0).lower() for m in TOKEN_RE.finditer(text or "")}
+
+
+def _normalize_text(text: str | None) -> str:
+    if not text:
+        return ""
+    return SPACE_RE.sub(" ", (text or "").strip().lower())
 
 
 def _canonical_url(url: str | None) -> str:
@@ -211,13 +227,16 @@ async def semantic_search(
     status: Optional[str] = None,
     mode: str = Query("editorial", pattern="^(editorial|semantic)$"),
     include_aggregators: bool = Query(False),
+    strict_tokens: bool = Query(True),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Hybrid retrieval on vectorized title/summary with editorial ranking.
     """
     query_vec = _query_embedding(q, 256)
-    query_tokens = _tokenize(q)
+    query_tokens_raw = _tokenize(q)
+    query_tokens = {t for t in query_tokens_raw if t not in STOPWORDS} or query_tokens_raw
+    query_norm = _normalize_text(q)
     pool_size = max(limit * 25, 120)
 
     stmt = (
@@ -250,6 +269,12 @@ async def semantic_search(
 
     now = datetime.utcnow()
     ranked: list[tuple[float, Article]] = []
+    required_overlap = 0
+    if mode == "editorial" and strict_tokens and len(query_tokens) >= 2:
+        # In editorial mode, lexical anchoring should dominate because newsrooms
+        # need directly relevant hits, not loose semantic neighbors.
+        required_overlap = len(query_tokens) if len(query_tokens) <= 3 else max(2, math.ceil(len(query_tokens) * 0.75))
+
     for article, dist in best_by_article.values():
         if mode == "editorial" and not include_aggregators and _is_aggregator_source(article.source_name):
             continue
@@ -258,13 +283,19 @@ async def semantic_search(
         semantic = 1.0 - max(0.0, min(dist, 2.0)) / 2.0
 
         # lexical overlap
-        text_tokens = _tokenize(" ".join([
+        combined_text = " ".join([
             article.title_ar or "",
             article.original_title or "",
             article.summary or "",
-            article.source_name or "",
-        ]))
-        overlap = (len(query_tokens & text_tokens) / max(1, len(query_tokens))) if query_tokens else 0.0
+        ])
+        text_tokens = _tokenize(combined_text)
+        overlap_count = len(query_tokens & text_tokens)
+        overlap = (overlap_count / max(1, len(query_tokens))) if query_tokens else 0.0
+        phrase_hit = 1.0 if query_norm and query_norm in _normalize_text(combined_text) else 0.0
+
+        # Editorial strict mode: enforce lexical anchoring to query tokens.
+        if required_overlap and overlap_count < required_overlap:
+            continue
 
         # newsroom priors
         trust = _source_trust(article.source_name)
@@ -275,12 +306,13 @@ async def semantic_search(
 
         if mode == "editorial":
             score = (
-                0.40 * semantic
-                + 0.22 * overlap
-                + 0.16 * recency
-                + 0.12 * trust
-                + 0.07 * importance
-                + 0.03 * breaking
+                0.15 * semantic
+                + 0.55 * overlap
+                + 0.12 * phrase_hit
+                + 0.08 * recency
+                + 0.05 * trust
+                + 0.03 * importance
+                + 0.02 * breaking
             )
         else:
             score = (
