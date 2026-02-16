@@ -39,6 +39,11 @@ SEQUENCE_TERMS = {"تأجيل", "استكمال", "ردود", "متابعة", "u
 IMPACT_TERMS = {"تأثير", "انعكاس", "أسعار", "تضخم", "impact", "effet", "prix", "inflation"}
 CONTRAST_TERMS = {"نفي", "تكذيب", "ينفي", "dément", "denies", "refute", "démenti"}
 
+DUPLICATE_SCORE_THRESHOLD = 0.84
+CLUSTER_SCORE_THRESHOLD = 0.68
+ENTITY_CLUSTER_MIN_SHARED = 2
+ENTITY_CLUSTER_MAX_HOURS = 48
+
 TAXONOMY_WEIGHTS: dict[NewsCategory, dict[str, float]] = {
     NewsCategory.POLITICS: {
         "رئيس": 2.0, "وزارة": 1.8, "حكومة": 1.8, "برلمان": 1.7, "دبلوماس": 1.6,
@@ -243,6 +248,18 @@ class NewsKnowledgeService:
             await self._ensure_single_cluster(db, article, label=article.title_ar or article.original_title)
             return
 
+        candidate_ids = [cand_article.id for _, cand_article in candidates]
+        entity_rows = await db.execute(
+            select(ArticleEntity.article_id, ArticleEntity.entity).where(
+                ArticleEntity.article_id.in_([article.id] + candidate_ids)
+            )
+        )
+        entity_map: dict[int, set[str]] = defaultdict(set)
+        for row in entity_rows:
+            if row.entity:
+                entity_map[int(row.article_id)].add(str(row.entity).lower())
+
+        current_entities = entity_map.get(article.id, set())
         best_dup: tuple[Article, float] | None = None
         best_cluster: tuple[Article, float] | None = None
         relation_candidates: list[tuple[Article, float]] = []
@@ -253,14 +270,28 @@ class NewsKnowledgeService:
             jac = _jaccard(article_shingles, cand_shingles)
             score = 0.65 * simhash_score + 0.35 * jac
 
+            shared_entities = len(current_entities & entity_map.get(cand_article.id, set()))
+            age_hours = abs(
+                (
+                    (article.crawled_at or datetime.utcnow())
+                    - (cand_article.crawled_at or datetime.utcnow())
+                ).total_seconds()
+                / 3600.0
+            )
+            entity_cluster_signal = (
+                shared_entities >= ENTITY_CLUSTER_MIN_SHARED
+                and age_hours <= ENTITY_CLUSTER_MAX_HOURS
+            )
+
             if score >= 0.7:
                 relation_candidates.append((cand_article, score))
-            if score >= 0.90:
+            if score >= DUPLICATE_SCORE_THRESHOLD:
                 if best_dup is None or score > best_dup[1]:
                     best_dup = (cand_article, score)
-            elif score >= 0.75:
-                if best_cluster is None or score > best_cluster[1]:
-                    best_cluster = (cand_article, score)
+            elif score >= CLUSTER_SCORE_THRESHOLD or entity_cluster_signal:
+                cluster_score = max(score, CLUSTER_SCORE_THRESHOLD) if entity_cluster_signal else score
+                if best_cluster is None or cluster_score > best_cluster[1]:
+                    best_cluster = (cand_article, cluster_score)
 
         anchor = best_dup or best_cluster
         if anchor is not None:
