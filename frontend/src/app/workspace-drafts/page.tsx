@@ -209,6 +209,21 @@ export default function WorkspaceDraftsPage() {
         setSelectedLanguage(hasArabic ? 'ar' : hasFrench ? 'fr' : 'en');
     }, [selected?.id]);
 
+    useEffect(() => {
+        if (!articleData?.data || !selected) return;
+        if (!workingTitle.trim()) {
+            setWorkingTitle(articleData.data.title_ar || articleData.data.original_title || '');
+        }
+        if (workingBody.trim().length < 80) {
+            setWorkingBody(
+                selected.body
+                || articleData.data.original_content
+                || articleData.data.summary
+                || '',
+            );
+        }
+    }, [articleData?.data?.id, selected?.id]);
+
     const cleanAiText = (raw: string) => {
         if (!raw) return '';
         let t = raw.trim();
@@ -221,26 +236,24 @@ export default function WorkspaceDraftsPage() {
     const wpPackage = useMemo(() => {
         const title = (workingTitle || selected?.title || '').trim();
         const body = (workingBody || '').trim();
-        const blocks = body
-            .split(/\n{2,}/)
-            .map((p) => p.trim())
-            .filter(Boolean)
-            .map((p) => `<p>${p}</p>`)
-            .join('\n\n');
-
-        return `<h1>${title}</h1>\n\n${blocks}\n\n<hr />\n<h3>بيانات SEO (إضافة يدوية)</h3>\n<p><strong>SEO Title:</strong> ${seoTitle || title}</p>\n<p><strong>Meta Description:</strong> ${seoDescription || '—'}</p>\n<p><strong>Focus Keywords:</strong> ${seoKeywords || '—'}</p>\n<p><strong>Image ALT:</strong> ${imageAlt || '—'}</p>`;
+        return [
+            `العنوان: ${title}`,
+            '',
+            'المتن الجاهز للنشر:',
+            body || '—',
+            '',
+            'بيانات SEO:',
+            `- SEO Title: ${seoTitle || title || '—'}`,
+            `- Meta Description: ${seoDescription || '—'}`,
+            `- Focus Keywords: ${seoKeywords || '—'}`,
+            `- Image ALT: ${imageAlt || '—'}`,
+        ].join('\n');
     }, [workingBody, workingTitle, selected?.title, seoTitle, seoDescription, seoKeywords, imageAlt]);
 
     const wpBodyOnlyPackage = useMemo(() => {
         const title = (workingTitle || selected?.title || '').trim();
         const body = (workingBody || '').trim();
-        const blocks = body
-            .split(/\n{2,}/)
-            .map((p) => p.trim())
-            .filter(Boolean)
-            .map((p) => `<p>${p}</p>`)
-            .join('\n\n');
-        return `<h1>${title}</h1>\n\n${blocks}`;
+        return [title, '', body].join('\n');
     }, [workingBody, workingTitle, selected?.title]);
 
     const seoManualPackage = useMemo(() => {
@@ -795,20 +808,37 @@ export default function WorkspaceDraftsPage() {
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                     <div className="rounded-xl border border-white/10 bg-black/20 p-3">
                                         <div className="flex items-center justify-between mb-2">
-                                            <h4 className="text-xs text-gray-400">آخر مخرجات AI</h4>
+                                            <h4 className="text-xs text-gray-400">آخر مخرجات AI (مبسطة)</h4>
                                             <button
-                                                onClick={() => copyText('ai_result', JSON.stringify(aiResult, null, 2), 'تم نسخ مخرجات AI')}
+                                                onClick={() => copyText('ai_result', [
+                                                    aiResult.rewrite ? `إعادة الصياغة:\n${aiResult.rewrite}` : '',
+                                                    aiResult.summary ? `ملخص السوشيال:\n${aiResult.summary}` : '',
+                                                    aiResult.proofread ? `التدقيق:\n${aiResult.proofread}` : '',
+                                                    aiResult.metadata ? `بيانات SEO:\n${aiResult.metadata}` : '',
+                                                    aiResult.keywords ? `الكلمات المفتاحية:\n${aiResult.keywords}` : '',
+                                                    aiResult.imagePrompt ? `برومبت الصورة:\n${aiResult.imagePrompt}` : '',
+                                                    aiResult.infographicPrompt ? `برومبت الإنفوغراف:\n${aiResult.infographicPrompt}` : '',
+                                                ].filter(Boolean).join('\n\n'), 'تم نسخ مخرجات AI')}
                                                 className="px-2 py-1 rounded-lg text-[10px] bg-white/10 text-gray-200"
                                             >
                                                 {lastCopiedKey === 'ai_result' ? 'تم النسخ' : 'نسخ'}
                                             </button>
                                         </div>
-                                        <pre className="whitespace-pre-wrap text-xs text-gray-200 max-h-56 overflow-auto" dir="rtl">
-                                            {JSON.stringify(aiResult, null, 2)}
-                                        </pre>
+                                        <div className="space-y-2 max-h-56 overflow-auto text-xs text-gray-200" dir="rtl">
+                                            {aiResult.rewrite && <div className="rounded-lg bg-white/5 p-2"><span className="text-emerald-300">إعادة الصياغة:</span> {aiResult.rewrite}</div>}
+                                            {aiResult.summary && <div className="rounded-lg bg-white/5 p-2"><span className="text-violet-300">ملخص السوشيال:</span> {aiResult.summary}</div>}
+                                            {aiResult.proofread && <div className="rounded-lg bg-white/5 p-2"><span className="text-sky-300">التدقيق:</span> {aiResult.proofread}</div>}
+                                            {aiResult.metadata && <div className="rounded-lg bg-white/5 p-2"><span className="text-fuchsia-300">SEO:</span> {aiResult.metadata}</div>}
+                                            {aiResult.keywords && <div className="rounded-lg bg-white/5 p-2"><span className="text-amber-300">الكلمات المفتاحية:</span> {aiResult.keywords}</div>}
+                                            {aiResult.imagePrompt && <div className="rounded-lg bg-white/5 p-2"><span className="text-cyan-300">Prompt صورة:</span> {aiResult.imagePrompt}</div>}
+                                            {aiResult.infographicPrompt && <div className="rounded-lg bg-white/5 p-2"><span className="text-rose-300">Prompt إنفوغراف:</span> {aiResult.infographicPrompt}</div>}
+                                            {!aiResult.rewrite && !aiResult.summary && !aiResult.proofread && !aiResult.metadata && !aiResult.keywords && !aiResult.imagePrompt && !aiResult.infographicPrompt && (
+                                                <div className="text-gray-500">لا توجد مخرجات بعد. شغّل حزمة الكاتب أو أدوات AI.</div>
+                                            )}
+                                        </div>
                                     </div>
                                     <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
-                                        <h4 className="text-xs text-gray-400">نسخة WordPress جاهزة للنسخ (متوافقة مع Gutenberg)</h4>
+                                        <h4 className="text-xs text-gray-400">نسخة نشر واضحة (بدون أكواد)</h4>
                                         <div className="flex flex-wrap gap-2">
                                             <button
                                                 onClick={() => copyText('wp_full', wpPackage, 'تم نسخ النسخة الكاملة للووردبريس')}
@@ -838,11 +868,18 @@ export default function WorkspaceDraftsPage() {
                             <div className="rounded-2xl border border-white/10 bg-gray-900/40 p-4">
                                 <h3 className="text-sm text-gray-200 mb-2 flex items-center gap-2">
                                     <Wand2 className="w-4 h-4 text-emerald-300" />
-                                    مرجع الخبر الأصلي
+                                    مواد المصدر للمساعدة التحريرية
                                 </h3>
                                 <p className="text-xs text-gray-400">المصدر: {articleData?.data?.source_name || '—'}</p>
                                 <p className="text-xs text-gray-400">الرابط: {articleData?.data?.original_url || '—'}</p>
-                                <p className="text-sm text-gray-200 mt-2" dir="rtl">{articleData?.data?.summary || articleData?.data?.original_title || '—'}</p>
+                                <p className="text-sm text-gray-200 mt-2" dir="rtl"><span className="text-gray-400">العنوان الأصلي:</span> {articleData?.data?.original_title || '—'}</p>
+                                <p className="text-sm text-gray-200 mt-2" dir="rtl"><span className="text-gray-400">الملخص:</span> {articleData?.data?.summary || '—'}</p>
+                                <div className="mt-2 rounded-xl bg-black/20 border border-white/10 p-3">
+                                    <p className="text-xs text-gray-400 mb-1">المحتوى الأصلي</p>
+                                    <p className="text-sm text-gray-200 whitespace-pre-wrap max-h-56 overflow-auto" dir="rtl">
+                                        {articleData?.data?.original_content || 'لا يوجد محتوى أصلي متاح لهذا الخبر.'}
+                                    </p>
+                                </div>
                             </div>
                         </>
                     ) : (
