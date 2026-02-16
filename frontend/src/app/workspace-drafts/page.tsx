@@ -120,21 +120,20 @@ export default function WorkspaceDraftsPage() {
     const createVersionMutation = useMutation({
         mutationFn: async () => {
             if (!selected) throw new Error('لا توجد مسودة محددة');
-            return editorialApi.createDraft(selected.article_id, {
-                title: workingTitle,
-                body: workingBody,
-                source_action: 'editorial_magic_workspace',
-                note: 'new_version_from_workspace',
-            });
+            return editorialApi.regenerateWorkspaceDraft(selected.work_id);
         },
-        onSuccess: (res) => {
+        onSuccess: async (res) => {
             queryClient.invalidateQueries({ queryKey: ['workspace-drafts'] });
-            const created = res.data;
-            setOk('تم إنشاء نسخة جديدة من المسودة');
-            setError(null);
-            if (created?.work_id) {
-                setStatus('draft');
+            const regeneratedWorkId = res.data?.work_id;
+            if (regeneratedWorkId) {
+                const latest = await editorialApi.workspaceDraft(regeneratedWorkId);
+                if (latest?.data) {
+                    setSelected(latest.data);
+                }
             }
+            setOk('تمت إعادة توليد المسودة بنفس Work ID مع إصدار جديد');
+            setError(null);
+            setStatus('draft');
         },
         onError: (err: any) => setError(err?.response?.data?.detail || 'تعذر إنشاء نسخة جديدة'),
     });

@@ -135,26 +135,16 @@ export default function NewsPage() {
             articleId,
             decision,
             reason,
-            title,
-            summary,
         }: {
             articleId: number;
             decision: string;
             reason?: string;
-            title?: string;
-            summary?: string;
         }) => {
-            await editorialApi.decide(articleId, { editor_name: editorName, decision, reason });
             if (decision === 'approve') {
-                const seedBody = (summary || title || 'مسودة تحريرية').trim();
-                const draftRes = await editorialApi.createDraft(articleId, {
-                    title,
-                    body: seedBody,
-                    note: 'handoff_after_approval',
-                    source_action: 'approved_handoff',
-                });
+                const draftRes = await editorialApi.handoff(articleId);
                 return { workId: draftRes.data?.work_id || null };
             }
+            await editorialApi.decide(articleId, { editor_name: editorName, decision, reason });
             return { workId: null };
         },
         onSuccess: () => {
@@ -239,7 +229,7 @@ export default function NewsPage() {
     const articles = data?.data?.items || [];
     const totalPages = data?.data?.pages || 0;
 
-    const statuses = ['', 'new', 'classified', 'candidate', 'approved', 'rejected', 'published'];
+    const statuses = ['', 'new', 'classified', 'candidate', 'approved_handoff', 'draft_generated', 'approved', 'rejected', 'published'];
     const categories = ['', 'politics', 'economy', 'sports', 'technology', 'local_algeria', 'international', 'culture', 'society', 'health'];
 
     const categoryColor = (cat?: string | null) => {
@@ -263,6 +253,8 @@ export default function NewsPage() {
             cleaned: 'منظف',
             classified: 'مصنف',
             candidate: 'مرشح',
+            approved_handoff: 'جاهز للكاتب',
+            draft_generated: 'مسودة جاهزة',
             approved: 'مقبول',
             rejected: 'مرفوض',
             published: 'منشور',
@@ -550,8 +542,6 @@ export default function NewsPage() {
                                                 {
                                                     articleId: article.id,
                                                     decision: 'approve',
-                                                    title: article.title_ar || article.original_title,
-                                                    summary: article.summary || undefined,
                                                 },
                                                 {
                                                     onSuccess: (result) => {

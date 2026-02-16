@@ -165,6 +165,7 @@ export const editorialApi = {
         editor_name: string; decision: string;
         reason?: string; edited_title?: string; edited_body?: string;
     }) => api.post(`/editorial/${articleId}/decide`, data),
+    handoff: (articleId: number) => api.post(`/editorial/${articleId}/handoff`),
     process: (articleId: number, data: {
         action: string;
         value?: string;
@@ -193,6 +194,8 @@ export const editorialApi = {
         api.post(`/editorial/workspace/drafts/${workId}/apply`),
     archiveWorkspaceDraft: (workId: string) =>
         api.post(`/editorial/workspace/drafts/${workId}/archive`),
+    regenerateWorkspaceDraft: (workId: string) =>
+        api.post(`/editorial/workspace/drafts/${workId}/regenerate`),
     decisions: (articleId: number) => api.get(`/editorial/${articleId}/decisions`),
     generate: (articleId: number) => api.post(`/editorial/${articleId}/generate`),
 };

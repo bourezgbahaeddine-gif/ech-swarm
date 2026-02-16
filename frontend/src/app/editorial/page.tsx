@@ -76,26 +76,16 @@ export default function EditorialPage() {
             articleId,
             decision,
             reason,
-            title,
-            summary,
         }: {
             articleId: number;
             decision: string;
             reason?: string;
-            title?: string;
-            summary?: string;
         }) => {
-            await editorialApi.decide(articleId, { editor_name: editorName, decision, reason });
             if (decision === 'approve') {
-                const seedBody = (summary || title || 'مسودة تحريرية').trim();
-                const draftRes = await editorialApi.createDraft(articleId, {
-                    title,
-                    body: seedBody,
-                    note: 'handoff_after_approval',
-                    source_action: 'approved_handoff',
-                });
+                const draftRes = await editorialApi.handoff(articleId);
                 return { workId: draftRes.data?.work_id || null };
             }
+            await editorialApi.decide(articleId, { editor_name: editorName, decision, reason });
             return { workId: null };
         },
         onSuccess: () => {
@@ -115,9 +105,12 @@ export default function EditorialPage() {
     const bulkMutation = useMutation({
         mutationFn: async ({ ids, decision, reason }: { ids: number[]; decision: string; reason?: string }) => {
             await Promise.all(
-                ids.map((articleId) =>
-                    editorialApi.decide(articleId, { editor_name: editorName, decision, reason })
-                )
+                ids.map((articleId) => {
+                    if (decision === 'approve') {
+                        return editorialApi.handoff(articleId);
+                    }
+                    return editorialApi.decide(articleId, { editor_name: editorName, decision, reason });
+                })
             );
         },
         onSuccess: () => {
@@ -361,8 +354,6 @@ export default function EditorialPage() {
                                                     {
                                                         articleId: article.id,
                                                         decision: 'approve',
-                                                        title: article.title_ar || article.original_title,
-                                                        summary: article.summary || undefined,
                                                     },
                                                     {
                                                         onSuccess: (result) => {

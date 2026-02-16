@@ -8,13 +8,14 @@ Single Responsibility: Write & Format only.
 """
 
 from datetime import datetime
+from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.models import Article, NewsStatus
+from app.models import Article, EditorialDraft, NewsStatus
 from app.services.ai_service import ai_service
 from app.services.cache_service import cache_service
 
@@ -29,8 +30,18 @@ class ScribeAgent:
     Only operates on APPROVED articles (cost optimization).
     """
 
-    async def write_article(self, db: AsyncSession, article_id: int) -> dict:
-        """Generate a full article for an approved news item."""
+    @staticmethod
+    def _new_work_id() -> str:
+        return f"WRK-{datetime.utcnow():%Y%m%d}-{uuid4().hex[:10].upper()}"
+
+    async def write_article(
+        self,
+        db: AsyncSession,
+        article_id: int,
+        source_action: str = "approved_handoff",
+        fixed_work_id: str | None = None,
+    ) -> dict:
+        """Generate an editorial draft from an approved handoff."""
 
         result = await db.execute(
             select(Article).where(Article.id == article_id)
@@ -40,10 +51,8 @@ class ScribeAgent:
         if not article:
             return {"error": "Article not found"}
 
-        if article.status != NewsStatus.APPROVED:
-            return {"error": f"Article is not approved (status: {article.status})"}
-        if article.body_html:
-            return {"error": "Article already written"}
+        if article.status not in [NewsStatus.APPROVED, NewsStatus.APPROVED_HANDOFF, NewsStatus.DRAFT_GENERATED]:
+            return {"error": f"Article is not in writable state (status: {article.status})"}
 
         try:
             # Build content from available data
@@ -59,29 +68,67 @@ class ScribeAgent:
 
             await cache_service.increment_counter("ai_calls_today")
 
-            # Update article
-            article.title_ar = result_data.get("headline", article.title_ar)
-            article.body_html = result_data.get("body_html", "")
-            article.seo_title = result_data.get("seo_title", "")
-            article.seo_description = result_data.get("seo_description", "")
+            generated_title = result_data.get("headline", article.title_ar) or article.original_title
+            generated_body = result_data.get("body_html", "") or content
+            generated_seo_title = result_data.get("seo_title", "") or generated_title
+            generated_seo_description = result_data.get("seo_description", "") or (article.summary or "")
 
             if result_data.get("tags"):
                 article.keywords = result_data["tags"]
 
             article.ai_model_used = "groq/gemini-flash"
+            article.title_ar = generated_title
+            article.seo_title = generated_seo_title
+            article.seo_description = generated_seo_description
+            article.status = NewsStatus.DRAFT_GENERATED
             article.updated_at = datetime.utcnow()
 
-            await db.commit()
+            if fixed_work_id:
+                version_stmt = (
+                    select(func.coalesce(func.max(EditorialDraft.version), 0))
+                    .where(EditorialDraft.work_id == fixed_work_id)
+                )
+            else:
+                version_stmt = (
+                    select(func.coalesce(func.max(EditorialDraft.version), 0))
+                    .where(
+                        EditorialDraft.article_id == article.id,
+                        EditorialDraft.source_action == source_action,
+                    )
+                )
+            version_result = await db.execute(version_stmt)
+            next_version = int(version_result.scalar_one() or 0) + 1
 
-            logger.info("article_written",
+            draft = EditorialDraft(
+                article_id=article.id,
+                work_id=fixed_work_id or self._new_work_id(),
+                source_action=source_action,
+                title=generated_title,
+                body=generated_body,
+                note="auto_from_scribe_v2",
+                status="draft",
+                version=next_version,
+                created_by="Scribe Agent",
+                updated_by="Scribe Agent",
+            )
+            db.add(draft)
+
+            await db.commit()
+            await db.refresh(draft)
+
+            logger.info("scribe_draft_generated",
                         article_id=article.id,
-                        title=article.title_ar[:60] if article.title_ar else "")
+                        work_id=draft.work_id,
+                        version=draft.version)
 
             return {
                 "success": True,
                 "article_id": article.id,
-                "headline": article.title_ar,
-                "seo_title": article.seo_title,
+                "headline": generated_title,
+                "seo_title": generated_seo_title,
+                "draft_id": draft.id,
+                "work_id": draft.work_id,
+                "version": draft.version,
             }
 
         except Exception as e:
@@ -95,8 +142,7 @@ class ScribeAgent:
         result = await db.execute(
             select(Article)
             .where(
-                Article.status == NewsStatus.APPROVED,
-                Article.body_html == None,
+                Article.status.in_([NewsStatus.APPROVED_HANDOFF, NewsStatus.APPROVED]),
             )
             .order_by(Article.importance_score.desc())
             .limit(limit)
