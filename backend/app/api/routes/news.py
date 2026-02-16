@@ -93,6 +93,11 @@ def _matched_query_tokens(query_tokens: set[str], text_tokens: set[str], text_no
     return matched
 
 
+def _is_geo_token(token: str) -> bool:
+    t = _normalize_text(token)
+    return t in {"الجزائر", "جزائر", "algerie", "algeria"}
+
+
 def _canonical_url(url: str | None) -> str:
     if not url:
         return ""
@@ -310,67 +315,81 @@ async def semantic_search(
             required_overlap = len(query_tokens)
         else:
             required_overlap = max(2, math.ceil(len(query_tokens) * 0.75))
+    core_tokens = {t for t in query_tokens if not _is_geo_token(t)}
 
-    for article, dist in best_by_article.values():
-        if mode == "editorial" and not include_aggregators and _is_aggregator_source(article.source_name):
-            continue
+    def _build_ranked(min_overlap: int, require_title_overlap: bool, require_core_match: bool) -> list[tuple[float, Article]]:
+        local_ranked: list[tuple[float, Article]] = []
+        for article, dist in best_by_article.values():
+            if mode == "editorial" and not include_aggregators and _is_aggregator_source(article.source_name):
+                continue
 
-        # semantic similarity from cosine distance
-        semantic = 1.0 - max(0.0, min(dist, 2.0)) / 2.0
+            semantic = 1.0 - max(0.0, min(dist, 2.0)) / 2.0
 
-        # lexical overlap
-        combined_text = " ".join([
-            article.title_ar or "",
-            article.original_title or "",
-            article.summary or "",
-        ])
-        title_text = " ".join([article.title_ar or "", article.original_title or ""])
-        text_tokens = _tokenize(combined_text)
-        text_norm = _normalize_text(combined_text)
-        matched_tokens = _matched_query_tokens(query_tokens, text_tokens, text_norm)
-        overlap_count = len(matched_tokens)
-        overlap = (overlap_count / max(1, len(query_tokens))) if query_tokens else 0.0
-        phrase_hit = 1.0 if query_norm and query_norm in text_norm else 0.0
+            combined_text = " ".join([
+                article.title_ar or "",
+                article.original_title or "",
+                article.summary or "",
+            ])
+            title_text = " ".join([article.title_ar or "", article.original_title or ""])
+            text_tokens = _tokenize(combined_text)
+            text_norm = _normalize_text(combined_text)
+            matched_tokens = _matched_query_tokens(query_tokens, text_tokens, text_norm)
+            overlap_count = len(matched_tokens)
+            overlap = (overlap_count / max(1, len(query_tokens))) if query_tokens else 0.0
+            phrase_hit = 1.0 if query_norm and query_norm in text_norm else 0.0
 
-        title_tokens = _tokenize(title_text)
-        title_norm = _normalize_text(title_text)
-        title_overlap_count = len(_matched_query_tokens(query_tokens, title_tokens, title_norm))
-        title_overlap = (title_overlap_count / max(1, len(query_tokens))) if query_tokens else 0.0
+            if min_overlap and overlap_count < min_overlap:
+                continue
+            if require_core_match and core_tokens:
+                core_matched = _matched_query_tokens(core_tokens, text_tokens, text_norm)
+                if not core_matched:
+                    continue
 
-        # Editorial strict mode: enforce lexical anchoring to query tokens.
-        if required_overlap and overlap_count < required_overlap:
-            continue
-        if mode == "editorial" and strict_tokens and len(query_tokens) >= 2 and title_overlap_count == 0:
-            continue
+            title_tokens = _tokenize(title_text)
+            title_norm = _normalize_text(title_text)
+            title_overlap_count = len(_matched_query_tokens(query_tokens, title_tokens, title_norm))
+            title_overlap = (title_overlap_count / max(1, len(query_tokens))) if query_tokens else 0.0
+            if require_title_overlap and title_overlap_count == 0:
+                continue
 
-        # newsroom priors
-        trust = _source_trust(article.source_name)
-        recency_hours = max(0.0, (now - (article.created_at or article.crawled_at or now)).total_seconds() / 3600.0)
-        recency = math.exp(-recency_hours / 72.0)  # 3-day half-ish decay
-        importance = max(0.0, min(1.0, (article.importance_score or 0) / 10.0))
-        breaking = 1.0 if article.is_breaking else 0.0
+            trust = _source_trust(article.source_name)
+            recency_hours = max(0.0, (now - (article.created_at or article.crawled_at or now)).total_seconds() / 3600.0)
+            recency = math.exp(-recency_hours / 72.0)
+            importance = max(0.0, min(1.0, (article.importance_score or 0) / 10.0))
+            breaking = 1.0 if article.is_breaking else 0.0
 
-        if mode == "editorial":
-            score = (
-                0.15 * semantic
-                + 0.45 * overlap
-                + 0.10 * title_overlap
-                + 0.12 * phrase_hit
-                + 0.08 * recency
-                + 0.05 * trust
-                + 0.03 * importance
-                + 0.02 * breaking
-            )
-        else:
-            score = (
-                0.70 * semantic
-                + 0.15 * overlap
-                + 0.10 * recency
-                + 0.05 * trust
-            )
-        ranked.append((score, article))
+            if mode == "editorial":
+                score = (
+                    0.15 * semantic
+                    + 0.45 * overlap
+                    + 0.10 * title_overlap
+                    + 0.12 * phrase_hit
+                    + 0.08 * recency
+                    + 0.05 * trust
+                    + 0.03 * importance
+                    + 0.02 * breaking
+                )
+            else:
+                score = (
+                    0.70 * semantic
+                    + 0.15 * overlap
+                    + 0.10 * recency
+                    + 0.05 * trust
+                )
+            local_ranked.append((score, article))
+        local_ranked.sort(key=lambda x: x[0], reverse=True)
+        return local_ranked
 
-    ranked.sort(key=lambda x: x[0], reverse=True)
+    ranked = _build_ranked(
+        min_overlap=required_overlap,
+        require_title_overlap=(mode == "editorial" and strict_tokens and len(query_tokens) >= 2),
+        require_core_match=(mode == "editorial" and strict_tokens),
+    )
+    # Progressive fallback: avoid empty UX while preserving relevance.
+    if not ranked and mode == "editorial" and strict_tokens:
+        ranked = _build_ranked(min_overlap=1, require_title_overlap=False, require_core_match=True)
+    if not ranked and mode == "editorial":
+        ranked = _build_ranked(min_overlap=1, require_title_overlap=False, require_core_match=False)
 
     # Canonical URL de-dup on final list.
     final: list[Article] = []
