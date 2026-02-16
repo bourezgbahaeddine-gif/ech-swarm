@@ -5,6 +5,7 @@ Detects rising trends by cross-referencing Google Trends,
 RSS burst detection, and competitor feeds.
 """
 
+import asyncio
 from collections import Counter
 from datetime import timedelta
 from typing import Optional
@@ -35,11 +36,19 @@ COMPETITOR_FEEDS = [
 ]
 
 CATEGORY_KEYWORDS: dict[str, set[str]] = {
-    "politics": {"سياسة", "حكومة", "برلمان", "election", "government", "president", "parlement", "gouvernement"},
-    "economy": {"اقتصاد", "نفط", "غاز", "dinar", "market", "inflation", "économie", "pétrole", "banque"},
-    "sports": {"رياضة", "كرة", "match", "football", "league", "olympic", "sport", "fifa", "caf"},
+    "politics": {
+        "سياسة", "حكومة", "برلمان", "election", "government", "president", "parlement", "gouvernement",
+        "politique", "elysee", "ministere", "député", "senat",
+    },
+    "economy": {
+        "اقتصاد", "نفط", "غاز", "dinar", "market", "inflation", "économie", "pétrole", "banque",
+        "bourse", "emploi", "entreprise", "industrie", "finances",
+    },
+    "justice": {"justice", "tribunal", "procès", "avocat", "accusé", "police", "محكمة", "قضاء"},
+    "energy": {"energie", "énergie", "electricite", "électricité", "gaz", "petrole", "pétrole", "طاقة", "نفط"},
+    "sports": {"رياضة", "كرة", "match", "football", "league", "olympic", "sport", "fifa", "caf", "ligue", "tennis"},
     "technology": {"ذكاء", "تقنية", "ai", "tech", "startup", "cyber", "robot", "innovation", "digital"},
-    "society": {"مجتمع", "education", "school", "health", "crime", "santé", "éducation", "ramadan"},
+    "society": {"مجتمع", "education", "school", "health", "crime", "santé", "éducation", "ramadan", "culture", "cinema"},
     "international": {"ukraine", "gaza", "iran", "france", "europe", "africa", "usa", "israel", "onu"},
 }
 
@@ -84,14 +93,20 @@ WEAK_TERMS = {
     "today", "yesterday", "tomorrow", "says", "said", "president",
 }
 
+FR_HEADLINE_PREFIXES = [
+    "comment ", "pourquoi ", "en direct", "direct", "vidéo", "video",
+    "analyse", "édito", "opinion", "live", "ce que l'on sait", "ce qu'on sait",
+]
+
 
 class TrendRadarAgent:
     """Trend Radar with category and geography outputs."""
 
-    async def scan(self, geo: str = "DZ", category: str = "all", limit: int = 12) -> list[TrendAlert]:
+    async def scan(self, geo: str = "DZ", category: str = "all", limit: int = 12, mode: str = "fast") -> list[TrendAlert]:
         """Run a full trend scan cycle."""
         geo = (geo or "DZ").upper()
         category = (category or "all").lower()
+        mode = (mode or "fast").lower()
         limit = max(1, min(limit, 30))
         try:
             google_trends = await self._fetch_google_trends(geo)
@@ -132,7 +147,7 @@ class TrendRadarAgent:
             alerts: list[TrendAlert] = []
             for trend in verified_trends[:limit]:
                 # Non-DZ scans should stay responsive and avoid long AI latency.
-                if geo != "DZ":
+                if geo != "DZ" and mode != "deep":
                     alert = TrendAlert(
                         keyword=trend["keyword"],
                         source_signals=trend["source_signals"],
@@ -146,7 +161,22 @@ class TrendRadarAgent:
                         ],
                     )
                 else:
-                    alert = await self._analyze_trend(trend, geo=geo)
+                    try:
+                        # keep API responsive even in deep mode
+                        alert = await asyncio.wait_for(self._analyze_trend(trend, geo=geo), timeout=5)
+                    except TimeoutError:
+                        alert = TrendAlert(
+                            keyword=trend["keyword"],
+                            source_signals=trend["source_signals"],
+                            strength=trend["strength"],
+                            category=trend.get("category", "general"),
+                            geography=trend.get("geography", geo),
+                            reason=f"اتجاه متصاعد في {GEO_LABELS.get(trend.get('geography', geo), geo)} يحتاج متابعة تحريرية.",
+                            suggested_angles=[
+                                f"ما أسباب صعود {trend['keyword']} الآن؟",
+                                f"الأثر المحلي/الإقليمي المرتبط بـ {trend['keyword']}",
+                            ],
+                        )
                 if alert:
                     alerts.append(alert)
 
@@ -179,7 +209,7 @@ class TrendRadarAgent:
                     terms_counter: Counter[str] = Counter()
                     for entry in feed.entries[:30]:
                         raw_title = entry.get("title", "")
-                        stripped = self._strip_publisher_suffix(raw_title)
+                        stripped = self._clean_headline_text(self._strip_publisher_suffix(raw_title))
                         normalized = normalize_text(stripped)
                         if normalized:
                             for term in self._extract_candidate_terms(normalized):
@@ -394,6 +424,15 @@ class TrendRadarAgent:
             if sep in raw_title:
                 raw_title = raw_title.split(sep)[0]
         return raw_title.strip()
+
+    def _clean_headline_text(self, text: str) -> str:
+        t = text.strip()
+        lowered = t.lower()
+        for p in FR_HEADLINE_PREFIXES:
+            if lowered.startswith(p):
+                t = t[len(p):].strip(" :,-–—|")
+                lowered = t.lower()
+        return t
 
     def _extract_named_entities(self, raw_title: str) -> list[str]:
         """

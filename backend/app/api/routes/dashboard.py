@@ -150,9 +150,9 @@ async def _run_scribe_pipeline():
         logger.info("scribe_pipeline_completed", stats=stats)
 
 
-async def _run_trends_scan(geo: str, category: str, limit: int):
-    alerts = await trend_radar_agent.scan(geo=geo, category=category, limit=limit)
-    logger.info("trends_scan_completed", alerts_count=len(alerts), geo=geo, category=category, limit=limit)
+async def _run_trends_scan(geo: str, category: str, limit: int, mode: str):
+    alerts = await trend_radar_agent.scan(geo=geo, category=category, limit=limit, mode=mode)
+    logger.info("trends_scan_completed", alerts_count=len(alerts), geo=geo, category=category, limit=limit, mode=mode)
 
 
 def _assert_agent_control_permission(user: User) -> None:
@@ -199,6 +199,7 @@ async def trigger_trend_scan(
     geo: str = Query("DZ", min_length=2, max_length=16),
     category: str = Query("all", min_length=2, max_length=32),
     limit: int = Query(12, ge=1, le=30),
+    mode: str = Query("fast", pattern="^(fast|deep)$"),
     wait: bool = Query(False),
     current_user: User = Depends(get_current_user),
 ):
@@ -207,7 +208,7 @@ async def trigger_trend_scan(
     if wait:
         try:
             alerts = await asyncio.wait_for(
-                trend_radar_agent.scan(geo=geo, category=category, limit=limit),
+                trend_radar_agent.scan(geo=geo, category=category, limit=limit, mode=mode),
                 timeout=25,
             )
             return {"message": "Trend scan completed", "alerts": [a.model_dump(mode="json") for a in alerts]}
@@ -218,7 +219,7 @@ async def trigger_trend_scan(
                 "alerts": (payload or {}).get("alerts", []),
             }
 
-    background_tasks.add_task(_run_trends_scan, geo.upper(), category.lower(), limit)
+    background_tasks.add_task(_run_trends_scan, geo.upper(), category.lower(), limit, mode.lower())
     return {"message": "Trend scan queued"}
 
 
