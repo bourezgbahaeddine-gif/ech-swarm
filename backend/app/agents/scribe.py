@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.models import Article, EditorialDraft, NewsStatus
+from app.services.article_index_service import article_index_service
 from app.services.ai_service import ai_service
 from app.services.cache_service import cache_service
 
@@ -112,6 +113,7 @@ class ScribeAgent:
                 updated_by="Scribe Agent",
             )
             db.add(draft)
+            await article_index_service.upsert_article(db, article)
 
             await db.commit()
             await db.refresh(draft)

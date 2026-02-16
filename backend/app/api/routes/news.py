@@ -5,6 +5,8 @@ CRUD operations for articles with filtering & pagination.
 """
 
 from datetime import datetime, timedelta
+import hashlib
+import math
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func, desc, and_, update
@@ -12,11 +14,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.models import Article, NewsStatus, NewsCategory, UrgencyLevel
+from app.models import Article, ArticleVector, NewsStatus, NewsCategory, UrgencyLevel
 from app.schemas import ArticleResponse, ArticleBrief, PaginatedResponse
 
 router = APIRouter(prefix="/news", tags=["News"])
 settings = get_settings()
+
+
+def _query_embedding(text: str, dim: int = 256) -> list[float]:
+    base = hashlib.sha256((text or "").encode("utf-8")).digest()
+    values = []
+    seed = base
+    while len(values) < dim:
+        seed = hashlib.sha256(seed).digest()
+        for b in seed:
+            values.append((b / 255.0) * 2.0 - 1.0)
+            if len(values) >= dim:
+                break
+    norm = math.sqrt(sum(v * v for v in values)) or 1.0
+    return [v / norm for v in values]
 
 
 async def _expire_stale_breaking_flags(db: AsyncSession) -> None:
@@ -110,16 +126,6 @@ async def list_articles(
     )
 
 
-@router.get("/{article_id}", response_model=ArticleResponse)
-async def get_article(article_id: int, db: AsyncSession = Depends(get_db)):
-    """Get a single article by ID."""
-    result = await db.execute(select(Article).where(Article.id == article_id))
-    article = result.scalar_one_or_none()
-    if not article:
-        raise HTTPException(404, "Article not found")
-    return ArticleResponse.model_validate(article)
-
-
 @router.get("/breaking/latest")
 async def get_breaking_news(
     limit: int = Query(5, ge=1, le=20),
@@ -159,3 +165,92 @@ async def get_pending_candidates(
     )
     articles = result.scalars().all()
     return [ArticleBrief.model_validate(a) for a in articles]
+
+
+@router.get("/search/semantic")
+async def semantic_search(
+    q: str = Query(..., min_length=2),
+    limit: int = Query(10, ge=1, le=50),
+    status: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Semantic retrieval on vectorized title/summary records.
+    """
+    query_vec = _query_embedding(q, 256)
+    stmt = (
+        select(Article)
+        .join(ArticleVector, ArticleVector.article_id == Article.id)
+        .where(ArticleVector.vector_type.in_(["title", "summary"]))
+        .order_by(ArticleVector.embedding.cosine_distance(query_vec))
+        .limit(limit)
+    )
+    if status:
+        try:
+            stmt = stmt.where(Article.status == NewsStatus(status))
+        except ValueError:
+            raise HTTPException(400, f"Invalid status: {status}")
+    else:
+        stmt = stmt.where(Article.status != NewsStatus.ARCHIVED)
+
+    rows = await db.execute(stmt)
+    items = rows.scalars().all()
+
+    seen = set()
+    unique_items = []
+    for item in items:
+        if item.id in seen:
+            continue
+        seen.add(item.id)
+        unique_items.append(item)
+    return [ArticleBrief.model_validate(a) for a in unique_items]
+
+
+@router.get("/{article_id}", response_model=ArticleResponse)
+async def get_article(article_id: int, db: AsyncSession = Depends(get_db)):
+    """Get a single article by ID."""
+    result = await db.execute(select(Article).where(Article.id == article_id))
+    article = result.scalar_one_or_none()
+    if not article:
+        raise HTTPException(404, "Article not found")
+    return ArticleResponse.model_validate(article)
+
+
+@router.get("/{article_id}/related")
+async def related_articles(
+    article_id: int,
+    limit: int = Query(8, ge=1, le=30),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Retrieve related articles via summary vectors.
+    """
+    src_vec_result = await db.execute(
+        select(ArticleVector)
+        .where(
+            and_(
+                ArticleVector.article_id == article_id,
+                ArticleVector.vector_type == "summary",
+            )
+        )
+        .limit(1)
+    )
+    src_vec = src_vec_result.scalar_one_or_none()
+    if not src_vec:
+        return []
+
+    stmt = (
+        select(Article)
+        .join(ArticleVector, ArticleVector.article_id == Article.id)
+        .where(
+            and_(
+                Article.id != article_id,
+                ArticleVector.vector_type == "summary",
+                Article.status != NewsStatus.ARCHIVED,
+            )
+        )
+        .order_by(ArticleVector.embedding.cosine_distance(src_vec.embedding))
+        .limit(limit)
+    )
+    rows = await db.execute(stmt)
+    return [ArticleBrief.model_validate(a) for a in rows.scalars().all()]

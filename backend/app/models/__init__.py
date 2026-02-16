@@ -7,6 +7,15 @@ from app.models.news import (
 from app.models.settings import ApiSetting
 from app.models.audit import SettingsAudit
 from app.models.constitution import ConstitutionMeta, ConstitutionAck, ImagePrompt, InfographicData
+from app.models.knowledge import (
+    ArticleProfile,
+    ArticleTopic,
+    ArticleEntity,
+    ArticleChunk,
+    ArticleVector,
+    StoryCluster,
+    StoryClusterMember,
+)
 
 __all__ = [
     "Source", "Article", "EditorDecision", "EditorialDraft", "FeedbackLog",
@@ -18,4 +27,11 @@ __all__ = [
     "ConstitutionAck",
     "ImagePrompt",
     "InfographicData",
+    "ArticleProfile",
+    "ArticleTopic",
+    "ArticleEntity",
+    "ArticleChunk",
+    "ArticleVector",
+    "StoryCluster",
+    "StoryClusterMember",
 ]

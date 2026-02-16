@@ -15,6 +15,7 @@ from app.core.logging import get_logger
 from app.models import Article, EditorDecision, EditorialDraft, FeedbackLog, NewsCategory, NewsStatus
 from app.models.user import User, UserRole
 from app.schemas import EditorDecisionCreate, EditorDecisionResponse
+from app.services.article_index_service import article_index_service
 from app.services.ai_service import ai_service
 
 logger = get_logger("api.editorial")
@@ -491,6 +492,7 @@ async def apply_draft_by_work_id(
             edited_body=draft.body,
         )
     )
+    await article_index_service.upsert_article(db, article)
     await db.commit()
     return {"article_id": article.id, "work_id": work_id, "applied": True, "draft": _draft_to_dict(draft)}
 
@@ -772,6 +774,7 @@ async def apply_draft(
             edited_body=draft.body,
         )
     )
+    await article_index_service.upsert_article(db, article)
     await db.commit()
     return {"article_id": article_id, "draft_id": draft_id, "applied": True, "draft": _draft_to_dict(draft)}
 
