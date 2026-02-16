@@ -271,9 +271,12 @@ async def semantic_search(
     ranked: list[tuple[float, Article]] = []
     required_overlap = 0
     if mode == "editorial" and strict_tokens and len(query_tokens) >= 2:
-        # In editorial mode, lexical anchoring should dominate because newsrooms
-        # need directly relevant hits, not loose semantic neighbors.
-        required_overlap = len(query_tokens) if len(query_tokens) <= 3 else max(2, math.ceil(len(query_tokens) * 0.75))
+        # Keep lexical anchoring strict, but avoid empty-result UX for short queries.
+        # 2 tokens -> require 1, 3 tokens -> require 2, 4+ -> ~75%.
+        if len(query_tokens) <= 3:
+            required_overlap = max(1, len(query_tokens) - 1)
+        else:
+            required_overlap = max(2, math.ceil(len(query_tokens) * 0.75))
 
     for article, dist in best_by_article.values():
         if mode == "editorial" and not include_aggregators and _is_aggregator_source(article.source_name):
