@@ -7,6 +7,8 @@ CRUD operations for articles with filtering & pagination.
 from datetime import datetime, timedelta
 import hashlib
 import math
+import re
+from urllib.parse import urlparse, urlunparse
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func, desc, and_, update
@@ -19,6 +21,7 @@ from app.schemas import ArticleResponse, ArticleBrief, PaginatedResponse
 
 router = APIRouter(prefix="/news", tags=["News"])
 settings = get_settings()
+TOKEN_RE = re.compile(r"[\u0600-\u06FFa-zA-Z0-9]{2,}")
 
 
 def _query_embedding(text: str, dim: int = 256) -> list[float]:
@@ -33,6 +36,40 @@ def _query_embedding(text: str, dim: int = 256) -> list[float]:
                 break
     norm = math.sqrt(sum(v * v for v in values)) or 1.0
     return [v / norm for v in values]
+
+
+def _tokenize(text: str) -> set[str]:
+    return {m.group(0).lower() for m in TOKEN_RE.finditer(text or "")}
+
+
+def _canonical_url(url: str | None) -> str:
+    if not url:
+        return ""
+    try:
+        parsed = urlparse(url.strip())
+        return urlunparse(parsed._replace(query="", fragment=""))
+    except Exception:
+        return url
+
+
+def _source_trust(source_name: str | None) -> float:
+    s = (source_name or "").lower()
+    if not s:
+        return 0.4
+    trusted = [
+        "aps", "reuters", "bbc", "france24", "le monde", "guardian", "echorouk", "el khabar",
+    ]
+    low = ["news.google.com", "google news", "aggregator", "reddit"]
+    if any(k in s for k in trusted):
+        return 1.0
+    if any(k in s for k in low):
+        return 0.25
+    return 0.6
+
+
+def _is_aggregator_source(source_name: str | None) -> bool:
+    s = (source_name or "").lower()
+    return "news.google.com" in s or "google news" in s or "aggregator" in s
 
 
 async def _expire_stale_breaking_flags(db: AsyncSession) -> None:
@@ -172,18 +209,26 @@ async def semantic_search(
     q: str = Query(..., min_length=2),
     limit: int = Query(10, ge=1, le=50),
     status: Optional[str] = None,
+    mode: str = Query("editorial", pattern="^(editorial|semantic)$"),
+    include_aggregators: bool = Query(False),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Semantic retrieval on vectorized title/summary records.
+    Hybrid retrieval on vectorized title/summary with editorial ranking.
     """
     query_vec = _query_embedding(q, 256)
+    query_tokens = _tokenize(q)
+    pool_size = max(limit * 25, 120)
+
     stmt = (
-        select(Article)
+        select(
+            Article,
+            ArticleVector.embedding.cosine_distance(query_vec).label("dist"),
+        )
         .join(ArticleVector, ArticleVector.article_id == Article.id)
         .where(ArticleVector.vector_type.in_(["title", "summary"]))
         .order_by(ArticleVector.embedding.cosine_distance(query_vec))
-        .limit(limit)
+        .limit(pool_size)
     )
     if status:
         try:
@@ -194,16 +239,78 @@ async def semantic_search(
         stmt = stmt.where(Article.status != NewsStatus.ARCHIVED)
 
     rows = await db.execute(stmt)
-    items = rows.scalars().all()
+    raw_items = rows.all()
 
-    seen = set()
-    unique_items = []
-    for item in items:
-        if item.id in seen:
+    # Keep best distance per article first (title+summary can duplicate article rows)
+    best_by_article: dict[int, tuple[Article, float]] = {}
+    for article, dist in raw_items:
+        prev = best_by_article.get(article.id)
+        if prev is None or dist < prev[1]:
+            best_by_article[article.id] = (article, float(dist))
+
+    now = datetime.utcnow()
+    ranked: list[tuple[float, Article]] = []
+    for article, dist in best_by_article.values():
+        if mode == "editorial" and not include_aggregators and _is_aggregator_source(article.source_name):
             continue
-        seen.add(item.id)
-        unique_items.append(item)
-    return [ArticleBrief.model_validate(a) for a in unique_items]
+
+        # semantic similarity from cosine distance
+        semantic = 1.0 - max(0.0, min(dist, 2.0)) / 2.0
+
+        # lexical overlap
+        text_tokens = _tokenize(" ".join([
+            article.title_ar or "",
+            article.original_title or "",
+            article.summary or "",
+            article.source_name or "",
+        ]))
+        overlap = (len(query_tokens & text_tokens) / max(1, len(query_tokens))) if query_tokens else 0.0
+
+        # newsroom priors
+        trust = _source_trust(article.source_name)
+        recency_hours = max(0.0, (now - (article.created_at or article.crawled_at or now)).total_seconds() / 3600.0)
+        recency = math.exp(-recency_hours / 72.0)  # 3-day half-ish decay
+        importance = max(0.0, min(1.0, (article.importance_score or 0) / 10.0))
+        breaking = 1.0 if article.is_breaking else 0.0
+
+        if mode == "editorial":
+            score = (
+                0.40 * semantic
+                + 0.22 * overlap
+                + 0.16 * recency
+                + 0.12 * trust
+                + 0.07 * importance
+                + 0.03 * breaking
+            )
+        else:
+            score = (
+                0.70 * semantic
+                + 0.15 * overlap
+                + 0.10 * recency
+                + 0.05 * trust
+            )
+        ranked.append((score, article))
+
+    ranked.sort(key=lambda x: x[0], reverse=True)
+
+    # Canonical URL de-dup on final list.
+    final: list[Article] = []
+    seen_urls: set[str] = set()
+    seen_ids: set[int] = set()
+    for _, article in ranked:
+        if article.id in seen_ids:
+            continue
+        url_key = _canonical_url(article.original_url)
+        if url_key and url_key in seen_urls:
+            continue
+        seen_ids.add(article.id)
+        if url_key:
+            seen_urls.add(url_key)
+        final.append(article)
+        if len(final) >= limit:
+            break
+
+    return [ArticleBrief.model_validate(a) for a in final]
 
 
 @router.get("/{article_id}", response_model=ArticleResponse)
