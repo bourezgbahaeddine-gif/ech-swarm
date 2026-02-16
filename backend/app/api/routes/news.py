@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import hashlib
 import math
 import re
+import unicodedata
 from urllib.parse import urlparse, urlunparse
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -21,7 +22,7 @@ from app.schemas import ArticleResponse, ArticleBrief, PaginatedResponse
 
 router = APIRouter(prefix="/news", tags=["News"])
 settings = get_settings()
-TOKEN_RE = re.compile(r"[\u0600-\u06FFa-zA-Z0-9]{2,}")
+TOKEN_RE = re.compile(r"[\u0600-\u06FFA-Za-z\u00C0-\u024F0-9]{2,}")
 SPACE_RE = re.compile(r"\s+")
 STOPWORDS = {
     # Arabic
@@ -31,6 +32,13 @@ STOPWORDS = {
     "les", "des", "dans", "avec", "pour", "sur", "une", "un", "du", "de", "et",
     # English
     "the", "and", "for", "with", "from", "into", "over", "under", "that", "this",
+}
+SYNONYMS = {
+    # Arabic <-> French/English newsroom concepts
+    "الطاقة": {"طاقة", "الطاقوية", "الطاقي", "energie", "énergie", "energetique", "énergétique", "energy"},
+    "طاقة": {"الطاقة", "الطاقوية", "الطاقي", "energie", "énergie", "energetique", "énergétique", "energy"},
+    "الجزائر": {"جزائر", "algerie", "algérie", "algeria", "algérien", "algerien"},
+    "جزائر": {"الجزائر", "algerie", "algérie", "algeria", "algérien", "algerien"},
 }
 
 
@@ -55,14 +63,20 @@ def _tokenize(text: str) -> set[str]:
 def _normalize_text(text: str | None) -> str:
     if not text:
         return ""
-    return SPACE_RE.sub(" ", (text or "").strip().lower())
+    t = (text or "").strip().lower()
+    # Fold accents so "énergie" and "energie" match consistently.
+    t = unicodedata.normalize("NFKD", t)
+    t = "".join(ch for ch in t if not unicodedata.combining(ch))
+    return SPACE_RE.sub(" ", t)
 
 
 def _token_forms(token: str) -> set[str]:
-    forms = {token}
+    token_norm = _normalize_text(token)
+    forms = {token_norm}
     # Arabic definite article normalization: "الطاقة" -> "طاقة"
-    if token.startswith("ال") and len(token) > 4:
-        forms.add(token[2:])
+    if token_norm.startswith("ال") and len(token_norm) > 4:
+        forms.add(token_norm[2:])
+    forms |= {_normalize_text(x) for x in SYNONYMS.get(token_norm, set())}
     return {f for f in forms if f}
 
 
