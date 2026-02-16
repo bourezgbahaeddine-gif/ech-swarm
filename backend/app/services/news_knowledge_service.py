@@ -154,6 +154,13 @@ def _select_taxonomy(scores: dict[NewsCategory, float]) -> tuple[NewsCategory | 
 
 
 class NewsKnowledgeService:
+    @staticmethod
+    def _safe_cluster_label(label: str | None) -> str | None:
+        if not label:
+            return None
+        value = _normalize_text(label)
+        return value[:256]
+
     async def process_article(self, db: AsyncSession, article: Article) -> None:
         text = _normalize_text(
             " ".join(
@@ -275,7 +282,12 @@ class NewsKnowledgeService:
 
     async def _ensure_single_cluster(self, db: AsyncSession, article: Article, label: str | None) -> None:
         cluster_key = self._cluster_key(article, seed=label or str(article.id))
-        cluster = await self._get_or_create_cluster(db, cluster_key, label=label, category=article.category.value if article.category else None)
+        cluster = await self._get_or_create_cluster(
+            db,
+            cluster_key,
+            label=self._safe_cluster_label(label),
+            category=article.category.value if article.category else None,
+        )
         await self._upsert_cluster_member(db, cluster.id, article.id, score=1.0)
 
     async def _attach_to_anchor_cluster(
@@ -296,7 +308,7 @@ class NewsKnowledgeService:
             cluster = await self._get_or_create_cluster(
                 db,
                 cluster_key,
-                label=anchor_article.title_ar or anchor_article.original_title,
+                label=self._safe_cluster_label(anchor_article.title_ar or anchor_article.original_title),
                 category=anchor_article.category.value if anchor_article.category else None,
             )
             cluster_id = cluster.id
