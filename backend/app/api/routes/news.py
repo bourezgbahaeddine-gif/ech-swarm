@@ -58,6 +58,27 @@ def _normalize_text(text: str | None) -> str:
     return SPACE_RE.sub(" ", (text or "").strip().lower())
 
 
+def _token_forms(token: str) -> set[str]:
+    forms = {token}
+    # Arabic definite article normalization: "الطاقة" -> "طاقة"
+    if token.startswith("ال") and len(token) > 4:
+        forms.add(token[2:])
+    return {f for f in forms if f}
+
+
+def _matched_query_tokens(query_tokens: set[str], text_tokens: set[str], text_norm: str) -> set[str]:
+    matched: set[str] = set()
+    for token in query_tokens:
+        forms = _token_forms(token)
+        if any(f in text_tokens for f in forms):
+            matched.add(token)
+            continue
+        # Fallback for derivations (e.g., طاقة / الطاقوية)
+        if any(len(f) >= 4 and f in text_norm for f in forms):
+            matched.add(token)
+    return matched
+
+
 def _canonical_url(url: str | None) -> str:
     if not url:
         return ""
@@ -271,10 +292,8 @@ async def semantic_search(
     ranked: list[tuple[float, Article]] = []
     required_overlap = 0
     if mode == "editorial" and strict_tokens and len(query_tokens) >= 2:
-        # Keep lexical anchoring strict, but avoid empty-result UX for short queries.
-        # 2 tokens -> require 1, 3 tokens -> require 2, 4+ -> ~75%.
         if len(query_tokens) <= 3:
-            required_overlap = max(1, len(query_tokens) - 1)
+            required_overlap = len(query_tokens)
         else:
             required_overlap = max(2, math.ceil(len(query_tokens) * 0.75))
 
@@ -291,13 +310,23 @@ async def semantic_search(
             article.original_title or "",
             article.summary or "",
         ])
+        title_text = " ".join([article.title_ar or "", article.original_title or ""])
         text_tokens = _tokenize(combined_text)
-        overlap_count = len(query_tokens & text_tokens)
+        text_norm = _normalize_text(combined_text)
+        matched_tokens = _matched_query_tokens(query_tokens, text_tokens, text_norm)
+        overlap_count = len(matched_tokens)
         overlap = (overlap_count / max(1, len(query_tokens))) if query_tokens else 0.0
-        phrase_hit = 1.0 if query_norm and query_norm in _normalize_text(combined_text) else 0.0
+        phrase_hit = 1.0 if query_norm and query_norm in text_norm else 0.0
+
+        title_tokens = _tokenize(title_text)
+        title_norm = _normalize_text(title_text)
+        title_overlap_count = len(_matched_query_tokens(query_tokens, title_tokens, title_norm))
+        title_overlap = (title_overlap_count / max(1, len(query_tokens))) if query_tokens else 0.0
 
         # Editorial strict mode: enforce lexical anchoring to query tokens.
         if required_overlap and overlap_count < required_overlap:
+            continue
+        if mode == "editorial" and strict_tokens and len(query_tokens) >= 2 and title_overlap_count == 0:
             continue
 
         # newsroom priors
@@ -310,7 +339,8 @@ async def semantic_search(
         if mode == "editorial":
             score = (
                 0.15 * semantic
-                + 0.55 * overlap
+                + 0.45 * overlap
+                + 0.10 * title_overlap
                 + 0.12 * phrase_hit
                 + 0.08 * recency
                 + 0.05 * trust
