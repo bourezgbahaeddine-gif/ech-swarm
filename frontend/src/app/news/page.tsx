@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { newsApi, dashboardApi, editorialApi, type ArticleBrief } from '@/lib/api';
@@ -228,6 +228,26 @@ export default function NewsPage() {
 
     const articles = data?.data?.items || [];
     const totalPages = data?.data?.pages || 0;
+    const articleIds = useMemo(() => articles.map((a: ArticleBrief) => a.id), [articles]);
+
+    const { data: insightsData } = useQuery({
+        queryKey: ['news-insights', articleIds.join(',')],
+        queryFn: () => newsApi.insights(articleIds),
+        enabled: articleIds.length > 0,
+        staleTime: 30_000,
+    });
+
+    const insightsMap = useMemo(() => {
+        const map = new Map<number, { cluster_size: number; relation_count: number }>();
+        const items = insightsData?.data || [];
+        for (const item of items) {
+            map.set(item.article_id, {
+                cluster_size: item.cluster_size,
+                relation_count: item.relation_count,
+            });
+        }
+        return map;
+    }, [insightsData?.data]);
 
     const statuses = ['', 'new', 'classified', 'candidate', 'approved_handoff', 'draft_generated', 'approved', 'rejected', 'published'];
     const categories = ['', 'politics', 'economy', 'sports', 'technology', 'local_algeria', 'international', 'culture', 'society', 'health'];
@@ -448,6 +468,7 @@ export default function NewsPage() {
                         const normalizedStatus = (article.status || '').toLowerCase();
                         const canReview = normalizedStatus === 'candidate' || normalizedStatus === 'classified';
                         const freshBreaking = isFreshBreaking(article.is_breaking, article.crawled_at);
+                        const insight = insightsMap.get(article.id);
 
                         return (
                             <div
@@ -502,6 +523,16 @@ export default function NewsPage() {
                                     <span className={cn('px-2 py-0.5 rounded-md text-[10px] font-medium border', categoryColor(article.category))}>
                                         {getCategoryLabel(article.category)}
                                     </span>
+                                    {(insight?.cluster_size || 0) > 1 && (
+                                        <span className="px-2 py-0.5 rounded-md text-[10px] font-medium border border-cyan-500/30 text-cyan-300 bg-cyan-500/10">
+                                            حدث موحّد: {insight?.cluster_size}
+                                        </span>
+                                    )}
+                                    {(insight?.relation_count || 0) > 0 && (
+                                        <span className="px-2 py-0.5 rounded-md text-[10px] font-medium border border-fuchsia-500/30 text-fuchsia-300 bg-fuchsia-500/10">
+                                            علاقات: {insight?.relation_count}
+                                        </span>
+                                    )}
                                 </div>
 
                                 <div className="mt-4 grid grid-cols-2 gap-2">

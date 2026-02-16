@@ -138,6 +138,12 @@ export interface WorkspaceDraft {
     updated_at: string;
 }
 
+export interface ArticleInsight {
+    article_id: number;
+    cluster_size: number;
+    relation_count: number;
+}
+
 export const newsApi = {
     list: (params?: {
         page?: number; per_page?: number;
@@ -149,6 +155,8 @@ export const newsApi = {
     get: (id: number) => api.get<Article>(`/news/${id}`),
     breaking: (limit?: number) => api.get<ArticleBrief[]>('/news/breaking/latest', { params: { limit } }),
     pending: (limit?: number) => api.get<ArticleBrief[]>('/news/candidates/pending', { params: { limit } }),
+    insights: (articleIds: number[]) =>
+        api.get<ArticleInsight[]>('/news/insights', { params: { article_ids: articleIds } }),
 };
 
 export const sourcesApi = {

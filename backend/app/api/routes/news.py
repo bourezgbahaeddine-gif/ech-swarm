@@ -269,6 +269,54 @@ async def get_pending_candidates(
     return [ArticleBrief.model_validate(a) for a in articles]
 
 
+@router.get("/insights")
+async def news_insights(
+    article_ids: list[int] = Query(default=[]),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Return lightweight per-article insights for newsroom cards:
+    - cluster_size: number of members in the same story cluster
+    - relation_count: number of explicit outgoing relations
+    """
+    ids = [int(x) for x in article_ids if int(x) > 0]
+    if not ids:
+        return []
+
+    sm_self = StoryClusterMember.__table__.alias("sm_self")
+    sm_all = StoryClusterMember.__table__.alias("sm_all")
+
+    cluster_rows = await db.execute(
+        select(
+            sm_self.c.article_id.label("article_id"),
+            func.count(sm_all.c.article_id).label("cluster_size"),
+        )
+        .select_from(sm_self.join(sm_all, sm_self.c.cluster_id == sm_all.c.cluster_id))
+        .where(sm_self.c.article_id.in_(ids))
+        .group_by(sm_self.c.article_id)
+    )
+    cluster_map = {int(r.article_id): int(r.cluster_size) for r in cluster_rows}
+
+    relation_rows = await db.execute(
+        select(
+            ArticleRelation.from_article_id.label("article_id"),
+            func.count(ArticleRelation.id).label("relation_count"),
+        )
+        .where(ArticleRelation.from_article_id.in_(ids))
+        .group_by(ArticleRelation.from_article_id)
+    )
+    relation_map = {int(r.article_id): int(r.relation_count) for r in relation_rows}
+
+    return [
+        {
+            "article_id": aid,
+            "cluster_size": cluster_map.get(aid, 0),
+            "relation_count": relation_map.get(aid, 0),
+        }
+        for aid in ids
+    ]
+
+
 @router.get("/search/semantic")
 async def semantic_search(
     q: str = Query(..., min_length=2),
