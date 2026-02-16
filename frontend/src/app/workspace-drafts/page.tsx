@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'next/navigation';
-import { CheckCircle2, Copy, FileText, Filter, Loader2, Search, Sparkles, Wand2 } from 'lucide-react';
+import { AlertTriangle, Bot, CheckCircle2, Copy, FileText, Filter, Loader2, PlayCircle, Search, Sparkles, Wand2 } from 'lucide-react';
 
 import { editorialApi, newsApi, type WorkspaceDraft } from '@/lib/api';
 import { journalistServicesApi } from '@/lib/journalist-services-api';
@@ -19,6 +19,8 @@ type AIToolResult = {
     imagePrompt?: string;
     infographicPrompt?: string;
 };
+
+type PipelineStepState = 'idle' | 'running' | 'done' | 'error';
 
 export default function WorkspaceDraftsPage() {
     const queryClient = useQueryClient();
@@ -45,6 +47,18 @@ export default function WorkspaceDraftsPage() {
 
     const [busyAction, setBusyAction] = useState('');
     const [lastCopiedKey, setLastCopiedKey] = useState('');
+    const [writerHeadlines, setWriterHeadlines] = useState<string[]>([]);
+    const [writerLead, setWriterLead] = useState('');
+    const [socialSnippets, setSocialSnippets] = useState<string[]>([]);
+    const [pipelineSteps, setPipelineSteps] = useState<Record<string, PipelineStepState>>({
+        regenerate: 'idle',
+        proofread: 'idle',
+        metadata: 'idle',
+        keywords: 'idle',
+        imagePrompt: 'idle',
+        infographicPrompt: 'idle',
+        social: 'idle',
+    });
 
     const initialWorkId = searchParams.get('work_id') || '';
 
@@ -177,6 +191,18 @@ export default function WorkspaceDraftsPage() {
         setImagePrompt('');
         setInfographicPrompt('');
         setAiResult({});
+        setWriterHeadlines([]);
+        setWriterLead('');
+        setSocialSnippets([]);
+        setPipelineSteps({
+            regenerate: 'idle',
+            proofread: 'idle',
+            metadata: 'idle',
+            keywords: 'idle',
+            imagePrompt: 'idle',
+            infographicPrompt: 'idle',
+            social: 'idle',
+        });
         const title = `${selected.title || ''} ${selected.body || ''}`;
         const hasArabic = /[\u0600-\u06FF]/.test(title);
         const hasFrench = /[éèêàùçôîïâ]/i.test(title);
@@ -229,13 +255,41 @@ export default function WorkspaceDraftsPage() {
         ].join('\n');
     }, [workingTitle, selected?.title, seoTitle, seoDescription, seoKeywords, imageAlt, imagePrompt, infographicPrompt]);
 
-    const runAI = async (action: 'rewrite' | 'summary' | 'proofread' | 'keywords' | 'metadata' | 'imagePrompt' | 'infographicPrompt') => {
+    const qualityChecks = useMemo(() => {
+        const body = (workingBody || '').trim();
+        const title = (workingTitle || '').trim();
+        const checks = [
+            { id: 'title', label: 'عنوان تحريري موجود', pass: title.length >= 12 },
+            { id: 'body', label: 'متن مناسب للنشر (>= 500 حرف)', pass: body.length >= 500 },
+            { id: 'seo_title', label: 'SEO Title جاهز', pass: (seoTitle || title).trim().length >= 12 },
+            { id: 'meta', label: 'Meta Description جاهز', pass: (seoDescription || '').trim().length >= 80 },
+            { id: 'keywords', label: 'Focus Keywords جاهزة', pass: (seoKeywords || '').trim().length >= 10 },
+            { id: 'alt', label: 'ALT للصورة جاهز', pass: (imageAlt || '').trim().length >= 8 },
+        ];
+        return checks;
+    }, [workingBody, workingTitle, seoTitle, seoDescription, seoKeywords, imageAlt]);
+
+    const canApplyDraft = useMemo(
+        () => !!selected && selected.status === 'draft' && qualityChecks.every((c) => c.pass),
+        [selected, qualityChecks],
+    );
+
+    const updatePipelineStep = (step: string, status: PipelineStepState) => {
+        setPipelineSteps((prev) => ({ ...prev, [step]: status }));
+    };
+
+    const runAI = async (
+        action: 'rewrite' | 'summary' | 'proofread' | 'keywords' | 'metadata' | 'imagePrompt' | 'infographicPrompt',
+        opts?: { silent?: boolean; stepName?: string },
+    ) => {
         const text = `${workingTitle}\n\n${workingBody}`.trim() || articleData?.data?.original_content || selected?.body || '';
         if (!text) {
             setError('لا يوجد نص لمعالجته');
             return;
         }
 
+        const stepName = opts?.stepName || action;
+        updatePipelineStep(stepName, 'running');
         setBusyAction(action);
         setError(null);
 
@@ -245,11 +299,16 @@ export default function WorkspaceDraftsPage() {
                 const result = cleanAiText(res?.data?.result || '');
                 setAiResult((prev) => ({ ...prev, rewrite: result }));
                 if (result) setWorkingBody(result);
+                const lines = result.split('\n').map((l) => l.trim()).filter(Boolean);
+                setWriterHeadlines(lines.slice(0, 3));
             }
 
             if (action === 'summary') {
                 const res = await journalistServicesApi.social(text, 'general', selectedLanguage);
-                setAiResult((prev) => ({ ...prev, summary: cleanAiText(res?.data?.result || '') }));
+                const result = cleanAiText(res?.data?.result || '');
+                setAiResult((prev) => ({ ...prev, summary: result }));
+                const snippets = result.split('\n').map((l) => l.trim()).filter(Boolean);
+                setSocialSnippets(snippets.slice(0, 4));
             }
 
             if (action === 'proofread') {
@@ -270,8 +329,8 @@ export default function WorkspaceDraftsPage() {
                 const res = await journalistServicesApi.metadata(text, selectedLanguage);
                 const result = cleanAiText(res?.data?.result || '');
                 setAiResult((prev) => ({ ...prev, metadata: result }));
-                const titleMatch = result.match(/SEO\s*Title\s*[:：]\s*(.+)/i);
-                const descMatch = result.match(/Meta\s*Description\s*[:：]\s*(.+)/i);
+                const titleMatch = result.match(/seo[_\s-]*title\s*[:：]\s*["']?(.+?)["']?(?:,|$)/i) || result.match(/SEO\s*Title\s*[:：]\s*(.+)/i);
+                const descMatch = result.match(/meta[_\s-]*description\s*[:：]\s*["']?(.+?)["']?(?:,|$)/i) || result.match(/Meta\s*Description\s*[:：]\s*(.+)/i);
                 if (titleMatch?.[1]) setSeoTitle(titleMatch[1].trim());
                 if (descMatch?.[1]) setSeoDescription(descMatch[1].trim());
             }
@@ -310,19 +369,62 @@ export default function WorkspaceDraftsPage() {
                 setInfographicPrompt(result);
             }
 
-            setOk('تم تنفيذ أداة الذكاء الاصطناعي بنجاح');
+            updatePipelineStep(stepName, 'done');
+            if (!opts?.silent) setOk('تم تنفيذ أداة الذكاء الاصطناعي بنجاح');
         } catch (err: any) {
+            updatePipelineStep(stepName, 'error');
             setError(err?.response?.data?.detail || 'فشل تنفيذ أداة الذكاء الاصطناعي');
         } finally {
             setBusyAction('');
         }
     };
 
+    const runWriterPack = async () => {
+        if (!selected) return;
+        setError(null);
+        setOk(null);
+        try {
+            updatePipelineStep('regenerate', 'running');
+            const regen = await editorialApi.regenerateWorkspaceDraft(selected.work_id);
+            const latest = await editorialApi.workspaceDraft(regen.data?.work_id || selected.work_id);
+            if (latest?.data) {
+                setSelected(latest.data);
+                setWorkingTitle(latest.data.title || '');
+                setWorkingBody(latest.data.body || '');
+            }
+            updatePipelineStep('regenerate', 'done');
+
+            const text = `${latest?.data?.title || workingTitle}\n\n${latest?.data?.body || workingBody}`.trim();
+            const tonalityRes = await journalistServicesApi.tonality(text, selectedLanguage);
+            const tonality = cleanAiText(tonalityRes?.data?.result || '');
+            const headlines = tonality.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 3);
+            setWriterHeadlines(headlines);
+
+            const invertedRes = await journalistServicesApi.inverted(text, selectedLanguage);
+            const inverted = cleanAiText(invertedRes?.data?.result || '');
+            setWriterLead((inverted.split('\n').map((l) => l.trim()).find(Boolean) || '').trim());
+
+            const socialRes = await journalistServicesApi.social(text, 'general', selectedLanguage);
+            const social = cleanAiText(socialRes?.data?.result || '');
+            const snippets = social.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 4);
+            setSocialSnippets(snippets);
+            setAiResult((prev) => ({ ...prev, summary: social, rewrite: tonality }));
+
+            setOk('تم تشغيل حزمة الكاتب: نسخة محسنة + عناوين + ليد + صيغ سوشيال');
+        } catch (err: any) {
+            updatePipelineStep('regenerate', 'error');
+            setError(err?.response?.data?.detail || 'فشل تشغيل حزمة الكاتب');
+        }
+    };
+
     const runPublishingWorkflow = async () => {
-        await runAI('proofread');
-        await runAI('metadata');
-        await runAI('keywords');
-        await runAI('imagePrompt');
+        await runAI('proofread', { silent: true, stepName: 'proofread' });
+        await runAI('metadata', { silent: true, stepName: 'metadata' });
+        await runAI('keywords', { silent: true, stepName: 'keywords' });
+        await runAI('imagePrompt', { silent: true, stepName: 'imagePrompt' });
+        await runAI('infographicPrompt', { silent: true, stepName: 'infographicPrompt' });
+        await runAI('summary', { silent: true, stepName: 'social' });
+        setOk('اكتملت حزمة النشر: تدقيق + SEO + وسائط + سوشيال');
     };
 
     const copyText = async (key: string, text: string, message: string) => {
@@ -430,14 +532,30 @@ export default function WorkspaceDraftsPage() {
                                             disabled={createVersionMutation.isPending}
                                             className="px-3 py-2 rounded-xl text-xs border bg-sky-500/20 border-sky-500/30 text-sky-200"
                                         >
-                                            نسخة جديدة
+                                            إعادة توليد (v+1)
+                                        </button>
+                                        <button
+                                            onClick={runWriterPack}
+                                            disabled={busyAction !== ''}
+                                            className="px-3 py-2 rounded-xl text-xs border bg-cyan-500/20 border-cyan-500/30 text-cyan-200 inline-flex items-center gap-2"
+                                        >
+                                            <Bot className="w-4 h-4" />
+                                            حزمة الكاتب
+                                        </button>
+                                        <button
+                                            onClick={runPublishingWorkflow}
+                                            disabled={busyAction !== ''}
+                                            className="px-3 py-2 rounded-xl text-xs border bg-emerald-500/20 border-emerald-500/30 text-emerald-100 inline-flex items-center gap-2"
+                                        >
+                                            <PlayCircle className="w-4 h-4" />
+                                            حزمة النشر
                                         </button>
                                         <button
                                             onClick={() => applyMutation.mutate(selected.work_id)}
-                                            disabled={applyMutation.isPending || selected.status !== 'draft'}
+                                            disabled={applyMutation.isPending || !canApplyDraft}
                                             className={cn(
                                                 'px-3 py-2 rounded-xl text-xs border flex items-center gap-2',
-                                                selected.status === 'draft'
+                                                canApplyDraft
                                                     ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-200'
                                                     : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed',
                                             )}
@@ -457,6 +575,53 @@ export default function WorkspaceDraftsPage() {
                                         >
                                             أرشفة
                                         </button>
+                                    </div>
+                                </div>
+
+                                <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <h4 className="text-xs text-gray-300">بوابة الجودة قبل التطبيق</h4>
+                                        {!canApplyDraft && (
+                                            <span className="text-[11px] text-amber-300 inline-flex items-center gap-1">
+                                                <AlertTriangle className="w-3 h-3" />
+                                                أكمل المتطلبات أولاً
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                        {qualityChecks.map((check) => (
+                                            <div
+                                                key={check.id}
+                                                className={cn(
+                                                    'px-2 py-1.5 rounded-lg text-xs border',
+                                                    check.pass
+                                                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+                                                        : 'bg-amber-500/10 border-amber-500/30 text-amber-200',
+                                                )}
+                                            >
+                                                {check.label}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                                    <h4 className="text-xs text-gray-300 mb-2">مراحل الكاتب</h4>
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                        {Object.entries(pipelineSteps).map(([step, state]) => (
+                                            <div key={step} className="px-2 py-1.5 rounded-lg text-[11px] border border-white/10 bg-white/5 text-gray-200">
+                                                <div className="font-medium">{step}</div>
+                                                <div className={cn(
+                                                    'mt-1',
+                                                    state === 'done' && 'text-emerald-300',
+                                                    state === 'running' && 'text-sky-300',
+                                                    state === 'error' && 'text-red-300',
+                                                    state === 'idle' && 'text-gray-500',
+                                                )}>
+                                                    {state}
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
 
@@ -575,6 +740,57 @@ export default function WorkspaceDraftsPage() {
                                     <button onClick={() => runAI('infographicPrompt')} disabled={busyAction !== ''} className="px-3 py-2 rounded-xl text-xs bg-rose-500/20 border border-rose-500/30 text-rose-200">اقتراح إنفوغراف</button>
                                 </div>
                                 {busyAction && <p className="text-xs text-gray-400">جاري التنفيذ: {busyAction}</p>}
+
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <h4 className="text-xs text-gray-300">بدائل عنوان الكاتب</h4>
+                                            <button
+                                                onClick={() => copyText('writer_headlines', writerHeadlines.join('\n'), 'تم نسخ بدائل العنوان')}
+                                                className="px-2 py-1 rounded-lg text-[10px] bg-white/10 text-gray-200"
+                                            >
+                                                {lastCopiedKey === 'writer_headlines' ? 'تم النسخ' : 'نسخ'}
+                                            </button>
+                                        </div>
+                                        <ul className="text-xs text-gray-100 space-y-1" dir="rtl">
+                                            {(writerHeadlines.length ? writerHeadlines : ['شغّل حزمة الكاتب لتوليد 3 بدائل']).map((h, idx) => (
+                                                <li key={`${h}-${idx}`} className="rounded-lg bg-white/5 px-2 py-1">{h}</li>
+                                            ))}
+                                        </ul>
+                                    </div>
+
+                                    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <h4 className="text-xs text-gray-300">Lead مقترح</h4>
+                                            <button
+                                                onClick={() => copyText('writer_lead', writerLead, 'تم نسخ الـ Lead')}
+                                                className="px-2 py-1 rounded-lg text-[10px] bg-white/10 text-gray-200"
+                                            >
+                                                {lastCopiedKey === 'writer_lead' ? 'تم النسخ' : 'نسخ'}
+                                            </button>
+                                        </div>
+                                        <p className="text-xs text-gray-100" dir="rtl">
+                                            {writerLead || 'شغّل حزمة الكاتب لتوليد Lead افتتاحي.'}
+                                        </p>
+                                    </div>
+
+                                    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <h4 className="text-xs text-gray-300">ملخصات سوشيال</h4>
+                                            <button
+                                                onClick={() => copyText('writer_social', socialSnippets.join('\n'), 'تم نسخ صيغ السوشيال')}
+                                                className="px-2 py-1 rounded-lg text-[10px] bg-white/10 text-gray-200"
+                                            >
+                                                {lastCopiedKey === 'writer_social' ? 'تم النسخ' : 'نسخ'}
+                                            </button>
+                                        </div>
+                                        <ul className="text-xs text-gray-100 space-y-1" dir="rtl">
+                                            {(socialSnippets.length ? socialSnippets : ['شغّل حزمة الكاتب لتوليد صيغ سوشيال.']).map((s, idx) => (
+                                                <li key={`${s}-${idx}`} className="rounded-lg bg-white/5 px-2 py-1">{s}</li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                     <div className="rounded-xl border border-white/10 bg-black/20 p-3">

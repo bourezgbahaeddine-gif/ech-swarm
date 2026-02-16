@@ -215,7 +215,7 @@ async def handoff_to_scribe(
     article = result.scalar_one_or_none()
     if not article:
         raise HTTPException(404, "Article not found")
-    if article.status not in [NewsStatus.CANDIDATE, NewsStatus.CLASSIFIED, NewsStatus.APPROVED_HANDOFF, NewsStatus.DRAFT_GENERATED]:
+    if article.status not in [NewsStatus.CANDIDATE, NewsStatus.CLASSIFIED, NewsStatus.APPROVED, NewsStatus.APPROVED_HANDOFF, NewsStatus.DRAFT_GENERATED]:
         raise HTTPException(400, f"Article cannot be handed off in state: {article.status}")
 
     if article.status in [NewsStatus.CANDIDATE, NewsStatus.CLASSIFIED]:
