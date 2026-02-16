@@ -7,8 +7,14 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-# Add backend package to path for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend")))
+# Add app package roots to path for imports.
+# In Docker image, backend code is copied to /app (contains /app/app).
+# In some local setups, code may live under ../backend.
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+BACKEND_DIR = os.path.join(ROOT_DIR, "backend")
+for p in [ROOT_DIR, BACKEND_DIR]:
+    if p not in sys.path and os.path.isdir(p):
+        sys.path.append(p)
 
 from app.core.config import get_settings
 from app.core.database import Base  # noqa: E402
