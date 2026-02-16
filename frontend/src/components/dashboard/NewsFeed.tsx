@@ -1,7 +1,8 @@
 'use client';
 
+import Link from 'next/link';
 import { type ArticleBrief } from '@/lib/api';
-import { cn, formatRelativeTime, getStatusColor, getUrgencyColor, getCategoryLabel, truncate } from '@/lib/utils';
+import { cn, formatRelativeTime, getStatusColor, getCategoryLabel, truncate } from '@/lib/utils';
 import { Zap, ExternalLink, Clock, Star } from 'lucide-react';
 
 interface NewsFeedProps {
@@ -14,70 +15,73 @@ function ArticleCard({ article }: { article: ArticleBrief }) {
     const displayTitle = article.title_ar || article.original_title;
 
     return (
-        <div className={cn(
-            'group relative rounded-xl p-4 transition-all duration-300',
-            'bg-gradient-to-br from-gray-800/40 to-gray-900/60',
-            'border hover:shadow-lg cursor-pointer',
-            article.is_breaking
-                ? 'border-red-500/30 hover:border-red-500/60 hover:shadow-red-500/10'
-                : 'border-white/5 hover:border-emerald-500/20 hover:shadow-emerald-500/5',
-        )}>
-            {/* Breaking badge */}
-            {article.is_breaking && (
-                <div className="absolute -top-2 right-4 px-2.5 py-0.5 rounded-full bg-red-500 text-[10px] font-bold text-white flex items-center gap-1 shadow-lg shadow-red-500/30 animate-pulse">
-                    <Zap className="w-3 h-3" />
-                    عاجل
-                </div>
-            )}
-
-            <div className="flex items-start gap-3">
-                {/* Importance indicator */}
-                <div className="flex flex-col items-center gap-1 pt-0.5">
-                    <div className={cn(
-                        'w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold',
-                        article.importance_score >= 8 ? 'bg-red-500/20 text-red-400' :
-                            article.importance_score >= 6 ? 'bg-amber-500/20 text-amber-400' :
-                                article.importance_score >= 4 ? 'bg-blue-500/20 text-blue-400' :
-                                    'bg-gray-500/20 text-gray-400',
-                    )}>
-                        {article.importance_score}
+        <Link href={`/news/${article.id}`} className="block">
+            <div
+                className={cn(
+                    'group relative rounded-xl p-4 transition-all duration-300',
+                    'bg-gradient-to-br from-gray-800/40 to-gray-900/60',
+                    'border hover:shadow-lg cursor-pointer',
+                    article.is_breaking
+                        ? 'border-red-500/30 hover:border-red-500/60 hover:shadow-red-500/10'
+                        : 'border-white/5 hover:border-emerald-500/20 hover:shadow-emerald-500/5',
+                )}
+            >
+                {article.is_breaking && (
+                    <div className="absolute -top-2 right-4 px-2.5 py-0.5 rounded-full bg-red-500 text-[10px] font-bold text-white flex items-center gap-1 shadow-lg shadow-red-500/30 breaking-pulse">
+                        <Zap className="w-3 h-3" />
+                        عاجل
                     </div>
-                </div>
+                )}
 
-                {/* Content */}
-                <div className="flex-1 min-w-0">
-                    <h3 className="text-sm font-semibold text-white leading-relaxed group-hover:text-emerald-300 transition-colors line-clamp-2" dir="rtl">
-                        {displayTitle}
-                    </h3>
+                <div className="flex items-start gap-3">
+                    <div className="flex flex-col items-center gap-1 pt-0.5">
+                        <div
+                            className={cn(
+                                'w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold',
+                                article.importance_score >= 8
+                                    ? 'bg-red-500/20 text-red-400'
+                                    : article.importance_score >= 6
+                                      ? 'bg-amber-500/20 text-amber-400'
+                                      : article.importance_score >= 4
+                                        ? 'bg-blue-500/20 text-blue-400'
+                                        : 'bg-gray-500/20 text-gray-400',
+                            )}
+                        >
+                            {article.importance_score}
+                        </div>
+                    </div>
 
-                    {article.summary && (
-                        <p className="mt-1.5 text-xs text-gray-400 leading-relaxed line-clamp-2" dir="rtl">
-                            {truncate(article.summary, 150)}
-                        </p>
-                    )}
+                    <div className="flex-1 min-w-0">
+                        <h3 className="text-sm font-semibold text-white leading-relaxed group-hover:text-emerald-300 transition-colors line-clamp-2" dir="rtl">
+                            {displayTitle}
+                        </h3>
 
-                    {/* Meta row */}
-                    <div className="flex flex-wrap items-center gap-2 mt-3">
-                        <span className={cn('px-2 py-0.5 rounded-md text-[10px] font-medium border', getStatusColor(article.status))}>
-                            {article.status}
-                        </span>
-                        <span className="text-[10px] text-gray-500">
-                            {getCategoryLabel(article.category)}
-                        </span>
-                        {article.source_name && (
-                            <span className="text-[10px] text-gray-600 flex items-center gap-1">
-                                <ExternalLink className="w-3 h-3" />
-                                {article.source_name}
-                            </span>
+                        {article.summary && (
+                            <p className="mt-1.5 text-xs text-gray-400 leading-relaxed line-clamp-2" dir="rtl">
+                                {truncate(article.summary, 150)}
+                            </p>
                         )}
-                        <span className="text-[10px] text-gray-600 flex items-center gap-1 mr-auto">
-                            <Clock className="w-3 h-3" />
-                            {formatRelativeTime(article.crawled_at)}
-                        </span>
+
+                        <div className="flex flex-wrap items-center gap-2 mt-3">
+                            <span className={cn('px-2 py-0.5 rounded-md text-[10px] font-medium border', getStatusColor(article.status))}>
+                                {article.status}
+                            </span>
+                            <span className="text-[10px] text-gray-500">{getCategoryLabel(article.category)}</span>
+                            {article.source_name && (
+                                <span className="text-[10px] text-gray-600 flex items-center gap-1">
+                                    <ExternalLink className="w-3 h-3" />
+                                    {article.source_name}
+                                </span>
+                            )}
+                            <span className="text-[10px] text-gray-600 flex items-center gap-1 mr-auto">
+                                <Clock className="w-3 h-3" />
+                                {formatRelativeTime(article.crawled_at)}
+                            </span>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
+        </Link>
     );
 }
 
@@ -108,9 +112,7 @@ export default function NewsFeed({ articles, isLoading, title = 'آخر الأخ
                     {title}
                 </h2>
                 {articles && (
-                    <span className="text-[10px] text-gray-500 px-2 py-0.5 rounded-full bg-white/5">
-                        {articles.length} خبر
-                    </span>
+                    <span className="text-[10px] text-gray-500 px-2 py-0.5 rounded-full bg-white/5">{articles.length} خبر</span>
                 )}
             </div>
 
@@ -118,9 +120,7 @@ export default function NewsFeed({ articles, isLoading, title = 'آخر الأخ
                 {isLoading ? (
                     Array.from({ length: 5 }).map((_, i) => <ArticleSkeleton key={i} />)
                 ) : articles && articles.length > 0 ? (
-                    articles.map((article) => (
-                        <ArticleCard key={article.id} article={article} />
-                    ))
+                    articles.map((article) => <ArticleCard key={article.id} article={article} />)
                 ) : (
                     <div className="text-center py-12 text-gray-500">
                         <Zap className="w-8 h-8 mx-auto mb-2 opacity-30" />

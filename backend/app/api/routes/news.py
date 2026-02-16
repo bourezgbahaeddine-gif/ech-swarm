@@ -96,10 +96,19 @@ async def get_breaking_news(
     limit: int = Query(5, ge=1, le=20),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get latest breaking news."""
+    """Get actionable breaking news for dashboard newsroom workflow."""
+    cutoff = datetime.utcnow() - timedelta(hours=72)
     result = await db.execute(
         select(Article)
-        .where(Article.is_breaking == True)
+        .where(
+            and_(
+                Article.is_breaking == True,
+                Article.created_at >= cutoff,
+                Article.status.notin_(
+                    [NewsStatus.REJECTED, NewsStatus.ARCHIVED, NewsStatus.PUBLISHED]
+                ),
+            )
+        )
         .order_by(desc(Article.crawled_at))
         .limit(limit)
     )

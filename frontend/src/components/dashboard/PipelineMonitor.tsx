@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { type PipelineRun } from '@/lib/api';
 import { cn, formatRelativeTime } from '@/lib/utils';
 import { Activity, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
@@ -9,7 +10,14 @@ interface PipelineMonitorProps {
     isLoading: boolean;
 }
 
-function RunRow({ run }: { run: PipelineRun }) {
+function getRunTarget(runType: string) {
+    const t = (runType || '').toLowerCase();
+    if (t === 'trends') return '/trends';
+    if (t === 'scout' || t === 'router' || t === 'scribe') return '/agents';
+    return '/agents';
+}
+
+function RunRow({ run, onOpen }: { run: PipelineRun; onOpen: (href: string) => void }) {
     const statusIcon = {
         success: <CheckCircle2 className="w-4 h-4 text-emerald-400" />,
         failed: <XCircle className="w-4 h-4 text-red-400" />,
@@ -17,38 +25,39 @@ function RunRow({ run }: { run: PipelineRun }) {
     }[run.status] || <Activity className="w-4 h-4 text-gray-400" />;
 
     const runTypeLabels: Record<string, string> = {
-        scout: '🔍 كشّاف',
-        router: '🧭 موجّه',
-        scribe: '✍️ كاتب',
-        trends: '📡 تراند',
-        audio: '🎙️ مذيع',
+        scout: 'كشّاف',
+        router: 'موجّه',
+        scribe: 'كاتب',
+        trends: 'تراند',
+        audio: 'مذيع',
     };
 
     return (
-        <div className={cn(
-            'flex items-center gap-3 px-4 py-3 rounded-xl transition-colors',
-            'hover:bg-white/[0.03]',
-            run.status === 'running' && 'bg-amber-500/5 border border-amber-500/10',
-        )}>
+        <button
+            onClick={() => onOpen(getRunTarget(run.run_type))}
+            className={cn(
+                'w-full text-right flex items-center gap-3 px-4 py-3 rounded-xl transition-colors',
+                'hover:bg-white/[0.03] cursor-pointer',
+                run.status === 'running' && 'bg-amber-500/5 border border-amber-500/10',
+            )}
+        >
             {statusIcon}
 
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-white">
-                        {runTypeLabels[run.run_type] || run.run_type}
-                    </span>
-                    <span className={cn(
-                        'px-1.5 py-0.5 rounded text-[9px] font-bold uppercase',
-                        run.status === 'success' && 'bg-emerald-500/20 text-emerald-400',
-                        run.status === 'failed' && 'bg-red-500/20 text-red-400',
-                        run.status === 'running' && 'bg-amber-500/20 text-amber-400',
-                    )}>
+                    <span className="text-sm font-medium text-white">{runTypeLabels[run.run_type] || run.run_type}</span>
+                    <span
+                        className={cn(
+                            'px-1.5 py-0.5 rounded text-[9px] font-bold uppercase',
+                            run.status === 'success' && 'bg-emerald-500/20 text-emerald-400',
+                            run.status === 'failed' && 'bg-red-500/20 text-red-400',
+                            run.status === 'running' && 'bg-amber-500/20 text-amber-400',
+                        )}
+                    >
                         {run.status}
                     </span>
                 </div>
-                <p className="text-[10px] text-gray-500 mt-0.5">
-                    {formatRelativeTime(run.started_at)}
-                </p>
+                <p className="text-[10px] text-gray-500 mt-0.5">{formatRelativeTime(run.started_at)}</p>
             </div>
 
             <div className="flex items-center gap-4 text-[10px] text-gray-500">
@@ -67,11 +76,13 @@ function RunRow({ run }: { run: PipelineRun }) {
                     <p>أخطاء</p>
                 </div>
             </div>
-        </div>
+        </button>
     );
 }
 
 export default function PipelineMonitor({ runs, isLoading }: PipelineMonitorProps) {
+    const router = useRouter();
+
     return (
         <div className="rounded-2xl bg-gray-800/20 border border-white/5 overflow-hidden">
             <div className="flex items-center gap-2 px-5 py-3 border-b border-white/5">
@@ -82,15 +93,11 @@ export default function PipelineMonitor({ runs, isLoading }: PipelineMonitorProp
 
             <div className="p-2 space-y-1 max-h-[400px] overflow-y-auto">
                 {isLoading ? (
-                    Array.from({ length: 5 }).map((_, i) => (
-                        <div key={i} className="h-16 rounded-xl bg-gray-800/30 animate-pulse" />
-                    ))
+                    Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-16 rounded-xl bg-gray-800/30 animate-pulse" />)
                 ) : runs && runs.length > 0 ? (
-                    runs.map((run) => <RunRow key={run.id} run={run} />)
+                    runs.map((run) => <RunRow key={run.id} run={run} onOpen={(href) => router.push(href)} />)
                 ) : (
-                    <div className="text-center py-8 text-gray-500 text-sm">
-                        لا توجد عمليات سابقة
-                    </div>
+                    <div className="text-center py-8 text-gray-500 text-sm">لا توجد عمليات سابقة</div>
                 )}
             </div>
         </div>

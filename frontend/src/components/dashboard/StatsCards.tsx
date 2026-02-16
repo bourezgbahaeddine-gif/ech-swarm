@@ -1,10 +1,18 @@
 'use client';
 
+import Link from 'next/link';
 import { type DashboardStats } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import {
-    Newspaper, Clock, CheckCircle, XCircle,
-    Send, Zap, Rss, Bot, Timer,
+    Newspaper,
+    Clock,
+    CheckCircle,
+    XCircle,
+    Send,
+    Zap,
+    Rss,
+    Bot,
+    Timer,
 } from 'lucide-react';
 
 interface StatsCardsProps {
@@ -19,21 +27,26 @@ interface StatCardProps {
     color: string;
     glowColor: string;
     trend?: string;
+    href?: string;
 }
 
-function StatCard({ label, value, icon: Icon, color, glowColor, trend }: StatCardProps) {
-    return (
-        <div className={cn(
-            'relative overflow-hidden rounded-2xl p-5',
-            'bg-gradient-to-br from-gray-800/50 to-gray-900/80',
-            'border border-white/5 hover:border-white/10',
-            'group transition-all duration-300 hover:scale-[1.02] hover:shadow-xl',
-        )}>
-            {/* Glow effect */}
-            <div className={cn(
-                'absolute -top-12 -left-12 w-24 h-24 rounded-full blur-2xl opacity-20 group-hover:opacity-40 transition-opacity',
-                glowColor,
-            )} />
+function StatCard({ label, value, icon: Icon, color, glowColor, trend, href }: StatCardProps) {
+    const content = (
+        <div
+            className={cn(
+                'relative overflow-hidden rounded-2xl p-5',
+                'bg-gradient-to-br from-gray-800/50 to-gray-900/80',
+                'border border-white/5 hover:border-white/10',
+                'group transition-all duration-300 hover:scale-[1.02] hover:shadow-xl',
+                href && 'cursor-pointer',
+            )}
+        >
+            <div
+                className={cn(
+                    'absolute -top-12 -left-12 w-24 h-24 rounded-full blur-2xl opacity-20 group-hover:opacity-40 transition-opacity',
+                    glowColor,
+                )}
+            />
 
             <div className="relative flex items-start justify-between">
                 <div>
@@ -41,18 +54,20 @@ function StatCard({ label, value, icon: Icon, color, glowColor, trend }: StatCar
                     <p className="text-2xl font-bold text-white tracking-tight">
                         {typeof value === 'number' ? value.toLocaleString('ar-DZ') : value}
                     </p>
-                    {trend && (
-                        <p className="text-[10px] text-emerald-400 mt-1">{trend}</p>
-                    )}
+                    {trend && <p className="text-[10px] text-emerald-400 mt-1">{trend}</p>}
                 </div>
-                <div className={cn(
-                    'w-10 h-10 rounded-xl flex items-center justify-center',
-                    color,
-                )}>
+                <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center', color)}>
                     <Icon className="w-5 h-5 text-white" />
                 </div>
             </div>
         </div>
+    );
+
+    if (!href) return content;
+    return (
+        <Link href={href} className="block">
+            {content}
+        </Link>
     );
 }
 
@@ -74,7 +89,9 @@ export default function StatsCards({ stats, isLoading }: StatsCardsProps) {
     if (isLoading) {
         return (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-                {Array.from({ length: 10 }).map((_, i) => <StatCardSkeleton key={i} />)}
+                {Array.from({ length: 10 }).map((_, i) => (
+                    <StatCardSkeleton key={i} />
+                ))}
             </div>
         );
     }
@@ -86,6 +103,7 @@ export default function StatsCards({ stats, isLoading }: StatsCardsProps) {
             icon: Newspaper,
             color: 'bg-blue-500/20',
             glowColor: 'bg-blue-500',
+            href: '/news',
         },
         {
             label: 'أخبار اليوم',
@@ -93,7 +111,8 @@ export default function StatsCards({ stats, isLoading }: StatsCardsProps) {
             icon: Clock,
             color: 'bg-cyan-500/20',
             glowColor: 'bg-cyan-500',
-            trend: '📈 محدّث مباشرة',
+            trend: 'محدّث مباشرة',
+            href: '/news',
         },
         {
             label: 'بانتظار المراجعة',
@@ -101,6 +120,7 @@ export default function StatsCards({ stats, isLoading }: StatsCardsProps) {
             icon: Clock,
             color: 'bg-amber-500/20',
             glowColor: 'bg-amber-500',
+            href: '/editorial',
         },
         {
             label: 'تمت الموافقة',
@@ -108,6 +128,7 @@ export default function StatsCards({ stats, isLoading }: StatsCardsProps) {
             icon: CheckCircle,
             color: 'bg-emerald-500/20',
             glowColor: 'bg-emerald-500',
+            href: '/editorial',
         },
         {
             label: 'تم الرفض',
@@ -115,6 +136,7 @@ export default function StatsCards({ stats, isLoading }: StatsCardsProps) {
             icon: XCircle,
             color: 'bg-red-500/20',
             glowColor: 'bg-red-500',
+            href: '/editorial',
         },
         {
             label: 'تم النشر',
@@ -122,6 +144,7 @@ export default function StatsCards({ stats, isLoading }: StatsCardsProps) {
             icon: Send,
             color: 'bg-violet-500/20',
             glowColor: 'bg-violet-500',
+            href: '/news?status=published',
         },
         {
             label: 'أخبار عاجلة',
@@ -129,6 +152,7 @@ export default function StatsCards({ stats, isLoading }: StatsCardsProps) {
             icon: Zap,
             color: 'bg-rose-500/20',
             glowColor: 'bg-rose-500',
+            href: '/news?breaking=1',
         },
         {
             label: 'المصادر النشطة',
@@ -136,6 +160,7 @@ export default function StatsCards({ stats, isLoading }: StatsCardsProps) {
             icon: Rss,
             color: 'bg-orange-500/20',
             glowColor: 'bg-orange-500',
+            href: '/sources',
         },
         {
             label: 'استدعاءات AI اليوم',
@@ -143,6 +168,7 @@ export default function StatsCards({ stats, isLoading }: StatsCardsProps) {
             icon: Bot,
             color: 'bg-indigo-500/20',
             glowColor: 'bg-indigo-500',
+            href: '/agents',
         },
         {
             label: 'متوسط المعالجة',
@@ -150,6 +176,7 @@ export default function StatsCards({ stats, isLoading }: StatsCardsProps) {
             icon: Timer,
             color: 'bg-teal-500/20',
             glowColor: 'bg-teal-500',
+            href: '/agents',
         },
     ];
 

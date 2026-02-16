@@ -1,11 +1,18 @@
 'use client';
 
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { dashboardApi, type AgentStatus } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import {
-    Search, Navigation, PenTool, Radio, Mic,
-    Play, Loader2, CheckCircle, AlertCircle,
+    Search,
+    Navigation,
+    PenTool,
+    Radio,
+    Play,
+    Loader2,
+    CheckCircle,
+    AlertCircle,
 } from 'lucide-react';
 
 interface AgentControlProps {
@@ -20,6 +27,7 @@ const agentConfig = [
 ];
 
 export default function AgentControl({ agents }: AgentControlProps) {
+    const queryClient = useQueryClient();
     const [running, setRunning] = useState<Record<string, boolean>>({});
     const [results, setResults] = useState<Record<string, { success: boolean; message: string }>>({});
 
@@ -33,10 +41,22 @@ export default function AgentControl({ agents }: AgentControlProps) {
                 ...prev,
                 [agentKey]: { success: true, message: (response.data as any)?.message || 'تم التنفيذ بنجاح' },
             }));
+
+            // Trigger fast UI refresh because most agents run async and return "queued".
+            const refresh = () => {
+                queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
+                queryClient.invalidateQueries({ queryKey: ['breaking-news'] });
+                queryClient.invalidateQueries({ queryKey: ['pending-articles'] });
+                queryClient.invalidateQueries({ queryKey: ['pipeline-runs'] });
+                queryClient.invalidateQueries({ queryKey: ['agents-status'] });
+            };
+            refresh();
+            setTimeout(refresh, 4000);
+            setTimeout(refresh, 12000);
         } catch (error: any) {
             setResults((prev) => ({
                 ...prev,
-                [agentKey]: { success: false, message: error.message || 'حدث خطأ' },
+                [agentKey]: { success: false, message: error?.response?.data?.detail || error.message || 'حدث خطأ' },
             }));
         } finally {
             setRunning((prev) => ({ ...prev, [agentKey]: false }));
@@ -55,13 +75,22 @@ export default function AgentControl({ agents }: AgentControlProps) {
                 {agentConfig.map(({ key, label, labelEn, icon: Icon, color, trigger }) => {
                     const isRunning = running[key];
                     const result = results[key];
-                    const agentStatus = agents?.[key];
+                    const hasAgent = Boolean(agents?.[key]);
 
                     return (
                         <div
                             key={key}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => !isRunning && handleTrigger(key, trigger)}
+                            onKeyDown={(e) => {
+                                if ((e.key === 'Enter' || e.key === ' ') && !isRunning) {
+                                    e.preventDefault();
+                                    handleTrigger(key, trigger);
+                                }
+                            }}
                             className={cn(
-                                'relative rounded-xl p-4 border transition-all duration-300',
+                                'relative rounded-xl p-4 border transition-all duration-300 cursor-pointer',
                                 'bg-gradient-to-br from-gray-800/40 to-gray-900/60',
                                 isRunning
                                     ? 'border-amber-500/30 shadow-lg shadow-amber-500/5'
@@ -69,21 +98,26 @@ export default function AgentControl({ agents }: AgentControlProps) {
                             )}
                         >
                             <div className="flex items-center gap-3 mb-3">
-                                <div className={cn(
-                                    'w-10 h-10 rounded-xl bg-gradient-to-br flex items-center justify-center shadow-lg',
-                                    color,
-                                )}>
+                                <div className={cn('w-10 h-10 rounded-xl bg-gradient-to-br flex items-center justify-center shadow-lg', color)}>
                                     <Icon className="w-5 h-5 text-white" />
                                 </div>
                                 <div>
                                     <h3 className="text-sm font-semibold text-white">{label}</h3>
                                     <p className="text-[10px] text-gray-500">{labelEn}</p>
                                 </div>
-                                <span className="mr-auto w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                                <span
+                                    className={cn(
+                                        'mr-auto w-2 h-2 rounded-full',
+                                        hasAgent ? 'bg-emerald-400 animate-pulse' : 'bg-gray-500/60',
+                                    )}
+                                />
                             </div>
 
                             <button
-                                onClick={() => handleTrigger(key, trigger)}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleTrigger(key, trigger);
+                                }}
                                 disabled={isRunning}
                                 className={cn(
                                     'w-full py-2 rounded-lg text-xs font-medium transition-all duration-200',
@@ -106,12 +140,13 @@ export default function AgentControl({ agents }: AgentControlProps) {
                                 )}
                             </button>
 
-                            {/* Result feedback */}
                             {result && (
-                                <div className={cn(
-                                    'mt-2 px-3 py-1.5 rounded-lg text-[10px] flex items-center gap-1.5',
-                                    result.success ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400',
-                                )}>
+                                <div
+                                    className={cn(
+                                        'mt-2 px-3 py-1.5 rounded-lg text-[10px] flex items-center gap-1.5',
+                                        result.success ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400',
+                                    )}
+                                >
                                     {result.success ? <CheckCircle className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
                                     {result.message}
                                 </div>
