@@ -13,6 +13,8 @@ from app.models.knowledge import (
     ArticleEntity,
     ArticleChunk,
     ArticleVector,
+    ArticleFingerprint,
+    ArticleRelation,
     StoryCluster,
     StoryClusterMember,
 )
@@ -32,6 +34,8 @@ __all__ = [
     "ArticleEntity",
     "ArticleChunk",
     "ArticleVector",
+    "ArticleFingerprint",
+    "ArticleRelation",
     "StoryCluster",
     "StoryClusterMember",
 ]

@@ -17,7 +17,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.models import Article, ArticleVector, NewsStatus, NewsCategory, UrgencyLevel
+from app.models import (
+    Article,
+    ArticleRelation,
+    ArticleVector,
+    NewsCategory,
+    NewsStatus,
+    StoryCluster,
+    StoryClusterMember,
+    UrgencyLevel,
+)
 from app.schemas import ArticleResponse, ArticleBrief, PaginatedResponse
 
 router = APIRouter(prefix="/news", tags=["News"])
@@ -459,3 +468,78 @@ async def related_articles(
     )
     rows = await db.execute(stmt)
     return [ArticleBrief.model_validate(a) for a in rows.scalars().all()]
+
+
+@router.get("/{article_id}/cluster")
+async def article_cluster(
+    article_id: int,
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Return cluster members for the article (event card view).
+    """
+    member_row = await db.execute(
+        select(StoryClusterMember).where(StoryClusterMember.article_id == article_id).limit(1)
+    )
+    member = member_row.scalar_one_or_none()
+    if not member:
+        return {"cluster": None, "members": []}
+
+    cluster_row = await db.execute(select(StoryCluster).where(StoryCluster.id == member.cluster_id))
+    cluster = cluster_row.scalar_one_or_none()
+    if not cluster:
+        return {"cluster": None, "members": []}
+
+    rows = await db.execute(
+        select(Article)
+        .join(StoryClusterMember, StoryClusterMember.article_id == Article.id)
+        .where(StoryClusterMember.cluster_id == cluster.id)
+        .order_by(desc(StoryClusterMember.score), desc(Article.crawled_at))
+        .limit(limit)
+    )
+    members = [ArticleBrief.model_validate(a) for a in rows.scalars().all()]
+    return {
+        "cluster": {
+            "id": cluster.id,
+            "cluster_key": cluster.cluster_key,
+            "label": cluster.label,
+            "category": cluster.category,
+            "geography": cluster.geography,
+        },
+        "members": members,
+    }
+
+
+@router.get("/{article_id}/relations")
+async def article_relations(
+    article_id: int,
+    relation_type: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Return explicit relation edges (sequence/impact/contrast/duplicate/related).
+    """
+    stmt = (
+        select(ArticleRelation, Article)
+        .join(Article, Article.id == ArticleRelation.to_article_id)
+        .where(ArticleRelation.from_article_id == article_id)
+        .order_by(desc(ArticleRelation.score), desc(Article.created_at))
+        .limit(limit)
+    )
+    if relation_type:
+        stmt = stmt.where(ArticleRelation.relation_type == relation_type)
+
+    rows = await db.execute(stmt)
+    items = []
+    for rel, target in rows.all():
+        items.append(
+            {
+                "relation_type": rel.relation_type,
+                "score": rel.score,
+                "metadata": rel.metadata_json or {},
+                "article": ArticleBrief.model_validate(target),
+            }
+        )
+    return items

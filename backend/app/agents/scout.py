@@ -28,6 +28,7 @@ from app.core.database import async_session
 from app.core.logging import get_logger
 from app.models import Article, Source, PipelineRun, FailedJob, NewsStatus
 from app.services.article_index_service import article_index_service
+from app.services.news_knowledge_service import news_knowledge_service
 from app.utils.hashing import generate_unique_hash, generate_trace_id
 from app.utils.text_processing import sanitize_input, truncate_text
 from app.services.cache_service import cache_service
@@ -495,6 +496,15 @@ class ScoutAgent:
             db.add(article)
             await db.flush()
             await article_index_service.upsert_article(db, article)
+            try:
+                await news_knowledge_service.process_article(db, article)
+            except Exception as enrich_error:
+                # Non-blocking: ingestion must continue even if enrichment fails.
+                logger.warning(
+                    "article_knowledge_enrichment_failed",
+                    article_id=article.id,
+                    error=str(enrich_error),
+                )
             
             # Update caches
             await cache_service.mark_url_processed(unique_hash, article.id)

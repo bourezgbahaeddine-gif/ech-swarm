@@ -6,6 +6,7 @@ from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    BigInteger,
     Column,
     DateTime,
     Float,
@@ -152,4 +153,38 @@ class StoryClusterMember(Base):
 
     __table_args__ = (
         UniqueConstraint("cluster_id", "article_id", name="uq_story_cluster_member"),
+    )
+
+
+class ArticleFingerprint(Base):
+    __tablename__ = "article_fingerprints"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    article_id = Column(Integer, ForeignKey("articles.id"), nullable=False, unique=True, index=True)
+    simhash = Column(BigInteger, nullable=False, index=True)
+    token_count = Column(Integer, nullable=False, default=0)
+    shingles = Column(JSON, nullable=True, default=list)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    article = relationship("Article")
+
+
+class ArticleRelation(Base):
+    __tablename__ = "article_relations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    from_article_id = Column(Integer, ForeignKey("articles.id"), nullable=False, index=True)
+    to_article_id = Column(Integer, ForeignKey("articles.id"), nullable=False, index=True)
+    relation_type = Column(String(32), nullable=False, index=True)  # duplicate_variant|sequence|impact|contrast|related
+    score = Column(Float, nullable=False, default=0.0)
+    metadata_json = Column(JSON, nullable=True, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    from_article = relationship("Article", foreign_keys=[from_article_id])
+    to_article = relationship("Article", foreign_keys=[to_article_id])
+
+    __table_args__ = (
+        UniqueConstraint("from_article_id", "to_article_id", "relation_type", name="uq_article_relations_edge"),
+        Index("ix_article_relations_from_type", "from_article_id", "relation_type"),
     )
