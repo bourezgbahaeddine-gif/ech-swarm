@@ -179,15 +179,20 @@ class TrendRadarAgent:
                     terms_counter: Counter[str] = Counter()
                     for entry in feed.entries[:30]:
                         raw_title = entry.get("title", "")
-                        title = normalize_text(self._strip_publisher_suffix(raw_title))
-                        if title:
-                            for term in self._extract_candidate_terms(title):
+                        stripped = self._strip_publisher_suffix(raw_title)
+                        normalized = normalize_text(stripped)
+                        if normalized:
+                            for term in self._extract_candidate_terms(normalized):
                                 terms_counter[term] += 1
+                        # Prefer named entities/proper nouns for non-DZ quality
+                        for entity in self._extract_named_entities(stripped):
+                            terms_counter[entity] += 3
 
                     ranked = sorted(
                         terms_counter.items(),
                         key=lambda kv: (
-                            0 if " " in kv[0] else 1,  # prioritize phrases
+                            0 if self._looks_like_entity(kv[0]) else 1,  # entities first
+                            0 if " " in kv[0] else 1,                    # then phrases
                             -kv[1],                    # then frequency
                             -len(kv[0]),               # then richer term
                         ),
@@ -197,7 +202,7 @@ class TrendRadarAgent:
                         if self._is_weak_term(term):
                             continue
                         # single words require repetition, phrases can pass with one hit
-                        if " " not in term and freq < 2:
+                        if (not self._looks_like_entity(term)) and " " not in term and freq < 2:
                             continue
                         out.append(term)
                         if len(out) >= 40:
@@ -216,7 +221,8 @@ class TrendRadarAgent:
     ) -> list[dict]:
         existing = {normalize_text(v["keyword"]) for v in verified_trends}
         for trend in google_trends:
-            norm = normalize_text(trend)
+            raw = trend.strip()
+            norm = normalize_text(raw)
             if not norm or norm in existing or self._is_weak_term(norm):
                 continue
             category = self._categorize_keyword(norm)
@@ -224,11 +230,11 @@ class TrendRadarAgent:
                 continue
             verified_trends.append(
                 {
-                    "keyword": norm,
+                    "keyword": raw,
                     "source_signals": ["google_trends", "geo_fallback"],
                     "strength": 5,
                     "category": category,
-                    "geography": self._detect_geography(norm, geo),
+                    "geography": self._detect_geography(raw, geo),
                 }
             )
             existing.add(norm)
@@ -388,6 +394,27 @@ class TrendRadarAgent:
             if sep in raw_title:
                 raw_title = raw_title.split(sep)[0]
         return raw_title.strip()
+
+    def _extract_named_entities(self, raw_title: str) -> list[str]:
+        """
+        Heuristic extraction for proper nouns (Latin script):
+        captures tokens like 'François Bayrou', 'Pyrénées-Orientales', 'Stellantis'.
+        """
+        if not raw_title:
+            return []
+        entities: list[str] = []
+        pattern = re.compile(r"\b([A-ZÀ-ÖØ-Ý][A-Za-zÀ-ÖØ-öø-ÿ'-]{2,}(?:\s+[A-ZÀ-ÖØ-Ý][A-Za-zÀ-ÖØ-öø-ÿ'-]{2,}){0,2})\b")
+        for match in pattern.finditer(raw_title):
+            candidate = match.group(1).strip()
+            if not candidate:
+                continue
+            if normalize_text(candidate) in WEAK_TERMS:
+                continue
+            entities.append(candidate)
+        return list(dict.fromkeys(entities))
+
+    def _looks_like_entity(self, term: str) -> bool:
+        return bool(re.search(r"[A-ZÀ-ÖØ-Ý]", term))
 
     def _is_weak_term(self, term: str) -> bool:
         t = normalize_text(term).strip()
