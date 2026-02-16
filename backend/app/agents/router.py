@@ -9,7 +9,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import select, update, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -120,6 +120,7 @@ class RouterAgent:
     async def process_batch(self, db: AsyncSession, limit: int = 50) -> dict:
         """Process a batch of NEW articles through triage."""
         stats = {"processed": 0, "candidates": 0, "ai_calls": 0, "breaking": 0}
+        await self._expire_stale_breaking_flags(db)
 
         # Pull a wider pool, lock only article rows, then enrich with sources.
         result = await db.execute(
@@ -152,6 +153,24 @@ class RouterAgent:
         await db.commit()
         logger.info("router_batch_complete", **stats)
         return stats
+
+    async def _expire_stale_breaking_flags(self, db: AsyncSession) -> None:
+        """Demote stale breaking flags after configured TTL."""
+        cutoff = datetime.utcnow() - timedelta(minutes=settings.breaking_news_ttl_minutes)
+        await db.execute(
+            update(Article)
+            .where(
+                and_(
+                    Article.is_breaking == True,
+                    Article.crawled_at < cutoff,
+                )
+            )
+            .values(
+                is_breaking=False,
+                urgency=UrgencyLevel.HIGH,
+                updated_at=datetime.utcnow(),
+            )
+        )
 
     async def _classify_article(self, db: AsyncSession, article: Article, source: Optional[Source], stats: dict):
         """Classify a single article using rules + AI fallback."""

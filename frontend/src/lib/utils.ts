@@ -42,6 +42,17 @@ export function truncate(str: string, length: number = 100): string {
     return str.slice(0, length) + '...';
 }
 
+export function isFreshBreaking(
+    isBreaking: boolean,
+    crawledAt: string | null | undefined,
+    ttlMinutes: number = Number(process.env.NEXT_PUBLIC_BREAKING_TTL_MINUTES || 60),
+): boolean {
+    if (!isBreaking || !crawledAt) return false;
+    const ts = new Date(crawledAt).getTime();
+    if (Number.isNaN(ts)) return false;
+    return Date.now() - ts <= ttlMinutes * 60 * 1000;
+}
+
 export function getStatusColor(status: string): string {
     const colors: Record<string, string> = {
         new: 'bg-blue-500/20 text-blue-400 border-blue-500/30',

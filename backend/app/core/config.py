@@ -90,6 +90,7 @@ class Settings(BaseSettings):
     # ── Processing Thresholds ──
     dedup_similarity_threshold: float = 0.70
     breaking_news_urgency_threshold: int = 8
+    breaking_news_ttl_minutes: int = 60
     truth_score_reject_threshold: float = 0.4
     truth_score_verify_threshold: float = 0.8
     editorial_min_importance: int = 6

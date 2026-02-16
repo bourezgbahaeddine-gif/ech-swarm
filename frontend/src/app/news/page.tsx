@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { newsApi, dashboardApi, editorialApi, type ArticleBrief } from '@/lib/api';
-import { cn, formatRelativeTime, getStatusColor, getCategoryLabel, truncate } from '@/lib/utils';
+import { cn, formatRelativeTime, getStatusColor, getCategoryLabel, isFreshBreaking, truncate } from '@/lib/utils';
 import { useAuth } from '@/lib/auth';
 import {
     Newspaper, Search, Zap, ExternalLink,
@@ -455,6 +455,7 @@ export default function NewsPage() {
                     articles.map((article: ArticleBrief) => {
                         const normalizedStatus = (article.status || '').toLowerCase();
                         const canReview = normalizedStatus === 'candidate' || normalizedStatus === 'classified';
+                        const freshBreaking = isFreshBreaking(article.is_breaking, article.crawled_at);
 
                         return (
                             <div
@@ -462,7 +463,7 @@ export default function NewsPage() {
                                 className={cn(
                                     'rounded-2xl border border-white/5 bg-gradient-to-br from-gray-800/40 to-gray-900/70 p-4 transition-all',
                                     'hover:border-white/10 hover:shadow-lg hover:shadow-black/30',
-                                    article.is_breaking && 'ring-1 ring-red-500/30'
+                                    freshBreaking && 'ring-1 ring-red-500/30'
                                 )}
                             >
                                 <div className="flex items-start gap-3">
@@ -478,7 +479,7 @@ export default function NewsPage() {
 
                                     <div className="flex-1">
                                         <div className="flex items-center gap-2 mb-2">
-                                            {article.is_breaking && (
+                                            {freshBreaking && (
                                                 <span className="px-2 py-0.5 rounded-full bg-red-500 text-[10px] font-bold text-white flex items-center gap-1 animate-pulse">
                                                     <Zap className="w-3 h-3" /> عاجل
                                                 </span>

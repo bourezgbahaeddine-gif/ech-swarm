@@ -7,14 +7,35 @@ CRUD operations for articles with filtering & pagination.
 from datetime import datetime, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func, desc, and_
+from sqlalchemy import select, func, desc, and_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.database import get_db
-from app.models import Article, NewsStatus, NewsCategory
+from app.models import Article, NewsStatus, NewsCategory, UrgencyLevel
 from app.schemas import ArticleResponse, ArticleBrief, PaginatedResponse
 
 router = APIRouter(prefix="/news", tags=["News"])
+settings = get_settings()
+
+
+async def _expire_stale_breaking_flags(db: AsyncSession) -> None:
+    cutoff = datetime.utcnow() - timedelta(minutes=settings.breaking_news_ttl_minutes)
+    await db.execute(
+        update(Article)
+        .where(
+            and_(
+                Article.is_breaking == True,
+                Article.crawled_at < cutoff,
+            )
+        )
+        .values(
+            is_breaking=False,
+            urgency=UrgencyLevel.HIGH,
+            updated_at=datetime.utcnow(),
+        )
+    )
+    await db.commit()
 
 
 @router.get("/", response_model=PaginatedResponse)
@@ -29,9 +50,13 @@ async def list_articles(
     db: AsyncSession = Depends(get_db),
 ):
     """List articles with filtering and pagination."""
+    if is_breaking:
+        await _expire_stale_breaking_flags(db)
 
     query = select(Article)
     count_query = select(func.count(Article.id))
+    breaking_cutoff = datetime.utcnow() - timedelta(minutes=settings.breaking_news_ttl_minutes)
+    actionable_breaking_statuses = [NewsStatus.NEW, NewsStatus.CLASSIFIED, NewsStatus.CANDIDATE]
 
     # Apply filters
     filters = []
@@ -50,6 +75,10 @@ async def list_articles(
             raise HTTPException(400, f"Invalid category: {category}")
     if is_breaking is not None:
         filters.append(Article.is_breaking == is_breaking)
+        if is_breaking:
+            filters.append(Article.crawled_at >= breaking_cutoff)
+            if not status:
+                filters.append(Article.status.in_(actionable_breaking_statuses))
     if search:
         search_filter = Article.original_title.ilike(f"%{search}%")
         if Article.title_ar:
@@ -97,16 +126,16 @@ async def get_breaking_news(
     db: AsyncSession = Depends(get_db),
 ):
     """Get actionable breaking news for dashboard newsroom workflow."""
-    cutoff = datetime.utcnow() - timedelta(hours=72)
+    await _expire_stale_breaking_flags(db)
+    cutoff = datetime.utcnow() - timedelta(minutes=settings.breaking_news_ttl_minutes)
+    actionable_breaking_statuses = [NewsStatus.NEW, NewsStatus.CLASSIFIED, NewsStatus.CANDIDATE]
     result = await db.execute(
         select(Article)
         .where(
             and_(
                 Article.is_breaking == True,
-                Article.created_at >= cutoff,
-                Article.status.notin_(
-                    [NewsStatus.REJECTED, NewsStatus.ARCHIVED, NewsStatus.PUBLISHED]
-                ),
+                Article.crawled_at >= cutoff,
+                Article.status.in_(actionable_breaking_statuses),
             )
         )
         .order_by(desc(Article.crawled_at))

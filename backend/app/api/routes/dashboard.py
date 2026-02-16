@@ -7,12 +7,13 @@ Dashboard stats, agent triggers, and pipeline monitoring.
 from datetime import datetime, timedelta
 import asyncio
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Query
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db, async_session
+from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.models import Article, Source, PipelineRun, FailedJob, NewsStatus
+from app.models import Article, Source, PipelineRun, FailedJob, NewsStatus, UrgencyLevel
 from app.models.user import User, UserRole
 from app.api.routes.auth import get_current_user
 from app.schemas import DashboardStats, PipelineRunResponse
@@ -21,16 +22,38 @@ from app.agents import scout_agent, router_agent, scribe_agent, trend_radar_agen
 
 logger = get_logger("api.dashboard")
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
+settings = get_settings()
+
+
+async def _expire_stale_breaking_flags(db: AsyncSession) -> None:
+    cutoff = datetime.utcnow() - timedelta(minutes=settings.breaking_news_ttl_minutes)
+    await db.execute(
+        update(Article)
+        .where(
+            and_(
+                Article.is_breaking == True,
+                Article.crawled_at < cutoff,
+            )
+        )
+        .values(
+            is_breaking=False,
+            urgency=UrgencyLevel.HIGH,
+            updated_at=datetime.utcnow(),
+        )
+    )
+    await db.commit()
 
 
 @router.get("/stats", response_model=DashboardStats)
 async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
     """Get real-time dashboard statistics."""
+    await _expire_stale_breaking_flags(db)
     cached = await cache_service.get_json("dashboard:stats")
     if cached:
         return DashboardStats(**cached)
 
     today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    breaking_cutoff = datetime.utcnow() - timedelta(minutes=settings.breaking_news_ttl_minutes)
 
     # Article counts
     total = await db.execute(select(func.count(Article.id)))
@@ -51,7 +74,11 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
     )
     breaking = await db.execute(
         select(func.count(Article.id)).where(
-            and_(Article.is_breaking == True, Article.crawled_at >= today)
+            and_(
+                Article.is_breaking == True,
+                Article.crawled_at >= breaking_cutoff,
+                Article.status.in_([NewsStatus.NEW, NewsStatus.CLASSIFIED, NewsStatus.CANDIDATE]),
+            )
         )
     )
 

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { type ArticleBrief } from '@/lib/api';
-import { cn, formatRelativeTime, getStatusColor, getCategoryLabel, truncate } from '@/lib/utils';
+import { cn, formatRelativeTime, getStatusColor, getCategoryLabel, isFreshBreaking, truncate } from '@/lib/utils';
 import { Zap, ExternalLink, Clock, Star } from 'lucide-react';
 
 interface NewsFeedProps {
@@ -13,6 +13,7 @@ interface NewsFeedProps {
 
 function ArticleCard({ article }: { article: ArticleBrief }) {
     const displayTitle = article.title_ar || article.original_title;
+    const freshBreaking = isFreshBreaking(article.is_breaking, article.crawled_at);
 
     return (
         <Link href={`/news/${article.id}`} className="block">
@@ -21,12 +22,12 @@ function ArticleCard({ article }: { article: ArticleBrief }) {
                     'group relative rounded-xl p-4 transition-all duration-300',
                     'bg-gradient-to-br from-gray-800/40 to-gray-900/60',
                     'border hover:shadow-lg cursor-pointer',
-                    article.is_breaking
+                    freshBreaking
                         ? 'border-red-500/30 hover:border-red-500/60 hover:shadow-red-500/10'
                         : 'border-white/5 hover:border-emerald-500/20 hover:shadow-emerald-500/5',
                 )}
             >
-                {article.is_breaking && (
+                {freshBreaking && (
                     <div className="absolute -top-2 right-4 px-2.5 py-0.5 rounded-full bg-red-500 text-[10px] font-bold text-white flex items-center gap-1 shadow-lg shadow-red-500/30 breaking-pulse">
                         <Zap className="w-3 h-3" />
                         عاجل
