@@ -156,8 +156,11 @@ export const newsApi = {
     get: (id: number) => api.get<Article>(`/news/${id}`),
     breaking: (limit?: number) => api.get<ArticleBrief[]>('/news/breaking/latest', { params: { limit } }),
     pending: (limit?: number) => api.get<ArticleBrief[]>('/news/candidates/pending', { params: { limit } }),
-    insights: (articleIds: number[]) =>
-        api.get<ArticleInsight[]>('/news/insights', { params: { article_ids: articleIds } }),
+    insights: (articleIds: number[]) => {
+        const params = new URLSearchParams();
+        articleIds.forEach((id) => params.append('article_ids', String(id)));
+        return api.get<ArticleInsight[]>(`/news/insights?${params.toString()}`);
+    },
 };
 
 export const sourcesApi = {

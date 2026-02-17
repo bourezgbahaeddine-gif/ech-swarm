@@ -37,7 +37,9 @@ export default function NewsPage() {
     } | null>(null);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [infoMessage, setInfoMessage] = useState<string | null>(null);
+    const [liveRefreshUntil, setLiveRefreshUntil] = useState<number>(0);
     const editorName = user?.full_name_ar || 'رئيس التحرير';
+    const kickLiveRefresh = (seconds = 30) => setLiveRefreshUntil(Date.now() + seconds * 1000);
 
     useEffect(() => {
         const qp = searchParams.get('q') || '';
@@ -63,12 +65,16 @@ export default function NewsPage() {
             sort_by: 'created_at',
             is_breaking: isBreaking === null ? undefined : isBreaking,
         }),
+        refetchInterval: () => (Date.now() < liveRefreshUntil ? 2000 : false),
+        refetchOnWindowFocus: true,
     });
 
     const triggerScout = useMutation({
         mutationFn: () => dashboardApi.triggerScout(),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['news'] });
+            queryClient.invalidateQueries({ queryKey: ['news-insights'] });
+            kickLiveRefresh(25);
             setErrorMessage(null);
             setInfoMessage('تم تشغيل الكشاف بنجاح');
         },
@@ -79,6 +85,8 @@ export default function NewsPage() {
         mutationFn: () => dashboardApi.triggerRouter(),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['news'] });
+            queryClient.invalidateQueries({ queryKey: ['news-insights'] });
+            kickLiveRefresh(25);
             setErrorMessage(null);
             setInfoMessage('تم تشغيل الموجّه بنجاح');
         },
@@ -89,6 +97,7 @@ export default function NewsPage() {
         mutationFn: () => dashboardApi.triggerScribe(),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['news'] });
+            queryClient.invalidateQueries({ queryKey: ['news-insights'] });
             setErrorMessage(null);
             setInfoMessage('تم تشغيل الكاتب بنجاح');
         },
@@ -118,10 +127,13 @@ export default function NewsPage() {
         onSuccess: async () => {
             setPage(1);
             await queryClient.invalidateQueries({ queryKey: ['news'] });
+            await queryClient.invalidateQueries({ queryKey: ['news-insights'] });
             await queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
+            kickLiveRefresh(35);
             // One extra refetch pass to catch late writes from queued jobs.
             setTimeout(() => {
                 queryClient.invalidateQueries({ queryKey: ['news'] });
+                queryClient.invalidateQueries({ queryKey: ['news-insights'] });
                 queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
             }, 5000);
             setErrorMessage(null);
@@ -234,7 +246,9 @@ export default function NewsPage() {
         queryKey: ['news-insights', articleIds.join(',')],
         queryFn: () => newsApi.insights(articleIds),
         enabled: articleIds.length > 0,
-        staleTime: 30_000,
+        staleTime: 0,
+        refetchInterval: () => (Date.now() < liveRefreshUntil ? 2000 : false),
+        refetchOnWindowFocus: true,
     });
 
     const insightsMap = useMemo(() => {
