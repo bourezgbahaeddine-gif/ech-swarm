@@ -25,6 +25,7 @@ from app.models import (
     StoryCluster,
     StoryClusterMember,
 )
+from app.models.constitution import ConstitutionAck, ConstitutionMeta
 from app.models.user import User, UserRole
 from app.schemas import EditorDecisionCreate, EditorDecisionResponse
 from app.services.article_index_service import article_index_service
@@ -97,7 +98,7 @@ class ClaimVerifyRequest(BaseModel):
 
 def _require_roles(user: User, allowed: set[UserRole]) -> None:
     if user.role not in allowed:
-        raise HTTPException(status_code=403, detail="??? ????")
+        raise HTTPException(status_code=403, detail="ليست لديك صلاحية تنفيذ هذا الإجراء")
 
 
 def _can_review_decision(user: User, decision: str) -> None:
@@ -116,7 +117,7 @@ def _can_review_decision(user: User, decision: str) -> None:
             },
         )
         return
-    raise HTTPException(status_code=400, detail="???? ??? ????")
+    raise HTTPException(status_code=400, detail="قرار التحرير غير صالح")
 
 
 def _clean_editorial_output(text: str) -> str:
@@ -149,39 +150,39 @@ def _clean_editorial_output(text: str) -> str:
 
 def _editorial_prompt(action: str, text: str, value: str | None) -> str:
     common = (
-        "Role: Senior newsroom editor at Echorouk.\n"
-        "Rules:\n"
-        "- Return only final editorial text.\n"
-        "- No explanations, no side comments, no meta text.\n"
-        "- No markdown code fences.\n"
-        "- Keep journalistic tone, clear and publishable.\n\n"
+        "الدور: محرر أول في غرفة أخبار الشروق.\n"
+        "قواعد الإخراج:\n"
+        "- أعد النص التحريري النهائي فقط.\n"
+        "- ممنوع الشروحات أو التعليقات الجانبية أو النصوص الوصفية.\n"
+        "- لا تستخدم markdown ولا code fences.\n"
+        "- الأسلوب صحفي واضح وقابل للنشر.\n\n"
     )
     if action == "summarize":
         return (
             common
-            + "Task: Produce a concise newsroom summary in Arabic (3 short paragraphs).\n"
-            + "Focus on facts, context, and why it matters.\n\n"
+            + "المطلوب: اكتب ملخصًا خبريًا عربيًا موجزًا في 3 فقرات قصيرة.\n"
+            + "التركيز على الحقائق والسياق وما يجعل الخبر مهمًا للقارئ.\n\n"
             + f"Source text:\n{text}"
         )
     if action == "translate":
         target = (value or "العربية").strip()
         return (
             common
-            + f"Task: Translate the source text into {target} with newsroom style.\n"
-            + "Preserve facts, names, numbers, and chronology.\n\n"
+            + f"المطلوب: ترجم النص إلى {target} بصياغة صحفية مهنية.\n"
+            + "حافظ على الأسماء والأرقام وتسلسل الأحداث دون أي إضافة.\n\n"
             + f"Source text:\n{text}"
         )
     if action == "proofread":
         return (
             common
-            + "Task: Proofread and rewrite the text in Arabic for publication.\n"
-            + "Fix grammar, punctuation, and clarity only.\n\n"
+            + "المطلوب: دقق النص وأعد صياغته إلى عربية صحفية جاهزة للنشر.\n"
+            + "صحح الإملاء والنحو والترقيم والوضوح فقط دون تغيير المعنى.\n\n"
             + f"Source text:\n{text}"
         )
     if action == "fact_check":
         return (
             common
-            + "Task: Build a compact fact-check brief in Arabic using this structure exactly:\n"
+            + "المطلوب: أعد مذكرة تحقق مختصرة بالعربية بهذا الهيكل حرفيًا:\n"
             + "ادعاءات قابلة للتحقق:\n- ...\n"
             + "ما يلزم التحقق منه:\n- ...\n"
             + "مصادر مقترحة للتحقق:\n- ...\n"
@@ -191,8 +192,8 @@ def _editorial_prompt(action: str, text: str, value: str | None) -> str:
     if action == "social_summary":
         return (
             common
-            + "Task: Write 3 short social posts in Arabic (X/Telegram/Facebook style), factual and professional.\n"
-            + "No hashtags spam.\n\n"
+            + "المطلوب: اكتب 3 نسخ سوشيال قصيرة بالعربية (X/تلغرام/فيسبوك) بصياغة مهنية دقيقة.\n"
+            + "تجنب التهويل والإكثار من الوسوم.\n\n"
             + f"Source text:\n{text}"
         )
     return f"{common}Source text:\n{text}"
@@ -301,6 +302,51 @@ async def _get_latest_draft_or_404(db: AsyncSession, work_id: str) -> EditorialD
     if not draft:
         raise HTTPException(404, "Draft not found")
     return draft
+
+
+async def _assert_publish_gate_and_constitution(
+    db: AsyncSession,
+    *,
+    article_id: int,
+    user: User,
+) -> None:
+    latest_constitution_row = await db.execute(
+        select(ConstitutionMeta)
+        .where(ConstitutionMeta.is_active == True)
+        .order_by(ConstitutionMeta.updated_at.desc())
+        .limit(1)
+    )
+    latest_constitution = latest_constitution_row.scalar_one_or_none()
+    if latest_constitution:
+        ack_row = await db.execute(
+            select(ConstitutionAck).where(
+                ConstitutionAck.user_id == user.id,
+                ConstitutionAck.version == latest_constitution.version,
+            )
+        )
+        if not ack_row.scalar_one_or_none():
+            raise HTTPException(
+                status_code=412,
+                detail="يجب الإقرار بالدستور التحريري قبل اعتماد النسخة النهائية.",
+            )
+
+    required_stages = ["FACT_CHECK", "SEO_TECH", "READABILITY", "QUALITY_SCORE"]
+    blockers: list[str] = []
+    for stage in required_stages:
+        report = await _latest_stage_report(db, article_id=article_id, stage=stage)
+        if not report:
+            blockers.append(f"تقرير مفقود: {stage}")
+            continue
+        if not report.passed:
+            blockers.extend(report.blocking_reasons or [f"فشل تقرير المرحلة: {stage}"])
+    if blockers:
+        raise HTTPException(
+            status_code=412,
+            detail={
+                "message": "لا يمكن اعتماد النسخة النهائية قبل تجاوز بوابة الجودة.",
+                "blocking_reasons": blockers,
+            },
+        )
 
 
 @router.post("/{article_id}/decide", response_model=EditorDecisionResponse)
@@ -545,8 +591,8 @@ async def process_article(
                 raise HTTPException(
                     status_code=400,
                     detail={
-                        "message": "Publish blocked: unresolved claims",
-                        "blocking_reasons": ["Run fact-check in Smart Editor and resolve claims first"],
+                        "message": "تم منع النشر: توجد ادعاءات غير محسومة",
+                        "blocking_reasons": ["شغّل التحقق من الادعاءات في المحرر الذكي ثم عالج النقاط العالقة"],
                     },
                 )
             audit = await quality_gate_service.technical_audit(db, article)
@@ -567,7 +613,7 @@ async def process_article(
                 raise HTTPException(
                     status_code=400,
                     detail={
-                        "message": "Technical audit failed",
+                        "message": "فشل التدقيق التقني قبل النشر",
                         "blocking_reasons": audit.get("blocking_reasons", []),
                         "actionable_fixes": audit.get("actionable_fixes", []),
                     },
@@ -1244,7 +1290,7 @@ async def workspace_publish_readiness(
     for stage in stages:
         report = await _latest_stage_report(db, article_id=article_id, stage=stage)
         if not report:
-            blockers.append(f"Missing report: {stage}")
+            blockers.append(f"تقرير مفقود: {stage}")
             continue
         stage_reports[stage] = {
             "passed": bool(report.passed),
@@ -1253,7 +1299,7 @@ async def workspace_publish_readiness(
             "blocking_reasons": report.blocking_reasons or [],
         }
         if not report.passed:
-            blockers.extend(report.blocking_reasons or [f"{stage} failed"])
+            blockers.extend(report.blocking_reasons or [f"فشل تقرير المرحلة: {stage}"])
 
     ready = len(blockers) == 0
     return {
@@ -1293,6 +1339,7 @@ async def apply_draft_by_work_id(
     article = article_result.scalar_one_or_none()
     if not article:
         raise HTTPException(404, "Article not found")
+    await _assert_publish_gate_and_constitution(db, article_id=article.id, user=current_user)
 
     if draft.title:
         article.title_ar = draft.title
@@ -1472,6 +1519,7 @@ async def create_draft(
     article = article_result.scalar_one_or_none()
     if not article:
         raise HTTPException(404, "Article not found")
+    await _assert_publish_gate_and_constitution(db, article_id=article_id, user=current_user)
 
     source_action = payload.source_action or "manual"
     version_result = await db.execute(

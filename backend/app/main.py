@@ -8,6 +8,7 @@
 ╚══════════════════════════════════════════════════╝
 """
 
+import asyncio
 import time
 from contextlib import asynccontextmanager
 
@@ -20,6 +21,8 @@ from app.core.database import init_db
 from app.core.logging import setup_logging, get_logger
 from app.services.cache_service import cache_service
 from app.schemas import HealthResponse
+from app.core.database import async_session
+from app.agents import scout_agent, router_agent, scribe_agent, trend_radar_agent
 
 # Import routers
 from app.api.routes.news import router as news_router
@@ -37,6 +40,47 @@ logger = get_logger("main")
 
 # Track uptime
 _start_time = time.time()
+_shutdown_event = asyncio.Event()
+_pipeline_task: asyncio.Task | None = None
+_trends_task: asyncio.Task | None = None
+
+
+async def _run_pipeline_once():
+    async with async_session() as db:
+        scout_stats = await scout_agent.run(db)
+        router_stats = await router_agent.process_batch(db)
+        scribe_stats = None
+        if settings.auto_scribe_enabled:
+            scribe_stats = await scribe_agent.batch_write(db)
+        logger.info(
+            "auto_pipeline_tick_done",
+            scout=scout_stats,
+            router=router_stats,
+            scribe=scribe_stats,
+        )
+
+
+async def _run_trends_once():
+    alerts = await trend_radar_agent.scan()
+    logger.info("auto_trends_tick_done", alerts_count=len(alerts))
+
+
+async def _periodic_loop(name: str, interval_seconds: int, job):
+    logger.info("periodic_loop_started", loop=name, interval_seconds=interval_seconds)
+    while not _shutdown_event.is_set():
+        started = time.time()
+        try:
+            await job()
+        except Exception as exc:  # noqa: BLE001
+            logger.error("periodic_loop_error", loop=name, error=str(exc))
+
+        elapsed = int(time.time() - started)
+        sleep_for = max(1, interval_seconds - elapsed)
+        try:
+            await asyncio.wait_for(_shutdown_event.wait(), timeout=sleep_for)
+        except asyncio.TimeoutError:
+            pass
+    logger.info("periodic_loop_stopped", loop=name)
 
 
 @asynccontextmanager
@@ -54,6 +98,33 @@ async def lifespan(app: FastAPI):
     # Connect to Redis
     await cache_service.connect()
 
+    # Start periodic pipeline loops (optional)
+    global _pipeline_task, _trends_task
+    _shutdown_event.clear()
+    if settings.auto_pipeline_enabled:
+        newsroom_interval_seconds = 20 * 60
+        trend_interval_seconds = 10 * 60
+        _pipeline_task = asyncio.create_task(
+            _periodic_loop(
+                "pipeline",
+                newsroom_interval_seconds,
+                _run_pipeline_once,
+            )
+        )
+        _trends_task = asyncio.create_task(
+            _periodic_loop(
+                "trends",
+                trend_interval_seconds,
+                _run_trends_once,
+            )
+        )
+        logger.info(
+            "auto_pipeline_enabled",
+            scout_interval_minutes=20,
+            trend_interval_minutes=10,
+            auto_scribe_enabled=settings.auto_scribe_enabled,
+        )
+
     logger.info(
         "app_ready",
         msg="🚀 غرفة الشروق الذكية جاهزة للعمل",
@@ -63,6 +134,12 @@ async def lifespan(app: FastAPI):
     yield
 
     # ── Shutdown ──
+    _shutdown_event.set()
+    for task in (_pipeline_task, _trends_task):
+        if task:
+            task.cancel()
+    await asyncio.gather(*[t for t in (_pipeline_task, _trends_task) if t], return_exceptions=True)
+
     await cache_service.disconnect()
     logger.info("app_shutdown", msg="تم إيقاف النظام بنجاح")
 

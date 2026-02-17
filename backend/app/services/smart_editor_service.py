@@ -49,7 +49,7 @@ CLAIM_TRIGGER_WORDS_AR = {
 }
 
 SIDE_COMMENT_PATTERNS = [
-    r"(?im)^\s*(حسنًا|حسنا|إليك|ملاحظات|ملاحظة|آمل|يمكنني|إذا كان لديك|هذا مفيد)\b.*$",
+    r"(?im)^\s*(حسنًا|حسنا|إليك|ملاحظات|ملاحظة|آمل|يمكنني|إذا كان لديك)\b.*$",
     r"(?im)^\s*(based on|note|explanation|comments?)\b.*$",
 ]
 
@@ -114,9 +114,13 @@ class SmartEditorService:
             protocols=["http", "https", "mailto"],
             strip=True,
         )
-        cleaned = re.sub(r'href\s*=\s*["\']\s*javascript:[^"\']*["\']', 'href="#"', cleaned, flags=re.IGNORECASE)
-        cleaned = cleaned.strip()
-        return cleaned
+        cleaned = re.sub(
+            r'href\s*=\s*["\']\s*javascript:[^"\']*["\']',
+            'href="#"',
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        return cleaned.strip()
 
     @staticmethod
     def html_to_text(value: str) -> str:
@@ -154,16 +158,16 @@ class SmartEditorService:
     ) -> dict[str, Any]:
         prompt = f"""
 أنت مساعد تحرير صحفي داخل غرفة أخبار الشروق.
-أعد كتابة النص بصيغة عربية صحفية واضحة بدون أي شروحات جانبية.
+المطلوب: إعادة صياغة النص بصياغة عربية صحفية واضحة فقط.
 
-المطلوب: JSON فقط بالمفاتيح:
+أعد JSON فقط بالمفاتيح:
 title, body_html, note
 
 قواعد إلزامية:
-- لا تضف معلومات غير موجودة في السياق.
-- امنع التعليقات الجانبية (مثل: ملاحظة، مثال، يمكنني، آمل).
-- body_html يجب أن يكون HTML نظيفًا ويحتوي H1 واحدًا فقط.
-- لا تستخدم markdown ولا code fence.
+- لا تضف أي معلومة غير موجودة في السياق.
+- ممنوع أي تعليقات جانبية مثل: ملاحظة، مثال، يمكنني، آمل.
+- body_html يجب أن يحتوي H1 واحد فقط، ثم فقرات HTML نظيفة.
+- لا تستخدم markdown ولا code fences.
 
 النمط: {mode}
 تعليمات إضافية: {instruction or "لا يوجد"}
@@ -223,7 +227,12 @@ official, breaking, seo, engaging, mobile_short
         if isinstance(data, list):
             out: list[dict[str, str]] = []
             for item in data[:5]:
-                out.append({"label": str(item.get("label") or "").strip(), "headline": self._strip_side_comments(str(item.get("headline") or "").strip())})
+                out.append(
+                    {
+                        "label": str(item.get("label") or "").strip(),
+                        "headline": self._strip_side_comments(str(item.get("headline") or "").strip()),
+                    }
+                )
             if len(out) == 5 and all(x["headline"] for x in out):
                 return out
 
@@ -238,7 +247,7 @@ official, breaking, seo, engaging, mobile_short
 
     async def seo_suggestions(self, *, source_text: str, draft_title: str, draft_html: str) -> dict[str, Any]:
         prompt = f"""
-أنت مختص SEO خبري.
+أنت مختص SEO إخباري.
 أعد JSON فقط بالمفاتيح:
 seo_title, meta_description, keywords, tags
 
@@ -247,7 +256,7 @@ seo_title, meta_description, keywords, tags
 - meta_description حتى 155 حرفًا.
 - keywords: 5 عناصر.
 - tags: 5 عناصر.
-- لا تضف شروحات.
+- بدون أي شروحات.
 
 العنوان:
 {draft_title}
@@ -288,15 +297,15 @@ seo_title, meta_description, keywords, tags
 
     async def social_variants(self, *, source_text: str, draft_title: str, draft_html: str) -> dict[str, str]:
         prompt = f"""
-أنت محرر منصات اجتماعية.
+أنت محرر منصات اجتماعية في غرفة أخبار.
 أعد JSON فقط بالمفاتيح:
 facebook, x, push, summary_120, breaking_alert
 
 الشروط:
-- عربية واضحة.
+- عربية واضحة ومحترفة.
 - بدون تعليقات جانبية.
 - push بين 15 و18 كلمة.
-- summary_120 حوالي 120 كلمة.
+- summary_120 قرابة 120 كلمة.
 
 العنوان:
 {draft_title}
@@ -442,7 +451,7 @@ facebook, x, push, summary_120, breaking_alert
         if structure < 80:
             fixes.append("أضف عنوانًا رئيسيًا H1 واحدًا مع عنوان فرعي H2 على الأقل.")
         if inverted_pyramid < 70:
-            fixes.append("قوّ الفقرة الأولى بماذا/من/أين/متى.")
+            fixes.append("قوِّ الفقرة الأولى بعناصر: ماذا/من/أين/متى.")
         if source_presence < 60:
             fixes.append("أضف إسنادًا واضحًا للمصادر داخل النص.")
         if tone_neutrality < 85:
@@ -470,4 +479,3 @@ facebook, x, push, summary_120, breaking_alert
 
 
 smart_editor_service = SmartEditorService()
-

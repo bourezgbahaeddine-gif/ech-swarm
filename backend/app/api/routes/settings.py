@@ -35,7 +35,7 @@ def _mask(value: Optional[str]) -> Optional[str]:
 
 
 def _is_admin(user: User) -> bool:
-    return user.role in [UserRole.director, UserRole.editor_chief]
+    return user.role == UserRole.director
 
 
 def _audit_value(value: Optional[str], is_secret: bool) -> Optional[str]:

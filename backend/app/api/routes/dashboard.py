@@ -1,11 +1,10 @@
 """
-Echorouk AI Swarm — Dashboard & Agent Control API
-====================================================
-Dashboard stats, agent triggers, and pipeline monitoring.
+Echorouk AI Swarm - Dashboard & Agent Control API.
 """
 
 from datetime import datetime, timedelta
 import asyncio
+
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Query
 from sqlalchemy import select, func, and_, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,7 +54,6 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
     today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     breaking_cutoff = datetime.utcnow() - timedelta(minutes=settings.breaking_news_ttl_minutes)
 
-    # Article counts
     total = await db.execute(select(func.count(Article.id)))
     today_count = await db.execute(
         select(func.count(Article.id)).where(Article.crawled_at >= today)
@@ -82,16 +80,11 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
         )
     )
 
-    # Source counts
     sources_active = await db.execute(
         select(func.count(Source.id)).where(Source.enabled == True)
     )
     sources_total = await db.execute(select(func.count(Source.id)))
-
-    # AI calls
     ai_calls = await cache_service.get_counter("ai_calls_today")
-
-    # Avg processing time
     avg_time = await db.execute(
         select(func.avg(Article.processing_time_ms))
         .where(Article.processing_time_ms.isnot(None))
@@ -110,7 +103,6 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
         ai_calls_today=ai_calls,
         avg_processing_ms=avg_time.scalar(),
     )
-    # Cache for a short window to reduce DB load on dashboards
     await cache_service.set_json("dashboard:stats", stats.model_dump(), ttl=timedelta(seconds=30))
     return stats
 
@@ -156,8 +148,6 @@ async def get_failed_jobs(
     ]
 
 
-# ── Agent Triggers ──
-
 async def _run_scout_pipeline():
     async with async_session() as db:
         stats = await scout_agent.run(db)
@@ -184,7 +174,29 @@ async def _run_trends_scan(geo: str, category: str, limit: int, mode: str):
 
 def _assert_agent_control_permission(user: User) -> None:
     if user.role not in {UserRole.director, UserRole.editor_chief}:
-        raise HTTPException(status_code=403, detail="غير مصرح بالتحكم في الوكلاء")
+        raise HTTPException(status_code=403, detail="غير مسموح لك بتشغيل هذا الوكيل.")
+
+
+def _assert_newsroom_refresh_permission(user: User) -> None:
+    if user.role not in {
+        UserRole.director,
+        UserRole.editor_chief,
+        UserRole.journalist,
+        UserRole.social_media,
+        UserRole.print_editor,
+    }:
+        raise HTTPException(status_code=403, detail="غير مسموح لك بتحديث غرفة الأخبار.")
+
+
+def _assert_trend_permission(user: User) -> None:
+    if user.role not in {
+        UserRole.director,
+        UserRole.editor_chief,
+        UserRole.journalist,
+        UserRole.social_media,
+        UserRole.print_editor,
+    }:
+        raise HTTPException(status_code=403, detail="غير مسموح لك باستخدام رادار التراند.")
 
 
 @router.post("/agents/scout/run")
@@ -193,9 +205,9 @@ async def trigger_scout(
     current_user: User = Depends(get_current_user),
 ):
     """Queue Scout Agent run in background and return immediately."""
-    _assert_agent_control_permission(current_user)
+    _assert_newsroom_refresh_permission(current_user)
     background_tasks.add_task(_run_scout_pipeline)
-    return {"message": "Scout run queued"}
+    return {"message": "تمت جدولة تشغيل الكشاف."}
 
 
 @router.post("/agents/router/run")
@@ -204,9 +216,9 @@ async def trigger_router(
     current_user: User = Depends(get_current_user),
 ):
     """Queue Router Agent run in background and return immediately."""
-    _assert_agent_control_permission(current_user)
+    _assert_newsroom_refresh_permission(current_user)
     background_tasks.add_task(_run_router_pipeline)
-    return {"message": "Router run queued"}
+    return {"message": "تمت جدولة تشغيل الموجه."}
 
 
 @router.post("/agents/scribe/run")
@@ -217,7 +229,7 @@ async def trigger_scribe(
     """Queue Scribe Agent run in background and return immediately."""
     _assert_agent_control_permission(current_user)
     background_tasks.add_task(_run_scribe_pipeline)
-    return {"message": "Scribe run queued"}
+    return {"message": "تمت جدولة تشغيل الكاتب."}
 
 
 @router.post("/agents/trends/scan")
@@ -231,23 +243,23 @@ async def trigger_trend_scan(
     current_user: User = Depends(get_current_user),
 ):
     """Run Trend Radar scan (sync when wait=true, async otherwise)."""
-    _assert_agent_control_permission(current_user)
+    _assert_trend_permission(current_user)
     if wait:
         try:
             alerts = await asyncio.wait_for(
                 trend_radar_agent.scan(geo=geo, category=category, limit=limit, mode=mode),
                 timeout=25,
             )
-            return {"message": "Trend scan completed", "alerts": [a.model_dump(mode="json") for a in alerts]}
+            return {"message": "اكتمل مسح التراند.", "alerts": [a.model_dump(mode="json") for a in alerts]}
         except TimeoutError:
             payload = await cache_service.get_json(f"trends:last:{geo.upper()}:{category.lower()}")
             return {
-                "message": "Trend scan timeout - returning latest cached result",
+                "message": "انتهت مهلة المسح. تم إرجاع آخر نتائج مخزنة.",
                 "alerts": (payload or {}).get("alerts", []),
             }
 
     background_tasks.add_task(_run_trends_scan, geo.upper(), category.lower(), limit, mode.lower())
-    return {"message": "Trend scan queued"}
+    return {"message": "تمت جدولة مسح التراند."}
 
 
 @router.get("/agents/trends/latest")
@@ -257,7 +269,7 @@ async def get_latest_trend_scan(
     current_user: User = Depends(get_current_user),
 ):
     """Fetch latest cached trend scan payload for a geography/category."""
-    _assert_agent_control_permission(current_user)
+    _assert_trend_permission(current_user)
     payload = await cache_service.get_json(f"trends:last:{geo.upper()}:{category.lower()}")
     return payload or {"alerts": []}
 
@@ -266,9 +278,96 @@ async def get_latest_trend_scan(
 async def agents_status():
     """Get current agent statuses."""
     return {
-        "scout": {"status": "ready", "description": "الوكيل الكشّاف - RSS Ingestion"},
-        "router": {"status": "ready", "description": "الموجّه - Classification & Routing"},
-        "scribe": {"status": "ready", "description": "الوكيل الكاتب - Article Generation"},
-        "trend_radar": {"status": "ready", "description": "رادار التراند - Trend Detection"},
-        "audio": {"status": "ready", "description": "المذيع الآلي - Audio Briefings"},
+        "scout": {"status": "ready", "description": "وكيل الكشاف - جمع الأخبار من المصادر"},
+        "router": {"status": "ready", "description": "وكيل الموجه - التصنيف والتوجيه"},
+        "scribe": {"status": "ready", "description": "وكيل الكاتب - توليد المسودة"},
+        "trend_radar": {"status": "ready", "description": "رادار التراند - اكتشاف الاتجاهات"},
+        "audio": {"status": "ready", "description": "وكيل الصوت - النشرات الصوتية"},
     }
+
+
+@router.get("/notifications")
+async def dashboard_notifications(
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Unified in-app notifications feed for newsroom users."""
+    _assert_newsroom_refresh_permission(current_user)
+
+    items: list[dict] = []
+    now = datetime.utcnow()
+
+    breaking_rows = await db.execute(
+        select(Article)
+        .where(
+            and_(
+                Article.is_breaking == True,
+                Article.crawled_at >= now - timedelta(hours=6),
+            )
+        )
+        .order_by(Article.crawled_at.desc())
+        .limit(8)
+    )
+    for article in breaking_rows.scalars().all():
+        items.append(
+            {
+                "id": f"breaking-{article.id}",
+                "type": "breaking",
+                "title": article.title_ar or article.original_title,
+                "message": "خبر عاجل جديد يحتاج متابعة تحريرية فورية.",
+                "article_id": article.id,
+                "created_at": article.crawled_at,
+                "severity": "high",
+            }
+        )
+
+    candidate_rows = await db.execute(
+        select(Article)
+        .where(
+            and_(
+                Article.status == NewsStatus.CANDIDATE,
+                Article.crawled_at >= now - timedelta(hours=6),
+            )
+        )
+        .order_by(Article.crawled_at.desc())
+        .limit(8)
+    )
+    for article in candidate_rows.scalars().all():
+        items.append(
+            {
+                "id": f"candidate-{article.id}",
+                "type": "candidate",
+                "title": article.title_ar or article.original_title,
+                "message": "خبر مرشح بانتظار قرار التحرير.",
+                "article_id": article.id,
+                "created_at": article.crawled_at,
+                "severity": "medium",
+            }
+        )
+
+    trend_payload = await cache_service.get_json("trends:last:DZ:all")
+    for idx, alert in enumerate((trend_payload or {}).get("alerts", [])[:8]):
+        items.append(
+            {
+                "id": f"trend-{idx}-{alert.get('keyword', '')}",
+                "type": "trend",
+                "title": alert.get("keyword", "تراند جديد"),
+                "message": alert.get("reason", "اتجاه ترند يحتاج متابعة تحريرية."),
+                "created_at": alert.get("detected_at") or now.isoformat(),
+                "severity": "low",
+            }
+        )
+
+    def _dt(v: object) -> datetime:
+        if isinstance(v, datetime):
+            return v
+        if isinstance(v, str):
+            try:
+                return datetime.fromisoformat(v.replace("Z", "+00:00")).replace(tzinfo=None)
+            except Exception:
+                return datetime.min
+        return datetime.min
+
+    items = sorted(items, key=lambda x: _dt(x.get("created_at")), reverse=True)[:limit]
+    return {"items": items, "total": len(items)}

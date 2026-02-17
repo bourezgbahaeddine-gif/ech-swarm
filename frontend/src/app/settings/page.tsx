@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { settingsApi } from '@/lib/settings-api';
 import { cn, formatRelativeTime } from '@/lib/utils';
 import { Save, KeyRound, Bell, Database, ShieldAlert, Wand2, PlugZap, History } from 'lucide-react';
+import { useAuth } from '@/lib/auth';
 
 type SettingRow = {
     key: string;
@@ -33,6 +34,8 @@ const SETTINGS: SettingRow[] = [
 ];
 
 export default function SettingsPage() {
+    const { user } = useAuth();
+    const isDirector = user?.role === 'director';
     const queryClient = useQueryClient();
     const [values, setValues] = useState<Record<string, string>>({});
     const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -46,11 +49,13 @@ export default function SettingsPage() {
     const { data } = useQuery({
         queryKey: ['settings'],
         queryFn: () => settingsApi.list(),
+        enabled: isDirector,
     });
 
     const { data: auditData } = useQuery({
         queryKey: ['settings-audit'],
         queryFn: () => settingsApi.audit(200),
+        enabled: isDirector,
     });
 
     const updateMutation = useMutation({
@@ -88,10 +93,18 @@ export default function SettingsPage() {
     });
 
     const byKey = useMemo(() => {
-        const map: Record<string, any> = {};
-        (data?.data || []).forEach((s: any) => { map[s.key] = s; });
+        const map: Record<string, { key: string; value?: string; has_value?: boolean }> = {};
+        (data?.data || []).forEach((s: { key: string; value?: string; has_value?: boolean }) => { map[s.key] = s; });
         return map;
     }, [data]);
+
+    if (!isDirector) {
+        return (
+            <div className="rounded-2xl border border-white/10 bg-gray-900/40 p-6 text-center text-gray-300">
+                هذه الصفحة متاحة للمدير فقط.
+            </div>
+        );
+    }
 
     const renderGroup = (group: SettingRow['group'], title: string, icon: ReactNode) => (
         <div className="rounded-2xl border border-white/5 bg-gray-900/40 p-4 space-y-4">
@@ -197,7 +210,7 @@ export default function SettingsPage() {
                             </tr>
                         </thead>
                         <tbody>
-                            {(auditData?.data || []).map((row: any) => (
+                            {(auditData?.data || []).map((row: { id: number; key: string; action: string; old_value?: string; new_value?: string; actor?: string; created_at?: string }) => (
                                 <tr key={row.id} className="border-b border-white/5 text-xs text-gray-300">
                                     <td className="py-2">{row.key}</td>
                                     <td className="py-2">{row.action}</td>

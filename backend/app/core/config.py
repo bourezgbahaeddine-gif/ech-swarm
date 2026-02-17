@@ -76,8 +76,8 @@ class Settings(BaseSettings):
     minio_use_ssl: bool = False
 
     # ── Scheduling ──
-    scout_interval_minutes: int = 30
-    trend_radar_interval_minutes: int = 15
+    scout_interval_minutes: int = 20
+    trend_radar_interval_minutes: int = 10
     auto_pipeline_enabled: bool = False
     auto_scribe_enabled: bool = True
 

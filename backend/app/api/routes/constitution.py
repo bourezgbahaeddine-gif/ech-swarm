@@ -1,12 +1,11 @@
 """
-Echorouk AI Swarm — Constitution Routes
-=======================================
+Echorouk AI Swarm - Constitution Routes.
 Expose latest constitution and user acknowledgements.
 """
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +16,14 @@ from app.api.routes.auth import get_current_user
 from app.schemas import ConstitutionMetaResponse, ConstitutionAckResponse, ConstitutionAckRequest
 
 router = APIRouter(prefix="/constitution", tags=["Constitution"])
+
+CONSTITUTION_TIPS = [
+    "ابدأ المقدمة بإجابة مباشرة: ماذا حدث؟ أين؟ متى؟ ومن الجهة المعنية؟",
+    "لا تعتمد أي معلومة بلا مصدر واضح أو تصريح منسوب.",
+    "استخدم جمل قصيرة وواضحة وتجنب اللغة الإنشائية.",
+    "قبل الاعتماد النهائي شغّل: التحقق من الادعاءات + الجودة + التدقيق التقني.",
+    "أي تعديل جوهري يجب أن يمر بمراجعة بشرية قبل الاعتماد.",
+]
 
 
 @router.get("/latest", response_model=ConstitutionMetaResponse)
@@ -29,7 +36,7 @@ async def get_latest_constitution(db: AsyncSession = Depends(get_db)):
     )
     latest = result.scalar_one_or_none()
     if not latest:
-        raise HTTPException(status_code=404, detail="Constitution not found")
+        raise HTTPException(status_code=404, detail="لم يتم العثور على نسخة دستور نشطة.")
     return ConstitutionMetaResponse(
         version=latest.version,
         file_url=latest.file_url,
@@ -42,7 +49,6 @@ async def get_ack_status(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # latest version
     result = await db.execute(
         select(ConstitutionMeta)
         .where(ConstitutionMeta.is_active == True)
@@ -51,7 +57,7 @@ async def get_ack_status(
     )
     latest = result.scalar_one_or_none()
     if not latest:
-        raise HTTPException(status_code=404, detail="Constitution not found")
+        raise HTTPException(status_code=404, detail="لم يتم العثور على نسخة دستور نشطة.")
 
     ack = await db.execute(
         select(ConstitutionAck)
@@ -70,15 +76,13 @@ async def acknowledge(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Ensure version exists
     result = await db.execute(
         select(ConstitutionMeta).where(ConstitutionMeta.version == data.version)
     )
     meta = result.scalar_one_or_none()
     if not meta:
-        raise HTTPException(status_code=404, detail="Constitution version not found")
+        raise HTTPException(status_code=404, detail="نسخة الدستور المطلوبة غير موجودة.")
 
-    # Upsert acknowledgement
     existing = await db.execute(
         select(ConstitutionAck)
         .where(
@@ -88,11 +92,18 @@ async def acknowledge(
     )
     ack = existing.scalar_one_or_none()
     if not ack:
-        db.add(ConstitutionAck(
-            user_id=current_user.id,
-            version=data.version,
-            acknowledged_at=datetime.utcnow(),
-        ))
+        db.add(
+            ConstitutionAck(
+                user_id=current_user.id,
+                version=data.version,
+                acknowledged_at=datetime.utcnow(),
+            )
+        )
         await db.commit()
 
     return ConstitutionAckResponse(acknowledged=True, version=data.version)
+
+
+@router.get("/tips")
+async def get_constitution_tips():
+    return {"tips": CONSTITUTION_TIPS}

@@ -4,7 +4,7 @@ Echorouk AI Swarm — Journalist Services
 Editor/Fact-check/SEO/Multimedia tools for journalists.
 """
 
-from typing import Optional, List
+import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +18,18 @@ CONSTITUTION_BASE = (
     "التزم بدستور الشروق التحريري: دقة، توازن، حياد، وضوح، عدم الإثارة، "
     "صياغة مهنية قابلة للنشر، ومنع الحشو أو التعليقات خارج النص المطلوب."
 )
+
+
+def _sanitize_ai_text(text: str) -> str:
+    if not text:
+        return ""
+    cleaned = text.strip()
+    cleaned = cleaned.replace("```", "")
+    cleaned = re.sub(r"(?im)^\s*(note|notes|explanation|comment)\s*:.*$", "", cleaned)
+    cleaned = re.sub(r"(?im)^\s*(ملاحظة|شرح|تعليق)\s*:.*$", "", cleaned)
+    cleaned = re.sub(r"(?im)^\s*(حسنًا|حسنا|يمكنني|آمل).*$", "", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned
 
 
 def _target_language(payload: dict) -> str:
@@ -44,7 +56,7 @@ async def editor_tonality(payload: dict):
         f"\n\nText:\n{text}"
     )
     result = await ai_service.generate_text(prompt)
-    return {"result": result}
+    return {"result": _sanitize_ai_text(result)}
 
 
 @router.post("/editor/inverted-pyramid")
@@ -61,7 +73,7 @@ async def editor_inverted_pyramid(payload: dict):
         f"\n\nText:\n{text}"
     )
     result = await ai_service.generate_text(prompt)
-    return {"result": result}
+    return {"result": _sanitize_ai_text(result)}
 
 
 @router.post("/editor/proofread")
@@ -78,7 +90,7 @@ async def editor_proofread(payload: dict):
         f"\n\nText:\n{text}"
     )
     result = await ai_service.generate_text(prompt)
-    return {"result": result}
+    return {"result": _sanitize_ai_text(result)}
 
 
 @router.post("/editor/social-summary")
@@ -95,17 +107,17 @@ async def editor_social_summary(payload: dict):
         f"\n\nText:\n{text}"
     )
     result = await ai_service.generate_text(prompt)
-    return {"result": result}
+    return {"result": _sanitize_ai_text(result)}
 
 
 @router.post("/factcheck/vision")
 async def factcheck_vision(payload: dict):
     image_url = payload.get("image_url")
-    question = payload.get("question", "Verify if this image appears manipulated or out of context.")
+    question = payload.get("question", "تحقق من صحة الصورة وسياقها وما إذا كانت معدلة أو خارج السياق.")
     if not image_url:
         raise HTTPException(400, "Missing image_url")
     result = await ai_service.analyze_image_url(image_url, question)
-    return {"result": result}
+    return {"result": _sanitize_ai_text(result)}
 
 
 @router.post("/factcheck/consistency")
@@ -122,7 +134,7 @@ async def factcheck_consistency(payload: dict):
         f"Reference:\n{reference}\n\nText:\n{text}"
     )
     result = await ai_service.generate_text(prompt)
-    return {"result": result}
+    return {"result": _sanitize_ai_text(result)}
 
 
 @router.post("/factcheck/extract")
@@ -138,7 +150,7 @@ async def factcheck_extract(payload: dict):
         f"\n\nText:\n{text}"
     )
     result = await ai_service.generate_text(prompt)
-    return {"result": result}
+    return {"result": _sanitize_ai_text(result)}
 
 
 @router.post("/seo/keywords")
@@ -154,7 +166,7 @@ async def seo_keywords(payload: dict):
         f"\n\nText:\n{text}"
     )
     result = await ai_service.generate_text(prompt)
-    return {"result": result}
+    return {"result": _sanitize_ai_text(result)}
 
 
 @router.post("/seo/internal-links")
@@ -171,7 +183,7 @@ async def seo_internal_links(payload: dict):
         f"News:\n{text}\n\nArchive Titles:\n{archive_titles}"
     )
     result = await ai_service.generate_text(prompt)
-    return {"result": result}
+    return {"result": _sanitize_ai_text(result)}
 
 
 @router.post("/seo/metadata")
@@ -190,7 +202,7 @@ async def seo_metadata(payload: dict):
         f"Text:\n{text}"
     )
     result = await ai_service.generate_text(prompt)
-    return {"result": result}
+    return {"result": _sanitize_ai_text(result)}
 
 
 @router.post("/multimedia/video-script")
@@ -206,7 +218,7 @@ async def multimedia_video_script(payload: dict):
         f"\n\nText:\n{text}"
     )
     result = await ai_service.generate_text(prompt)
-    return {"result": result}
+    return {"result": _sanitize_ai_text(result)}
 
 
 @router.post("/multimedia/sentiment")
@@ -222,7 +234,7 @@ async def multimedia_sentiment(payload: dict):
         f"\n\nText:\n{text}"
     )
     result = await ai_service.generate_text(prompt)
-    return {"result": result}
+    return {"result": _sanitize_ai_text(result)}
 
 
 @router.post("/multimedia/translate")
@@ -239,7 +251,7 @@ async def multimedia_translate(payload: dict):
         f"Text:\n{text}"
     )
     result = await ai_service.generate_text(prompt)
-    return {"result": result}
+    return {"result": _sanitize_ai_text(result)}
 
 
 @router.post("/multimedia/image-prompt")
@@ -253,32 +265,26 @@ async def multimedia_image_prompt(payload: dict, db: AsyncSession = Depends(get_
         raise HTTPException(400, "Missing text")
 
     prompt = f"""
-You are Echorouk Nano-Hook Studio. Build 3 high-impact image prompts.
-Use this 10-point structure in each prompt:
-1) Subject
-2) Style
-3) Lighting
-4) Composition
-5) Camera
-6) 3D Element (emoji or symbol, 3D, interacts with light)
-7) Color Theory (Echorouk Orange #F37021, Deep Black #0A0A0A, White #FFFFFF)
-8) Texture
-9) Negative Space (logo/text safe area, top-right gradient for logo protection)
-10) Dimensions (--ar)
+{CONSTITUTION_BASE}
+أنت مهندس برومبتات بصري في غرفة أخبار الشروق.
+ابنِ 3 برومبتات احترافية لصورة خبرية باللغة {_lang_name(lang)}.
 
-Constraints:
-- Respect Echorouk editorial constitution (accuracy, no sensationalism).
-- Visual semiotics: strong hook, viral-ready, journalistic realism.
-- Keep text area clean; avoid clutter.
-- Output in {_lang_name(lang)} only.
-- Provide 3 variants.
+إخراج إلزامي:
+- أعِد فقط 3 برومبتات مرقمة (1، 2، 3).
+- ممنوع الشرح أو التعليقات الجانبية.
+- كل برومبت يجب أن يتضمن:
+  الموضوع، النمط البصري، الإضاءة، التكوين، العدسة/الكاميرا، العناصر البصرية الداعمة،
+  ألوان الهوية (برتقالي الشروق #F37021 + أسود #0A0A0A + أبيض #FFFFFF)،
+  مساحة نص آمنة، ونسبة أبعاد واضحة.
+- الصورة يجب أن تكون صحفية واقعية بدون تهويل أو تضليل.
 
-News text:
+نص الخبر:
 {text}
 
-Preferred style: {style}
+النمط المطلوب:
+{style}
 """
-    result = await ai_service.generate_text(prompt)
+    result = _sanitize_ai_text(await ai_service.generate_text(prompt))
     if result:
         from app.models.constitution import ImagePrompt
         db.add(ImagePrompt(
@@ -301,17 +307,20 @@ async def infographic_analyze(payload: dict, db: AsyncSession = Depends(get_db))
         raise HTTPException(400, "Missing text")
 
     prompt = f"""
-Analyze the following news in {_lang_name(lang)} and extract structured data for an infographic.
-Return JSON only with this schema:
+{CONSTITUTION_BASE}
+حلّل الخبر التالي وأخرج بيانات منظمة لإنفوغرافيا باللغة {_lang_name(lang)}.
+أعد JSON فقط بهذا المخطط:
 {{
-  "title": "short title in target language",
-  "items": [{{"id": "1", "label": "label", "value": "value"}}],
+  "title": "عنوان قصير",
+  "items": [{{"id": "1", "label": "اسم البند", "value": "القيمة"}}],
   "type": "timeline|ranking|comparison|numbers|map|steps|profile|stats|quote|impact",
   "theme": "dark|light|orange|mono",
   "aspect_ratio": "1:1|4:5|16:9|9:16"
 }}
 
-Text:
+لا تضف أي شرح خارج JSON.
+
+النص:
 {text}
 """
     data = await ai_service.generate_json(prompt)
@@ -336,15 +345,20 @@ async def infographic_prompt(payload: dict, db: AsyncSession = Depends(get_db)):
     if not data:
         raise HTTPException(400, "Missing data")
     prompt = f"""
-You are a visual prompt engineer for Echorouk newsroom.
-Build a rich visual prompt for an infographic using this data:
+{CONSTITUTION_BASE}
+أنت مهندس برومبت بصري في غرفة أخبار الشروق.
+ابنِ برومبت إنفوغرافيا نهائي باللغة {_lang_name(lang)} اعتمادًا على البيانات التالية:
 {data}
 
-Include camera, lighting, composition, and typography (IBM Plex Sans Arabic).
-Respect Echorouk editorial constitution.
-Output only the final prompt text in {_lang_name(lang)}.
+متطلبات البرومبت:
+- أسلوب بصري صحفي واضح.
+- تخطيط منظم سهل القراءة.
+- خطوط عربية مناسبة.
+- تحديد لوحة الألوان ونسبة الأبعاد.
+- وصف العناصر الأساسية بدقة (عناوين، أرقام، ترتيب بصري).
+- بدون أي شرح جانبي؛ أعِد البرومبت النهائي فقط.
 """
-    result = await ai_service.generate_text(prompt)
+    result = _sanitize_ai_text(await ai_service.generate_text(prompt))
     if result:
         from app.models.constitution import InfographicData
         import json

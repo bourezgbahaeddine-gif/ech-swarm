@@ -68,6 +68,7 @@ export default function TrendsPage() {
     const [category, setCategory] = useState('all');
     const [limit, setLimit] = useState(12);
     const [copiedKeyword, setCopiedKeyword] = useState('');
+    const [lastUpdatedAt, setLastUpdatedAt] = useState<string>('');
 
     const latestMutation = useMutation({
         mutationFn: () => dashboardApi.latestTrends({ geo, category }),
@@ -75,6 +76,7 @@ export default function TrendsPage() {
             const alerts = response.data?.alerts || [];
             setTrends(alerts);
             loadRelatedNews(alerts);
+            setLastUpdatedAt(new Date().toLocaleTimeString('ar-DZ'));
         },
     });
 
@@ -84,6 +86,7 @@ export default function TrendsPage() {
             const alerts = response.data?.alerts || [];
             setTrends(alerts);
             loadRelatedNews(alerts);
+            setLastUpdatedAt(new Date().toLocaleTimeString('ar-DZ'));
         },
     });
 
@@ -114,8 +117,24 @@ export default function TrendsPage() {
 
     useEffect(() => {
         latestMutation.mutate();
+
+        const poll = window.setInterval(() => {
+            latestMutation.mutate();
+        }, 60 * 1000);
+
+        const queueScan = window.setInterval(() => {
+            dashboardApi
+                .triggerTrends({ geo, category, limit, wait: false })
+                .then(() => window.setTimeout(() => latestMutation.mutate(), 2500))
+                .catch(() => undefined);
+        }, 10 * 60 * 1000);
+
+        return () => {
+            window.clearInterval(poll);
+            window.clearInterval(queueScan);
+        };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [geo, category]);
+    }, [geo, category, limit]);
 
     const scoredTrends = useMemo(() => {
         return [...trends]
@@ -172,6 +191,10 @@ export default function TrendsPage() {
                         رادار التراند
                     </h1>
                     <p className="text-sm text-gray-400 mt-1">مسح ترندات فعّال مع تقسيم جغرافي وتصنيفي يخدم غرفة التحرير</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                        تحديث تلقائي كل دقيقة
+                        {lastUpdatedAt ? ` • آخر تحديث: ${lastUpdatedAt}` : ''}
+                    </p>
                 </div>
                 <button
                     onClick={() => scanMutation.mutate()}

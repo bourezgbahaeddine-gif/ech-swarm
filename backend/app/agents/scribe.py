@@ -1,10 +1,8 @@
 """
-Echorouk AI Swarm — Scribe Agent (الوكيل الكاتب)
-====================================================
-Content Layer: Transforms raw + context into a polished
-news article in Echorouk style.
-
-Single Responsibility: Write & Format only.
+Echorouk AI Swarm - Scribe Agent (الوكيل الكاتب)
+=================================================
+Transforms approved source content into polished editorial drafts.
+Single responsibility: writing and formatting only.
 """
 
 from datetime import datetime
@@ -27,9 +25,7 @@ settings = get_settings()
 
 class ScribeAgent:
     """
-    The Scribe Agent — writes and formats news articles.
-    Transforms raw data + AI analysis into polished content.
-    Only operates on APPROVED articles (cost optimization).
+    Writes and formats news articles from approved handoffs.
     """
 
     @staticmethod
@@ -42,7 +38,6 @@ class ScribeAgent:
         if not html:
             return f"<h1>{headline}</h1><p></p>"
 
-        # Remove markdown fences and WordPress/Gutenberg comments.
         html = re.sub(r"```[\s\S]*?```", "", html)
         html = re.sub(r"<!--\s*wp:[\s\S]*?-->", "", html, flags=re.IGNORECASE)
         html = re.sub(r"<!--\s*/wp:[\s\S]*?-->", "", html, flags=re.IGNORECASE)
@@ -50,7 +45,6 @@ class ScribeAgent:
         html = re.sub(r"<script[\s\S]*?</script>", "", html, flags=re.IGNORECASE)
         html = re.sub(r"<style[\s\S]*?</style>", "", html, flags=re.IGNORECASE)
 
-        # Remove side-comment lines and prompt-template leftovers.
         html = re.sub(r"(?im)^(note|ملاحظة|explanation|comment|output)\s*:\s*.*$", "", html)
         html = re.sub(r"\[[^\]\n]{2,160}\]", "", html)
         html = re.sub(r"\?{3,}", "", html)
@@ -89,11 +83,9 @@ class ScribeAgent:
             return {"error": f"Article is not in writable state (status: {article.status})"}
 
         try:
-            # Build content from available data
             content = article.original_content or article.summary or article.original_title
             category = article.category.value if article.category else "general"
 
-            # Call AI for rewriting
             result_data = await ai_service.rewrite_article(
                 content=content,
                 category=category,
@@ -153,10 +145,12 @@ class ScribeAgent:
             await db.commit()
             await db.refresh(draft)
 
-            logger.info("scribe_draft_generated",
-                        article_id=article.id,
-                        work_id=draft.work_id,
-                        version=draft.version)
+            logger.info(
+                "scribe_draft_generated",
+                article_id=article.id,
+                work_id=draft.work_id,
+                version=draft.version,
+            )
 
             return {
                 "success": True,
@@ -173,7 +167,7 @@ class ScribeAgent:
             return {"error": str(e)}
 
     async def batch_write(self, db: AsyncSession, limit: int = 10) -> dict:
-        """Batch write all approved articles that don't have body_html yet."""
+        """Batch write all approved articles that do not have generated drafts."""
         stats = {"written": 0, "errors": 0}
 
         result = await db.execute(
@@ -197,5 +191,4 @@ class ScribeAgent:
         return stats
 
 
-# Singleton
 scribe_agent = ScribeAgent()

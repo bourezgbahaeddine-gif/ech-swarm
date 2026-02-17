@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/lib/auth';
 import {
     LayoutDashboard,
     Newspaper,
@@ -16,9 +17,7 @@ import {
     Users,
     KeyRound,
     FileText,
-    Sparkles,
     ShieldCheck,
-    TrendingUp as SeoIcon,
     Film,
     FolderGit2,
 } from 'lucide-react';
@@ -32,18 +31,18 @@ const navItems = [
     { href: '/agents', label: 'الوكلاء', icon: Bot },
     { href: '/trends', label: 'رادار التراند', icon: TrendingUp },
     { href: '/team', label: 'فريق التحرير', icon: Users },
-    { href: '/settings', label: 'إعدادات APIs', icon: KeyRound },
+    { href: '/settings', label: 'إعدادات APIs', icon: KeyRound, directorOnly: true },
     { href: '/constitution', label: 'الدستور', icon: FileText },
-    { href: '/services/editor', label: 'خدمات التحرير', icon: Sparkles },
     { href: '/services/fact-check', label: 'التحقق والاستقصاء', icon: ShieldCheck },
-    { href: '/services/seo', label: 'خدمات SEO', icon: SeoIcon },
     { href: '/services/multimedia', label: 'الوسائط', icon: Film },
     { href: '/workspace-drafts', label: 'المحرر الذكي', icon: FolderGit2 },
 ];
 
 export default function Sidebar() {
     const pathname = usePathname();
+    const { user } = useAuth();
     const [collapsed, setCollapsed] = useState(false);
+    const visibleNav = navItems.filter((item) => !item.directorOnly || user?.role === 'director');
 
     return (
         <aside
@@ -69,7 +68,7 @@ export default function Sidebar() {
 
             {/* Navigation */}
             <nav className="flex-1 py-4 px-2 space-y-1 overflow-y-auto">
-                {navItems.map((item) => {
+                {visibleNav.map((item) => {
                     const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
                     return (
                         <Link

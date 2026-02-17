@@ -1,13 +1,13 @@
 """
-Echorouk AI Swarm - Notification Service
-========================================
-Multi-channel notification delivery (Telegram, Slack).
+Echorouk AI Swarm - Notification Service.
+Multi-channel notifications (Telegram/Slack) with newsroom rules.
 """
 
-import httpx
 import html
 import re
 from typing import Optional
+
+import httpx
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -66,7 +66,7 @@ class NotificationService:
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         payload = {
             "chat_id": chat_id,
-            "text": message[:4096],  # Telegram limit
+            "text": message[:4096],
             "parse_mode": parse_mode,
         }
 
@@ -76,14 +76,13 @@ class NotificationService:
                 if resp.status_code == 200:
                     logger.info("telegram_sent", channel=chat_id)
                     return True
-                else:
-                    logger.error("telegram_error", status=resp.status_code, body=resp.text)
-                    return False
+                logger.error("telegram_error", status=resp.status_code, body=resp.text)
+                return False
         except Exception as e:
             logger.error("telegram_exception", error=str(e))
             return False
 
-    async def send_slack(self, message: str, blocks: list = None) -> bool:
+    async def send_slack(self, message: str, blocks: list | None = None) -> bool:
         """Send a message to Slack via webhook."""
         webhook = await settings_service.get_value("SLACK_WEBHOOK_URL", settings.slack_webhook_url)
         if not webhook:
@@ -102,7 +101,7 @@ class NotificationService:
             return False
 
     async def send_breaking_alert(self, title: str, summary: str, source: str, url: str):
-        """Send a breaking news alert to all channels."""
+        """Send breaking news alerts (Telegram + Slack)."""
         safe_title = self._clean_text(title, 300)
         safe_summary = self._clean_text(summary, 700)
         safe_source = self._clean_text(source, 120)
@@ -119,7 +118,7 @@ class NotificationService:
             settings.telegram_channel_alerts,
         )
         await self.send_telegram(message, channel=channel_alerts)
-        await self.send_slack(f"?? ????: {title}\n{summary}\n??????: {source}")
+        await self.send_slack(f"خبر عاجل: {title}\n{summary}\nالمصدر: {source}")
 
     async def send_candidate_for_review(
         self,
@@ -130,14 +129,14 @@ class NotificationService:
         importance: int,
         category: str,
     ):
-        """Send a candidate article to editors for review."""
+        """Candidate reviews are in-app/Slack only (no Telegram)."""
         safe_title = self._clean_text(title, 300)
         safe_summary = self._clean_text(summary, 900)
         safe_source = self._clean_text(source, 120)
         category_label = self._category_label(category)
         stars = "★" * min(max(importance // 2, 1), 5)
         message = (
-            f"🗞️ <b>خبر جديد يحتاج مراجعة</b> #{article_id}\n\n"
+            f"🗞️ <b>خبر مرشح للمراجعة</b> #{article_id}\n\n"
             f"<b>{safe_title}</b>\n\n"
             f"{safe_summary}\n\n"
             f"🏷️ التصنيف: {category_label}\n"
@@ -147,11 +146,10 @@ class NotificationService:
             f"❌ رفض: <code>reject {article_id}</code>\n"
             f"✍️ إعادة صياغة: <code>rewrite {article_id}</code>"
         )
-
-        await self.send_telegram(message)
+        await self.send_slack(message)
 
     async def send_daily_report(self, stats: dict):
-        """Send daily pipeline statistics report."""
+        """Daily report is Slack only; Telegram reserved for breaking."""
         message = (
             f"📊 <b>التقرير اليومي - غرفة الشروق الذكية</b>\n\n"
             f"📰 إجمالي الأخبار: {stats.get('total', 0)}\n"
@@ -163,9 +161,7 @@ class NotificationService:
             f"⏱️ متوسط المعالجة: {stats.get('avg_time_ms', 0)}ms\n"
             f"⚠️ الأخطاء: {stats.get('errors', 0)}"
         )
+        await self.send_slack(message)
 
-        await self.send_telegram(message)
 
-
-# Singleton
 notification_service = NotificationService()

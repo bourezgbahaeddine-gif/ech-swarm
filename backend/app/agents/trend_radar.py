@@ -20,7 +20,6 @@ from app.core.logging import get_logger
 from app.schemas import TrendAlert
 from app.services.ai_service import ai_service
 from app.services.cache_service import cache_service
-from app.services.notification_service import notification_service
 from app.utils.hashing import normalize_text
 
 logger = get_logger("agent.trend_radar")
@@ -685,7 +684,9 @@ Return strict JSON:
             f"📝 <b>مقترحات العناوين:</b>\n{angles_text}\n\n"
             f"📚 <b>بحث في الأرشيف:</b> {archive_text}"
         )
-        await notification_service.send_telegram(message)
+        # Telegram channel is reserved for breaking news alerts only.
+        # Trend alerts are available in-app via dashboard notifications.
+        logger.info("trend_alert_in_app_only", keyword=alert.keyword, strength=alert.strength)
 
 
 trend_radar_agent = TrendRadarAgent()

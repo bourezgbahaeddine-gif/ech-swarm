@@ -120,6 +120,16 @@ export interface AgentStatus {
     description: string;
 }
 
+export interface DashboardNotification {
+    id: string;
+    type: 'breaking' | 'candidate' | 'trend' | string;
+    title: string;
+    message: string;
+    article_id?: number;
+    created_at: string;
+    severity: 'high' | 'medium' | 'low' | string;
+}
+
 export interface WorkspaceDraft {
     id: number;
     article_id: number;
@@ -324,6 +334,8 @@ export const dashboardApi = {
         api.post<{ message: string; alerts?: TrendAlert[] }>('/dashboard/agents/trends/scan', null, { params }),
     latestTrends: (params?: { geo?: string; category?: string }) =>
         api.get<{ alerts: TrendAlert[] }>('/dashboard/agents/trends/latest', { params }),
+    notifications: (params?: { limit?: number }) =>
+        api.get<{ items: DashboardNotification[]; total: number }>('/dashboard/notifications', { params }),
 };
 
 // ── Auth API ──
