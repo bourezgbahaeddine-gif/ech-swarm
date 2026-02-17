@@ -10,6 +10,7 @@ from collections import Counter
 from datetime import timedelta
 from typing import Optional
 import re
+import math
 
 import aiohttp
 import feedparser
@@ -77,6 +78,7 @@ GEO_NEWS_RSS: dict[str, str] = {
 # For non-DZ scans, we relax cross-verification by providing
 # geo-scoped fallback candidates from Google Trends itself.
 NON_DZ_MIN_TRENDS = 6
+MIN_CONFIDENCE = 0.65
 
 WEAK_TERMS = {
     # Arabic
@@ -129,6 +131,8 @@ class TrendRadarAgent:
                 geo=geo,
                 category_filter=category,
             )
+            verified_trends = await self._score_with_internal_interaction(verified_trends)
+            verified_trends = [t for t in verified_trends if t.get("confidence", 0.0) >= MIN_CONFIDENCE]
 
             # For non-DZ geographies, competitor/burst overlap can be low.
             # Promote top Google trends as fallback so newsroom still gets signals.
@@ -152,6 +156,8 @@ class TrendRadarAgent:
                         keyword=trend["keyword"],
                         source_signals=trend["source_signals"],
                         strength=trend["strength"],
+                        confidence=trend.get("confidence", 0.0),
+                        interaction_score=trend.get("interaction_score", 0.0),
                         category=trend.get("category", "general"),
                         geography=trend.get("geography", geo),
                         reason=f"اتجاه متصاعد في {GEO_LABELS.get(trend.get('geography', geo), geo)} يحتاج متابعة تحريرية.",
@@ -169,6 +175,8 @@ class TrendRadarAgent:
                             keyword=trend["keyword"],
                             source_signals=trend["source_signals"],
                             strength=trend["strength"],
+                            confidence=trend.get("confidence", 0.0),
+                            interaction_score=trend.get("interaction_score", 0.0),
                             category=trend.get("category", "general"),
                             geography=trend.get("geography", geo),
                             reason=f"اتجاه متصاعد في {GEO_LABELS.get(trend.get('geography', geo), geo)} يحتاج متابعة تحريرية.",
@@ -263,6 +271,8 @@ class TrendRadarAgent:
                     "keyword": raw,
                     "source_signals": ["google_trends", "geo_fallback"],
                     "strength": 5,
+                    "confidence": 0.55,
+                    "interaction_score": 0.0,
                     "category": category,
                     "geography": self._detect_geography(raw, geo),
                 }
@@ -371,6 +381,8 @@ class TrendRadarAgent:
                     "keyword": trend,
                     "source_signals": sources,
                     "strength": min(len(sources) * 3 + 2, 10),
+                    "confidence": 0.0,
+                    "interaction_score": 0.0,
                     "category": category,
                     "geography": detected_geo,
                 }
@@ -391,6 +403,8 @@ class TrendRadarAgent:
                         "keyword": burst_word,
                         "source_signals": ["rss_burst", "competitors"],
                         "strength": 6,
+                        "confidence": 0.0,
+                        "interaction_score": 0.0,
                         "category": category,
                         "geography": detected_geo,
                     }
@@ -399,6 +413,34 @@ class TrendRadarAgent:
         verified = self._merge_similar_trends(verified)
         verified.sort(key=lambda x: x["strength"], reverse=True)
         return verified
+
+    async def _score_with_internal_interaction(self, trends: list[dict]) -> list[dict]:
+        out: list[dict] = []
+        for trend in trends:
+            keyword = normalize_text(trend.get("keyword", ""))
+            signals = set(trend.get("source_signals", []))
+            interaction = float(await cache_service.get_counter(f"trend_interaction:{keyword}"))
+
+            confidence = 0.30
+            if "google_trends" in signals:
+                confidence += 0.25
+            if "competitors" in signals:
+                confidence += 0.20
+            if "rss_burst" in signals:
+                confidence += 0.15
+            if "geo_fallback" in signals:
+                confidence += 0.05
+
+            # Internal newsroom interaction as 3rd signal bucket.
+            interaction_component = min(0.20, math.log1p(max(0.0, interaction)) / 10.0)
+            confidence += interaction_component
+            confidence = round(min(1.0, confidence), 3)
+
+            trend["interaction_score"] = round(interaction, 2)
+            trend["confidence"] = confidence
+            out.append(trend)
+        out.sort(key=lambda t: (t.get("confidence", 0), t.get("strength", 0)), reverse=True)
+        return out
 
     def _extract_candidate_terms(self, text: str) -> list[str]:
         normalized = normalize_text(text)
@@ -599,6 +641,8 @@ Return strict JSON:
                 keyword=keyword,
                 source_signals=trend_data["source_signals"],
                 strength=trend_data["strength"],
+                confidence=trend_data.get("confidence", 0.0),
+                interaction_score=trend_data.get("interaction_score", 0.0),
                 category=trend_data.get("category", "general"),
                 geography=trend_data.get("geography", geo),
                 reason=reason,
@@ -613,6 +657,8 @@ Return strict JSON:
                 keyword=keyword,
                 source_signals=trend_data["source_signals"],
                 strength=trend_data["strength"],
+                confidence=trend_data.get("confidence", 0.0),
+                interaction_score=trend_data.get("interaction_score", 0.0),
                 category=trend_data.get("category", "general"),
                 geography=trend_data.get("geography", geo),
                 reason=f"إشارة ترند مؤكدة حول {keyword} وتحتاج متابعة تحريرية سريعة.",

@@ -28,6 +28,7 @@ from app.models import (
     UrgencyLevel,
 )
 from app.schemas import ArticleResponse, ArticleBrief, PaginatedResponse
+from app.services.trend_signal_service import bump_keyword_interactions, extract_keywords
 
 router = APIRouter(prefix="/news", tags=["News"])
 settings = get_settings()
@@ -296,10 +297,13 @@ async def news_insights(
         .where(sm_self.c.article_id.in_(ids))
         .group_by(sm_self.c.article_id, sm_self.c.cluster_id)
     )
-    cluster_map = {
-        int(r.article_id): {"cluster_size": int(r.cluster_size), "cluster_id": int(r.cluster_id)}
-        for r in cluster_rows
-    }
+    cluster_map: dict[int, dict[str, int]] = {}
+    for r in cluster_rows:
+        aid = int(r.article_id)
+        payload = {"cluster_size": int(r.cluster_size), "cluster_id": int(r.cluster_id)}
+        prev = cluster_map.get(aid)
+        if prev is None or payload["cluster_size"] > prev["cluster_size"]:
+            cluster_map[aid] = payload
 
     relation_rows = await db.execute(
         select(
@@ -480,6 +484,7 @@ async def get_article(article_id: int, db: AsyncSession = Depends(get_db)):
     article = result.scalar_one_or_none()
     if not article:
         raise HTTPException(404, "Article not found")
+    await bump_keyword_interactions(extract_keywords(article.title_ar or article.original_title), weight=1)
     return ArticleResponse.model_validate(article)
 
 
@@ -532,8 +537,20 @@ async def article_cluster(
     """
     Return cluster members for the article (event card view).
     """
+    cluster_sizes = (
+        select(
+            StoryClusterMember.cluster_id.label("cluster_id"),
+            func.count(StoryClusterMember.article_id).label("members"),
+        )
+        .group_by(StoryClusterMember.cluster_id)
+        .subquery()
+    )
     member_row = await db.execute(
-        select(StoryClusterMember).where(StoryClusterMember.article_id == article_id).limit(1)
+        select(StoryClusterMember)
+        .join(cluster_sizes, cluster_sizes.c.cluster_id == StoryClusterMember.cluster_id)
+        .where(StoryClusterMember.article_id == article_id)
+        .order_by(desc(cluster_sizes.c.members), desc(StoryClusterMember.score), StoryClusterMember.id.asc())
+        .limit(1)
     )
     member = member_row.scalar_one_or_none()
     if not member:

@@ -18,6 +18,7 @@ from app.models.knowledge import (
     StoryCluster,
     StoryClusterMember,
 )
+from app.models.quality import ArticleQualityReport
 
 __all__ = [
     "Source", "Article", "EditorDecision", "EditorialDraft", "FeedbackLog",
@@ -38,4 +39,5 @@ __all__ = [
     "ArticleRelation",
     "StoryCluster",
     "StoryClusterMember",
+    "ArticleQualityReport",
 ]

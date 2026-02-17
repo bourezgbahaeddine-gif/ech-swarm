@@ -204,6 +204,8 @@ class TrendAlert(BaseModel):
     keyword: str
     source_signals: list[str] = []
     strength: int = Field(5, ge=1, le=10)
+    confidence: float = Field(0.0, ge=0, le=1)
+    interaction_score: float = Field(0.0, ge=0)
     category: str = "general"
     geography: str = "DZ"
     reason: Optional[str] = None

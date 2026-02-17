@@ -3,6 +3,7 @@ import re
 from typing import Literal, Optional
 from uuid import uuid4
 
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -10,13 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.scribe import scribe_agent
 from app.api.routes.auth import get_current_user
-from app.core.database import get_db
+from app.core.database import get_db, async_session
 from app.core.logging import get_logger
-from app.models import Article, EditorDecision, EditorialDraft, FeedbackLog, NewsCategory, NewsStatus
+from app.models import Article, ArticleQualityReport, EditorDecision, EditorialDraft, FeedbackLog, NewsCategory, NewsStatus
 from app.models.user import User, UserRole
 from app.schemas import EditorDecisionCreate, EditorDecisionResponse
 from app.services.article_index_service import article_index_service
 from app.services.ai_service import ai_service
+from app.services.quality_gate_service import quality_gate_service
+from app.services.trend_signal_service import bump_keyword_interactions, extract_keywords
 
 logger = get_logger("api.editorial")
 router = APIRouter(prefix="/editorial", tags=["Editorial"])
@@ -246,6 +249,7 @@ async def make_decision(
         article.reviewed_at = datetime.utcnow()
         if data.edited_title:
             article.title_ar = data.edited_title
+        await bump_keyword_interactions(extract_keywords(article.title_ar or article.original_title), weight=2)
     elif data.decision == "reject":
         article.status = NewsStatus.REJECTED
         article.reviewed_by = editor_name
@@ -254,6 +258,7 @@ async def make_decision(
     elif data.decision == "rewrite":
         article.body_html = None
         article.status = NewsStatus.APPROVED
+        await bump_keyword_interactions(extract_keywords(article.title_ar or article.original_title), weight=1)
 
     await db.commit()
 
@@ -298,6 +303,7 @@ async def handoff_to_scribe(
             )
         )
         await db.commit()
+    await bump_keyword_interactions(extract_keywords(article.title_ar or article.original_title), weight=2)
 
     scribe_result = await scribe_agent.write_article(db, article_id, source_action="approved_handoff")
     if "error" in scribe_result:
@@ -342,6 +348,8 @@ async def process_article(
         if not output or not output.strip():
             raise HTTPException(status_code=503, detail="AI service returned empty output")
 
+        readability = quality_gate_service.readability_report(output)
+
         process_decision = EditorDecision(
             article_id=article_id,
             editor_name=current_user.full_name_ar,
@@ -369,6 +377,17 @@ async def process_article(
         )
         db.add(process_decision)
         db.add(draft_decision)
+        await quality_gate_service.save_report(
+            db,
+            article_id=article_id,
+            stage="READABILITY",
+            passed=bool(readability["passed"]),
+            score=readability.get("score"),
+            blocking_reasons=readability.get("blocking_reasons", []),
+            actionable_fixes=readability.get("actionable_fixes", []),
+            report_json=readability,
+            created_by=current_user.full_name_ar,
+        )
         await db.commit()
         await db.refresh(draft_decision)
 
@@ -376,6 +395,7 @@ async def process_article(
             "article_id": article_id,
             "action": payload.action,
             "result": output,
+            "readability_report": readability,
             "draft": _draft_to_dict(draft_decision),
         }
 
@@ -413,8 +433,31 @@ async def process_article(
     if payload.action in {"publish_now", "unpublish"}:
         _require_roles(current_user, {UserRole.director})
         if payload.action == "publish_now":
+            audit = await quality_gate_service.technical_audit(db, article)
+            await quality_gate_service.save_report(
+                db,
+                article_id=article_id,
+                stage="SEO_TECH",
+                passed=bool(audit["passed"]),
+                score=audit.get("score"),
+                blocking_reasons=audit.get("blocking_reasons", []),
+                actionable_fixes=audit.get("actionable_fixes", []),
+                report_json=audit,
+                created_by=current_user.full_name_ar,
+            )
+            if not audit["passed"]:
+                await db.commit()
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "message": "Technical audit failed",
+                        "blocking_reasons": audit.get("blocking_reasons", []),
+                        "actionable_fixes": audit.get("actionable_fixes", []),
+                    },
+                )
             article.status = NewsStatus.PUBLISHED
             article.published_at = datetime.utcnow()
+            await bump_keyword_interactions(extract_keywords(article.title_ar or article.original_title), weight=3)
         else:
             article.status = NewsStatus.APPROVED
             article.published_at = None
@@ -428,9 +471,139 @@ async def process_article(
             )
         )
         await db.commit()
+        if payload.action == "publish_now":
+            async def _guardian_job(article_id: int, created_by: str) -> None:
+                async with async_session() as bg_db:
+                    art_row = await bg_db.execute(select(Article).where(Article.id == article_id))
+                    bg_article = art_row.scalar_one_or_none()
+                    if not bg_article:
+                        return
+                    await quality_gate_service.guardian_check_with_retry(bg_db, bg_article, created_by)
+
+            asyncio.create_task(_guardian_job(article_id, current_user.full_name_ar))
         return {"article_id": article_id, "action": payload.action, "updated": True}
 
     raise HTTPException(400, "unsupported action")
+
+
+@router.post("/{article_id}/quality/readability")
+async def run_readability_check(
+    article_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(
+        current_user,
+        {UserRole.director, UserRole.editor_chief, UserRole.journalist, UserRole.social_media, UserRole.print_editor},
+    )
+    article_res = await db.execute(select(Article).where(Article.id == article_id))
+    article = article_res.scalar_one_or_none()
+    if not article:
+        raise HTTPException(404, "Article not found")
+    text = article.body_html or article.summary or article.original_content or article.original_title
+    report = quality_gate_service.readability_report(text)
+    await quality_gate_service.save_report(
+        db,
+        article_id=article_id,
+        stage="READABILITY",
+        passed=bool(report["passed"]),
+        score=report.get("score"),
+        blocking_reasons=report.get("blocking_reasons", []),
+        actionable_fixes=report.get("actionable_fixes", []),
+        report_json=report,
+        created_by=current_user.full_name_ar,
+    )
+    await db.commit()
+    return report
+
+
+@router.post("/{article_id}/quality/technical")
+async def run_technical_audit(
+    article_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(current_user, {UserRole.director, UserRole.editor_chief})
+    article_res = await db.execute(select(Article).where(Article.id == article_id))
+    article = article_res.scalar_one_or_none()
+    if not article:
+        raise HTTPException(404, "Article not found")
+    report = await quality_gate_service.technical_audit(db, article)
+    await quality_gate_service.save_report(
+        db,
+        article_id=article_id,
+        stage="SEO_TECH",
+        passed=bool(report["passed"]),
+        score=report.get("score"),
+        blocking_reasons=report.get("blocking_reasons", []),
+        actionable_fixes=report.get("actionable_fixes", []),
+        report_json=report,
+        created_by=current_user.full_name_ar,
+    )
+    await db.commit()
+    return report
+
+
+@router.post("/{article_id}/quality/guardian")
+async def run_guardian_check(
+    article_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(current_user, {UserRole.director, UserRole.editor_chief})
+    article_res = await db.execute(select(Article).where(Article.id == article_id))
+    article = article_res.scalar_one_or_none()
+    if not article:
+        raise HTTPException(404, "Article not found")
+    url = article.published_url or article.original_url or ""
+    report = await quality_gate_service.guardian_check(url)
+    await quality_gate_service.save_report(
+        db,
+        article_id=article_id,
+        stage="POST_PUBLISH",
+        passed=bool(report["passed"]),
+        score=report.get("score"),
+        blocking_reasons=report.get("blocking_reasons", []),
+        actionable_fixes=report.get("actionable_fixes", []),
+        report_json=report,
+        created_by=current_user.full_name_ar,
+    )
+    await db.commit()
+    return report
+
+
+@router.get("/{article_id}/quality/reports")
+async def get_quality_reports(
+    article_id: int,
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(
+        current_user,
+        {UserRole.director, UserRole.editor_chief, UserRole.journalist, UserRole.social_media, UserRole.print_editor},
+    )
+    rows = await db.execute(
+        select(ArticleQualityReport)
+        .where(ArticleQualityReport.article_id == article_id)
+        .order_by(ArticleQualityReport.created_at.desc(), ArticleQualityReport.id.desc())
+        .limit(max(1, min(limit, 100)))
+    )
+    reports = rows.scalars().all()
+    return [
+        {
+            "id": r.id,
+            "stage": r.stage,
+            "passed": bool(r.passed),
+            "score": r.score,
+            "blocking_reasons": r.blocking_reasons or [],
+            "actionable_fixes": r.actionable_fixes or [],
+            "report_json": r.report_json or {},
+            "created_by": r.created_by,
+            "created_at": r.created_at,
+        }
+        for r in reports
+    ]
 
 
 @router.get("/workspace/drafts")
