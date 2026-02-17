@@ -44,6 +44,7 @@ AGGREGATOR_HOSTS = {
     "l.facebook.com",
     "lm.facebook.com",
 }
+ACCESS_RESTRICTED_STATUSES = {401, 403, 429}
 
 
 class QualityGateService:
@@ -56,6 +57,20 @@ class QualityGateService:
 
     def _is_aggregator_url(self, url: str) -> bool:
         return self._hostname(url) in AGGREGATOR_HOSTS
+
+    @staticmethod
+    def _access_restricted_report(status_code: int, metrics: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "stage": "POST_PUBLISH_ACCESS_RESTRICTED",
+            "passed": False,
+            "score": 65,
+            "blocking_reasons": [f"الوصول إلى الصفحة مقيّد (HTTP {status_code})"],
+            "actionable_fixes": [
+                "تحقق من أن المصدر يسمح بالزحف الآلي من خادمك",
+                "استخدم رابط نشر بديل قابل للوصول إن توفر",
+            ],
+            "metrics": metrics,
+        }
 
     async def save_report(
         self,
@@ -290,6 +305,11 @@ class QualityGateService:
                     metrics["final_url"] = str(resp.url)
                     audited_url = str(resp.url)
 
+            if metrics["status_code"] in ACCESS_RESTRICTED_STATUSES:
+                metrics["audited_url"] = audited_url
+                metrics["access_restricted"] = True
+                return self._access_restricted_report(metrics["status_code"], metrics)
+
             soup = BeautifulSoup(html, "html.parser")
             robots = (soup.find("meta", attrs={"name": "robots"}) or {}).get("content", "")
             canonical_raw = (soup.find("link", rel="canonical") or {}).get("href", "")
@@ -309,6 +329,10 @@ class QualityGateService:
                             metrics["status_code"] = real_resp.status
                             metrics["final_url"] = str(real_resp.url)
                             audited_url = str(real_resp.url)
+                            if metrics["status_code"] in ACCESS_RESTRICTED_STATUSES:
+                                metrics["audited_url"] = audited_url
+                                metrics["access_restricted"] = True
+                                return self._access_restricted_report(metrics["status_code"], metrics)
                             soup = BeautifulSoup(html, "html.parser")
                             robots = (soup.find("meta", attrs={"name": "robots"}) or {}).get("content", "")
                             canonical_raw = (soup.find("link", rel="canonical") or {}).get("href", "")
