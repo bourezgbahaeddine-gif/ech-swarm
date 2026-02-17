@@ -31,6 +31,7 @@ certifi==2025.1.31
 # ── Text Processing ──
 python-Levenshtein==0.26.1
 rapidfuzz==3.11.0
+bleach==6.2.0
 
 # ── TTS (Audio Agent) ──
 edge-tts==7.0.0

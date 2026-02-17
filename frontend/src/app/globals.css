@@ -124,3 +124,38 @@ code, pre, .font-mono {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+.smart-editor-content h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0.5rem 0 1rem;
+}
+
+.smart-editor-content h2 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin: 0.8rem 0 0.5rem;
+}
+
+.smart-editor-content h3 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0.6rem 0 0.4rem;
+}
+
+.smart-editor-content p {
+  margin: 0.4rem 0;
+}
+
+.smart-editor-content ul,
+.smart-editor-content ol {
+  padding-right: 1.1rem;
+  margin: 0.6rem 0;
+}
+
+.smart-editor-content blockquote {
+  border-right: 3px solid rgba(52, 211, 153, 0.45);
+  margin: 0.7rem 0;
+  padding: 0.2rem 0.8rem;
+  background: rgba(255, 255, 255, 0.04);
+}

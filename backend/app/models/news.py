@@ -186,6 +186,8 @@ class EditorialDraft(Base):
     article_id = Column(Integer, ForeignKey("articles.id"), nullable=False, index=True)
     work_id = Column(String(64), nullable=False, index=True)
     source_action = Column(String(100), nullable=False, default="manual")
+    parent_draft_id = Column(Integer, ForeignKey("editorial_drafts.id"), nullable=True)
+    change_origin = Column(String(40), nullable=False, default="manual")  # manual|autosave|ai_suggestion|restore|regenerate
     title = Column(String(1024), nullable=True)
     body = Column(Text, nullable=False)
     note = Column(Text, nullable=True)
@@ -199,9 +201,11 @@ class EditorialDraft(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     article = relationship("Article")
+    parent_draft = relationship("EditorialDraft", remote_side=[id], uselist=False)
 
     __table_args__ = (
         UniqueConstraint("article_id", "source_action", "version", name="uq_draft_article_action_version"),
+        UniqueConstraint("work_id", "version", name="uq_draft_work_version"),
         Index("ix_editorial_drafts_article_status", "article_id", "status"),
     )
 

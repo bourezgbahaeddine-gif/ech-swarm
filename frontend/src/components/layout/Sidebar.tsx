@@ -38,7 +38,7 @@ const navItems = [
     { href: '/services/fact-check', label: 'التحقق والاستقصاء', labelEn: 'Fact-Check', icon: ShieldCheck },
     { href: '/services/seo', label: 'خدمات SEO', labelEn: 'SEO', icon: SeoIcon },
     { href: '/services/multimedia', label: 'الوسائط', labelEn: 'Multimedia', icon: Film },
-    { href: '/workspace-drafts', label: 'مساحة المسودات', labelEn: 'Workspace Drafts', icon: FolderGit2 },
+    { href: '/workspace-drafts', label: 'المحرر الذكي', labelEn: 'Smart Editor', icon: FolderGit2 },
 ];
 
 export default function Sidebar() {

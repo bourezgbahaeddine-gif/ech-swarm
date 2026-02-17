@@ -125,6 +125,8 @@ export interface WorkspaceDraft {
     article_id: number;
     work_id: string;
     source_action: string;
+    parent_draft_id?: number | null;
+    change_origin?: string;
     title: string | null;
     body: string;
     note: string | null;
@@ -143,6 +145,58 @@ export interface ArticleInsight {
     cluster_size: number;
     cluster_id?: number | null;
     relation_count: number;
+}
+
+export interface DraftVersionDiff {
+    work_id: string;
+    from_version: number;
+    to_version: number;
+    diff: string;
+    stats: { added: number; removed: number };
+}
+
+export interface SmartEditorContext {
+    work_id: string;
+    draft: WorkspaceDraft;
+    article: {
+        id: number;
+        title_ar: string | null;
+        original_title: string;
+        summary: string | null;
+        original_url: string;
+        original_content: string | null;
+        category: string | null;
+        urgency: string | null;
+        importance_score: number;
+        source_name: string | null;
+        status: string;
+        router_rationale: string;
+    };
+    story_context: {
+        cluster: {
+            cluster_id: number;
+            cluster_key: string;
+            label: string | null;
+            category: string | null;
+            geography: string | null;
+        } | null;
+        timeline: Array<{
+            id: number;
+            title: string;
+            url: string | null;
+            source_name: string | null;
+            created_at: string;
+        }>;
+        relations: Array<{
+            id: number;
+            title: string;
+            url: string | null;
+            source_name: string | null;
+            created_at: string;
+            relation_type: string;
+            score: number;
+        }>;
+    };
 }
 
 export const newsApi = {
@@ -216,6 +270,43 @@ export const editorialApi = {
         api.post(`/editorial/workspace/drafts/${workId}/archive`),
     regenerateWorkspaceDraft: (workId: string) =>
         api.post(`/editorial/workspace/drafts/${workId}/regenerate`),
+    smartContext: (workId: string) =>
+        api.get<SmartEditorContext>(`/editorial/workspace/drafts/${workId}/context`),
+    draftVersions: (workId: string) =>
+        api.get<WorkspaceDraft[]>(`/editorial/workspace/drafts/${workId}/versions`),
+    draftDiff: (workId: string, fromVersion: number, toVersion: number) =>
+        api.get<DraftVersionDiff>(`/editorial/workspace/drafts/${workId}/diff`, {
+            params: { from_version: fromVersion, to_version: toVersion },
+        }),
+    autosaveWorkspaceDraft: (workId: string, data: {
+        title?: string | null;
+        body: string;
+        note?: string;
+        based_on_version: number;
+    }) => api.post(`/editorial/workspace/drafts/${workId}/autosave`, data),
+    restoreWorkspaceDraftVersion: (workId: string, version: number) =>
+        api.post(`/editorial/workspace/drafts/${workId}/restore/${version}`),
+    aiRewriteSuggestion: (workId: string, data: { mode: 'formal' | 'breaking' | 'analysis' | 'simple'; instruction?: string }) =>
+        api.post(`/editorial/workspace/drafts/${workId}/ai/rewrite`, data),
+    aiHeadlineSuggestion: (workId: string, count = 5) =>
+        api.post(`/editorial/workspace/drafts/${workId}/ai/headlines`, { count }),
+    aiSeoSuggestion: (workId: string) =>
+        api.post(`/editorial/workspace/drafts/${workId}/ai/seo`),
+    aiSocialVariants: (workId: string) =>
+        api.post(`/editorial/workspace/drafts/${workId}/ai/social`),
+    applyAiSuggestion: (workId: string, data: {
+        title?: string | null;
+        body: string;
+        note?: string;
+        based_on_version: number;
+        suggestion_tool?: string;
+    }) => api.post(`/editorial/workspace/drafts/${workId}/ai/apply`, data),
+    verifyClaims: (workId: string, threshold = 0.7) =>
+        api.post(`/editorial/workspace/drafts/${workId}/verify/claims`, { threshold }),
+    qualityScore: (workId: string) =>
+        api.post(`/editorial/workspace/drafts/${workId}/quality/score`),
+    publishReadiness: (workId: string) =>
+        api.get(`/editorial/workspace/drafts/${workId}/publish-readiness`),
     decisions: (articleId: number) => api.get(`/editorial/${articleId}/decisions`),
     generate: (articleId: number) => api.post(`/editorial/${articleId}/generate`),
 };

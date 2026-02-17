@@ -135,6 +135,7 @@ class ScribeAgent:
                 article_id=article.id,
                 work_id=fixed_work_id or self._new_work_id(),
                 source_action=source_action,
+                change_origin="regenerate" if fixed_work_id else "ai_suggestion",
                 title=generated_title,
                 body=generated_body,
                 note="auto_from_scribe_v2",
