@@ -37,16 +37,6 @@ OPINION_WORDS_AR = {
     "خطير جدا",
 }
 
-TRANSITIONS_AR = {
-    "لكن",
-    "بالمقابل",
-    "إضافة إلى ذلك",
-    "في المقابل",
-    "من جهة أخرى",
-    "لذلك",
-    "وبحسب",
-}
-
 CLAIM_TRIGGER_WORDS_AR = {
     "قال",
     "أعلن",
@@ -55,7 +45,21 @@ CLAIM_TRIGGER_WORDS_AR = {
     "كشف",
     "ذكر",
     "نقل",
+    "أفاد",
 }
+
+SIDE_COMMENT_PATTERNS = [
+    r"(?im)^\s*(حسنًا|حسنا|إليك|ملاحظات|ملاحظة|آمل|يمكنني|إذا كان لديك|هذا مفيد)\b.*$",
+    r"(?im)^\s*(based on|note|explanation|comments?)\b.*$",
+]
+
+TEMPLATE_NOISE_PATTERNS = [
+    r"\[[^\]]{2,120}\]",
+    r"\bمثال\b",
+    r"\bالبند\s+\d+\b",
+    r"\?{3,}",
+    r"(?i)\btemplate\b",
+]
 
 
 @dataclass
@@ -69,11 +73,38 @@ class SmartEditorService:
     @staticmethod
     def _get_ai_service():
         try:
-            from app.services.ai_service import ai_service  # lazy import to avoid hard dependency at import-time
+            from app.services.ai_service import ai_service
 
             return ai_service
         except Exception:
             return None
+
+    @staticmethod
+    def _contains_html(value: str) -> bool:
+        return bool(re.search(r"<[a-zA-Z][^>]*>", value or ""))
+
+    @staticmethod
+    def _strip_side_comments(value: str) -> str:
+        text = (value or "").strip()
+        for pattern in SIDE_COMMENT_PATTERNS:
+            text = re.sub(pattern, "", text)
+        text = text.replace("```html", "").replace("```", "")
+        text = re.sub(r"(?m)^\s*[-*]\s+", "", text)
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
+        return text
+
+    @staticmethod
+    def _contains_template_noise(text: str) -> bool:
+        sample = text or ""
+        return any(re.search(pattern, sample) for pattern in TEMPLATE_NOISE_PATTERNS)
+
+    @staticmethod
+    def _text_to_html(title: str, text: str) -> str:
+        lines = [line.strip() for line in re.split(r"\n+", text or "") if line.strip()]
+        if not lines:
+            return f"<h1>{title}</h1><p></p>"
+        body = "\n".join(f"<p>{line}</p>" for line in lines)
+        return f"<h1>{title}</h1>\n{body}"
 
     def sanitize_html(self, value: str) -> str:
         cleaned = bleach.clean(
@@ -83,9 +114,9 @@ class SmartEditorService:
             protocols=["http", "https", "mailto"],
             strip=True,
         )
-        # Drop javascript-like href values that may slip through malformed markup.
         cleaned = re.sub(r'href\s*=\s*["\']\s*javascript:[^"\']*["\']', 'href="#"', cleaned, flags=re.IGNORECASE)
-        return cleaned.strip()
+        cleaned = cleaned.strip()
+        return cleaned
 
     @staticmethod
     def html_to_text(value: str) -> str:
@@ -122,39 +153,44 @@ class SmartEditorService:
         instruction: str = "",
     ) -> dict[str, Any]:
         prompt = f"""
-You are an Arabic newsroom assistant for Echorouk.
-Return strict JSON only with keys:
+أنت مساعد تحرير صحفي داخل غرفة أخبار الشروق.
+أعد كتابة النص بصيغة عربية صحفية واضحة بدون أي شروحات جانبية.
+
+المطلوب: JSON فقط بالمفاتيح:
 title, body_html, note
 
-Hard rules:
-- Keep facts exactly as provided in source context.
-- Do not add new entities, numbers, dates, or quotes.
-- Use neutral journalistic tone.
-- Output clean HTML only in body_html (h1,p,h2,ul,li,a,strong,em).
+قواعد إلزامية:
+- لا تضف معلومات غير موجودة في السياق.
+- امنع التعليقات الجانبية (مثل: ملاحظة، مثال، يمكنني، آمل).
+- body_html يجب أن يكون HTML نظيفًا ويحتوي H1 واحدًا فقط.
+- لا تستخدم markdown ولا code fence.
 
-Mode: {mode}
-Instruction: {instruction or "none"}
+النمط: {mode}
+تعليمات إضافية: {instruction or "لا يوجد"}
 
-Source context:
+السياق:
 {source_text[:7000]}
 
-Current title:
+العنوان الحالي:
 {draft_title}
 
-Current body:
+المتن الحالي:
 {draft_html[:10000]}
 """
         ai = self._get_ai_service()
         data = await ai.generate_json(prompt) if ai else {}
-        title = str(data.get("title") or draft_title or "").strip()
-        body_html = str(data.get("body_html") or draft_html or "").strip()
+        title = str(data.get("title") or draft_title or "").strip() or "عنوان الخبر"
+        candidate = str(data.get("body_html") or draft_html or "").strip()
         note = str(data.get("note") or f"rewrite_mode:{mode}").strip()
 
-        if not body_html:
-            body_html = draft_html
-        sanitized = self.sanitize_html(body_html)
-        diff = self.build_diff(draft_html, sanitized)
+        candidate = self._strip_side_comments(candidate)
+        if not self._contains_html(candidate):
+            candidate = self._text_to_html(title, candidate)
+        if "<h1" not in candidate.lower():
+            candidate = f"<h1>{title}</h1>\n{candidate}"
 
+        sanitized = self.sanitize_html(candidate)
+        diff = self.build_diff(draft_html, sanitized)
         return {
             "title": title,
             "body_html": sanitized,
@@ -166,31 +202,29 @@ Current body:
 
     async def headline_suggestions(self, *, source_text: str, draft_title: str) -> list[dict[str, str]]:
         prompt = f"""
-Generate exactly 5 Arabic newsroom headlines as strict JSON array.
-Each item must contain: label, headline.
-Required labels in order:
-official, breaking, seo, engaging, mobile_short.
-No markdown.
-No extra keys.
+أنت محرر عناوين في الشروق.
+أعد 5 عناوين فقط بصيغة JSON array.
+كل عنصر يجب أن يحتوي:
+label, headline
 
-Context:
+الترتيب:
+official, breaking, seo, engaging, mobile_short
+
+بدون أي نص إضافي.
+
+السياق:
 {source_text[:5000]}
 
-Current title:
+العنوان الحالي:
 {draft_title}
 """
         ai = self._get_ai_service()
         data = await ai.generate_json(prompt) if ai else {}
-        if isinstance(data, list) and len(data) >= 5:
+        if isinstance(data, list):
             out: list[dict[str, str]] = []
             for item in data[:5]:
-                out.append(
-                    {
-                        "label": str(item.get("label") or "").strip(),
-                        "headline": str(item.get("headline") or "").strip(),
-                    }
-                )
-            if all(x["headline"] for x in out):
+                out.append({"label": str(item.get("label") or "").strip(), "headline": self._strip_side_comments(str(item.get("headline") or "").strip())})
+            if len(out) == 5 and all(x["headline"] for x in out):
                 return out
 
         base = draft_title or "عنوان مقترح"
@@ -204,29 +238,31 @@ Current title:
 
     async def seo_suggestions(self, *, source_text: str, draft_title: str, draft_html: str) -> dict[str, Any]:
         prompt = f"""
-Return strict JSON with keys:
+أنت مختص SEO خبري.
+أعد JSON فقط بالمفاتيح:
 seo_title, meta_description, keywords, tags
 
-Rules:
-- Arabic newsroom style.
-- seo_title <= 60 chars.
-- meta_description <= 155 chars.
-- keywords exactly 5 items.
-- tags exactly 5 items.
+الشروط:
+- seo_title حتى 60 حرفًا.
+- meta_description حتى 155 حرفًا.
+- keywords: 5 عناصر.
+- tags: 5 عناصر.
+- لا تضف شروحات.
 
-Title:
+العنوان:
 {draft_title}
 
-Body:
+المتن:
 {draft_html[:9000]}
 
-Context:
+السياق:
 {source_text[:4000]}
 """
         ai = self._get_ai_service()
         data = await ai.generate_json(prompt) if ai else {}
-        seo_title = str(data.get("seo_title") or draft_title or "").strip()[:60]
-        meta = str(data.get("meta_description") or "").strip()[:155]
+
+        seo_title = self._strip_side_comments(str(data.get("seo_title") or draft_title or "").strip())[:60]
+        meta = self._strip_side_comments(str(data.get("meta_description") or "").strip())[:155]
 
         keywords = data.get("keywords") or []
         tags = data.get("tags") or []
@@ -234,8 +270,8 @@ Context:
             keywords = []
         if not isinstance(tags, list):
             tags = []
-        keywords = [str(x).strip() for x in keywords if str(x).strip()][:5]
-        tags = [str(x).strip() for x in tags if str(x).strip()][:5]
+        keywords = [self._strip_side_comments(str(x).strip()) for x in keywords if str(x).strip()][:5]
+        tags = [self._strip_side_comments(str(x).strip()) for x in tags if str(x).strip()][:5]
 
         if not keywords:
             tokens = re.findall(r"[\u0600-\u06FFA-Za-z]{4,}", self.html_to_text(draft_html))
@@ -252,29 +288,30 @@ Context:
 
     async def social_variants(self, *, source_text: str, draft_title: str, draft_html: str) -> dict[str, str]:
         prompt = f"""
-Return strict JSON with keys:
+أنت محرر منصات اجتماعية.
+أعد JSON فقط بالمفاتيح:
 facebook, x, push, summary_120, breaking_alert
 
-Constraints:
-- Arabic.
-- factual only.
-- push must be 15-18 words.
-- summary_120 around 120 words.
+الشروط:
+- عربية واضحة.
+- بدون تعليقات جانبية.
+- push بين 15 و18 كلمة.
+- summary_120 حوالي 120 كلمة.
 
-Title:
+العنوان:
 {draft_title}
 
-Body:
+المتن:
 {draft_html[:9000]}
 
-Context:
+السياق:
 {source_text[:3000]}
 """
         ai = self._get_ai_service()
         data = await ai.generate_json(prompt) if ai else {}
         out: dict[str, str] = {}
         for key in ["facebook", "x", "push", "summary_120", "breaking_alert"]:
-            out[key] = str(data.get(key) or "").strip()
+            out[key] = self._strip_side_comments(str(data.get(key) or "").strip())
         return out
 
     def extract_claims(self, *, text: str, source_url: str | None = None) -> list[dict[str, Any]]:
@@ -305,31 +342,43 @@ Context:
                 confidence += 0.05
             confidence = min(confidence, 0.95)
 
-            blocking = confidence < 0.70
             claims.append(
                 {
                     "id": f"clm-{idx}",
                     "text": sentence,
                     "claim_type": claim_type,
                     "confidence": round(confidence, 2),
-                    "blocking": blocking,
-                    "verify_hint": "official_statement_or_reliable_wire",
+                    "blocking": confidence < 0.70,
+                    "verify_hint": "تحقق من المصدر الرسمي أو وكالة موثوقة",
                     "evidence_links": [source_url] if source_url else [],
                 }
             )
         return claims
 
     def fact_check_report(self, *, text: str, source_url: str | None = None, threshold: float = 0.70) -> dict[str, Any]:
-        claims = self.extract_claims(text=text, source_url=source_url)
+        clean_text = self._strip_side_comments(text or "")
+        template_noise = self._contains_template_noise(clean_text)
+        claims = self.extract_claims(text=clean_text, source_url=source_url)
         unresolved = [c for c in claims if c["confidence"] < threshold]
-        passed = len(unresolved) == 0
+
+        blocking_reasons: list[str] = []
+        actionable_fixes: list[str] = []
+        if template_noise:
+            blocking_reasons.append("النص يحتوي قوالب أو تعليقات جانبية وغير صالح للنشر")
+            actionable_fixes.append("استخدم زر تحسين الصياغة لإزالة القوالب والتعليقات")
+        if unresolved:
+            blocking_reasons.append("توجد ادعاءات غير مؤكدة تحت الحد المطلوب")
+            actionable_fixes.append("تحقق من الادعاءات منخفضة الثقة قبل طلب النشر")
+
+        passed = not blocking_reasons
+        score = max(0, 100 - len(unresolved) * 20 - (30 if template_noise else 0))
         return {
             "stage": "FACT_CHECK_PASSED" if passed else "FACT_CHECK_BLOCKED",
             "passed": passed,
-            "score": max(0, 100 - len(unresolved) * 20),
+            "score": score,
             "claims": claims,
-            "blocking_reasons": ["Unverified claims found"] if unresolved else [],
-            "actionable_fixes": ["Verify low-confidence claims before publish"] if unresolved else [],
+            "blocking_reasons": blocking_reasons,
+            "actionable_fixes": actionable_fixes,
             "threshold": threshold,
         }
 
@@ -349,7 +398,7 @@ Context:
         lead_score = 0
         if re.search(r"\d", lead):
             lead_score += 25
-        if any(x in lead for x in ["في", "ب", "اليوم", "أمس"]):
+        if any(x in lead for x in ["في", "اليوم", "أمس", "الجزائر", "حسب"]):
             lead_score += 25
         if len(lead.split()) >= 12:
             lead_score += 25
@@ -359,8 +408,8 @@ Context:
 
         duplicates = 0
         seen: set[str] = set()
-        for s in sentences:
-            key = re.sub(r"\s+", " ", s).strip()
+        for sentence in sentences:
+            key = re.sub(r"\s+", " ", sentence).strip()
             if key in seen:
                 duplicates += 1
             seen.add(key)
@@ -372,14 +421,9 @@ Context:
         elif len(words) > 700:
             length_score = 70
 
-        neutral_penalty = 0
-        lowered = text.lower()
-        for w in OPINION_WORDS_AR:
-            if w in lowered:
-                neutral_penalty += 12
+        neutral_penalty = sum(12 for word in OPINION_WORDS_AR if word in text.lower())
         tone_neutrality = max(0, 100 - neutral_penalty)
-
-        source_citations = len(re.findall(r"(قال|أعلن|بحسب|وفق|ذكرت|رويترز|الوزارة)", text))
+        source_citations = len(re.findall(r"(قال|أعلن|بحسب|وفق|ذكرت|الوزارة|الهيئة|بيان)", text))
         source_presence = min(100, source_citations * 20)
 
         total = int(
@@ -394,15 +438,15 @@ Context:
 
         fixes: list[str] = []
         if clarity < 75:
-            fixes.append("Split long sentences and simplify wording.")
+            fixes.append("قصّر الجمل الطويلة لتحسين الوضوح.")
         if structure < 80:
-            fixes.append("Ensure one H1 and at least one H2 section.")
+            fixes.append("أضف عنوانًا رئيسيًا H1 واحدًا مع عنوان فرعي H2 على الأقل.")
         if inverted_pyramid < 70:
-            fixes.append("Strengthen lead paragraph with who/what/when/where.")
+            fixes.append("قوّ الفقرة الأولى بماذا/من/أين/متى.")
         if source_presence < 60:
-            fixes.append("Add explicit source attribution.")
+            fixes.append("أضف إسنادًا واضحًا للمصادر داخل النص.")
         if tone_neutrality < 85:
-            fixes.append("Remove opinionated adjectives and keep neutral tone.")
+            fixes.append("أزل الأوصاف الانفعالية وحافظ على الحياد.")
 
         passed = total >= 70
         return {
@@ -419,10 +463,11 @@ Context:
                 "sources_attribution": source_presence,
                 "word_count": len(words),
             },
-            "blocking_reasons": [] if passed else ["Quality score below publish threshold"],
+            "blocking_reasons": [] if passed else ["درجة الجودة أقل من الحد المطلوب للنشر."],
             "actionable_fixes": fixes,
             "source_excerpt": source_text[:280],
         }
 
 
 smart_editor_service = SmartEditorService()
+

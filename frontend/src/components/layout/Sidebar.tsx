@@ -25,20 +25,20 @@ import {
 import { useState } from 'react';
 
 const navItems = [
-    { href: '/', label: 'لوحة القيادة', labelEn: 'Dashboard', icon: LayoutDashboard },
-    { href: '/news', label: 'الأخبار', labelEn: 'News', icon: Newspaper },
-    { href: '/editorial', label: 'قسم التحرير', labelEn: 'Editorial', icon: UserCheck },
-    { href: '/sources', label: 'المصادر', labelEn: 'Sources', icon: Rss },
-    { href: '/agents', label: 'الوكلاء', labelEn: 'Agents', icon: Bot },
-    { href: '/trends', label: 'رادار التراند', labelEn: 'Trends', icon: TrendingUp },
-    { href: '/team', label: 'فريق التحرير', labelEn: 'Team', icon: Users },
-    { href: '/settings', label: 'إعدادات APIs', labelEn: 'API Settings', icon: KeyRound },
-    { href: '/constitution', label: 'الدستور', labelEn: 'Constitution', icon: FileText },
-    { href: '/services/editor', label: 'خدمات التحرير', labelEn: 'Editor Services', icon: Sparkles },
-    { href: '/services/fact-check', label: 'التحقق والاستقصاء', labelEn: 'Fact-Check', icon: ShieldCheck },
-    { href: '/services/seo', label: 'خدمات SEO', labelEn: 'SEO', icon: SeoIcon },
-    { href: '/services/multimedia', label: 'الوسائط', labelEn: 'Multimedia', icon: Film },
-    { href: '/workspace-drafts', label: 'المحرر الذكي', labelEn: 'Smart Editor', icon: FolderGit2 },
+    { href: '/', label: 'لوحة القيادة', icon: LayoutDashboard },
+    { href: '/news', label: 'الأخبار', icon: Newspaper },
+    { href: '/editorial', label: 'قسم التحرير', icon: UserCheck },
+    { href: '/sources', label: 'المصادر', icon: Rss },
+    { href: '/agents', label: 'الوكلاء', icon: Bot },
+    { href: '/trends', label: 'رادار التراند', icon: TrendingUp },
+    { href: '/team', label: 'فريق التحرير', icon: Users },
+    { href: '/settings', label: 'إعدادات APIs', icon: KeyRound },
+    { href: '/constitution', label: 'الدستور', icon: FileText },
+    { href: '/services/editor', label: 'خدمات التحرير', icon: Sparkles },
+    { href: '/services/fact-check', label: 'التحقق والاستقصاء', icon: ShieldCheck },
+    { href: '/services/seo', label: 'خدمات SEO', icon: SeoIcon },
+    { href: '/services/multimedia', label: 'الوسائط', icon: Film },
+    { href: '/workspace-drafts', label: 'المحرر الذكي', icon: FolderGit2 },
 ];
 
 export default function Sidebar() {
@@ -62,7 +62,7 @@ export default function Sidebar() {
                 {!collapsed && (
                     <div className="overflow-hidden">
                         <h1 className="text-sm font-bold text-white truncate">غرفة الشروق</h1>
-                        <p className="text-[10px] text-emerald-400/80 font-medium">AI SWARM v1.0</p>
+                        <p className="text-[10px] text-emerald-400/80 font-medium">النظام الذكي v1.0</p>
                     </div>
                 )}
             </div>
@@ -87,10 +87,7 @@ export default function Sidebar() {
                             )}
                             <item.icon className={cn('w-5 h-5 flex-shrink-0', isActive && 'drop-shadow-[0_0_6px_rgba(52,211,153,0.5)]')} />
                             {!collapsed && (
-                                <div className="flex flex-col">
-                                    <span className="text-sm font-medium">{item.label}</span>
-                                    <span className="text-[10px] text-gray-500">{item.labelEn}</span>
-                                </div>
+                                <span className="text-sm font-medium">{item.label}</span>
                             )}
                         </Link>
                     );

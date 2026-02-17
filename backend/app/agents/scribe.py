@@ -50,8 +50,11 @@ class ScribeAgent:
         html = re.sub(r"<script[\s\S]*?</script>", "", html, flags=re.IGNORECASE)
         html = re.sub(r"<style[\s\S]*?</style>", "", html, flags=re.IGNORECASE)
 
-        # Remove side-comment lines that scare non-technical journalists.
+        # Remove side-comment lines and prompt-template leftovers.
         html = re.sub(r"(?im)^(note|ملاحظة|explanation|comment|output)\s*:\s*.*$", "", html)
+        html = re.sub(r"\[[^\]\n]{2,160}\]", "", html)
+        html = re.sub(r"\?{3,}", "", html)
+        html = re.sub(r"(?im)^\s*[-*]\s+", "", html)
         html = re.sub(r"\n{3,}", "\n\n", html).strip()
 
         if "<h1" not in html.lower():

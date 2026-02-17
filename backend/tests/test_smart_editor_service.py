@@ -32,3 +32,9 @@ def test_quality_score_has_required_metrics():
     assert "metrics" in report
     assert "clarity" in report["metrics"]
     assert "sources_attribution" in report["metrics"]
+
+def test_fact_check_blocks_template_noise():
+    noisy_text = "هذا نص فيه [اسم الجهة] و ??? ومثال يجب حذفه."
+    report = smart_editor_service.fact_check_report(text=noisy_text, source_url=None, threshold=0.7)
+    assert report["passed"] is False
+    assert report["blocking_reasons"]
