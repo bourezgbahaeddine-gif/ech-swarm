@@ -592,7 +592,7 @@ class TrendRadarAgent:
                 pass
 
         try:
-            gemini = ai_service._get_gemini()
+            gemini = await ai_service._get_gemini()
             if not gemini:
                 return TrendAlert(
                     keyword=keyword,
