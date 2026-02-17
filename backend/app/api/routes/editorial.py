@@ -387,6 +387,7 @@ async def process_article(
             actionable_fixes=readability.get("actionable_fixes", []),
             report_json=readability,
             created_by=current_user.full_name_ar,
+            upsert_by_stage=True,
         )
         await db.commit()
         await db.refresh(draft_decision)
@@ -444,6 +445,7 @@ async def process_article(
                 actionable_fixes=audit.get("actionable_fixes", []),
                 report_json=audit,
                 created_by=current_user.full_name_ar,
+                upsert_by_stage=True,
             )
             if not audit["passed"]:
                 await db.commit()
@@ -512,6 +514,7 @@ async def run_readability_check(
         actionable_fixes=report.get("actionable_fixes", []),
         report_json=report,
         created_by=current_user.full_name_ar,
+        upsert_by_stage=True,
     )
     await db.commit()
     return report
@@ -539,6 +542,7 @@ async def run_technical_audit(
         actionable_fixes=report.get("actionable_fixes", []),
         report_json=report,
         created_by=current_user.full_name_ar,
+        upsert_by_stage=True,
     )
     await db.commit()
     return report
@@ -567,6 +571,7 @@ async def run_guardian_check(
         actionable_fixes=report.get("actionable_fixes", []),
         report_json=report,
         created_by=current_user.full_name_ar,
+        upsert_by_stage=True,
     )
     await db.commit()
     return report
@@ -587,9 +592,18 @@ async def get_quality_reports(
         select(ArticleQualityReport)
         .where(ArticleQualityReport.article_id == article_id)
         .order_by(ArticleQualityReport.created_at.desc(), ArticleQualityReport.id.desc())
-        .limit(max(1, min(limit, 100)))
+        .limit(max(20, min(limit * 10, 500)))
     )
-    reports = rows.scalars().all()
+    all_reports = rows.scalars().all()
+    reports: list[ArticleQualityReport] = []
+    seen_stages: set[str] = set()
+    for row in all_reports:
+        if row.stage in seen_stages:
+            continue
+        seen_stages.add(row.stage)
+        reports.append(row)
+        if len(reports) >= max(1, min(limit, 100)):
+            break
     return [
         {
             "id": r.id,

@@ -6,6 +6,7 @@ Tiered Processing: Python → Flash → Groq → Pro (cost optimization).
 """
 
 import json
+import re
 import time
 from typing import Optional
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -35,6 +36,18 @@ class AIService:
         if model_name.startswith("gemini-1.5"):
             return fallback
         return model_name
+
+    @staticmethod
+    def _parse_json_response(raw_text: str) -> dict:
+        text = (raw_text or "").strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1]
+            text = text.rsplit("```", 1)[0]
+        # Some models prepend prose before JSON; keep the first JSON object.
+        match = re.search(r"\{[\s\S]*\}", text)
+        if match:
+            text = match.group(0)
+        return json.loads(text)
 
     async def _get_gemini(self):
         """Lazy-load Gemini client."""
@@ -121,22 +134,28 @@ Output Schema (JSON only, no markdown):
         Rewrite an article in Echorouk style using Groq (fast) or Gemini Flash.
         """
         prompt = f"""Role: You are a Senior Editor at Echorouk, Algeria's leading newspaper.
-Task: Rewrite this news content into a professional Arabic news article.
+Task: Rewrite this news content into a professional Arabic newsroom draft.
 
 Guidelines:
 1. Use the Inverted Pyramid style (most important first).
 2. Tone: Professional, objective, suitable for digital news.
-3. Include SEO-friendly title and meta description.
-4. Article body should be 300-500 words minimum.
+3. No side comments, no explanation, no markdown, no code fences.
+4. Strictly avoid WordPress/Gutenberg artifacts like <!-- wp:... -->.
+5. body_html must be clean semantic HTML only.
+6. body_html must contain exactly one <h1> at the top, then multiple <p> and optional <h2>.
+7. Include at least one internal link to Echorouk (href starts with /news or /).
+8. Use at least two Arabic transition words between paragraphs (مثل: لذلك، بالمقابل، إضافة إلى ذلك).
+9. Keep body around 220-420 words.
+10. Include SEO-friendly title and meta description.
 
 Category: {category}
 
 Output Format (JSON only):
 {{
-  "headline": "String (Arabic, catchy, max 15 words)",
-  "body_html": "String (HTML formatted article body in Arabic)",
-  "seo_title": "String (max 60 chars)",
-  "seo_description": "String (max 160 chars)",
+  "headline": "String (Arabic, clear, max 15 words)",
+  "body_html": "String (Clean HTML only: one h1 + paragraphs + optional h2 + at least one internal link)",
+  "seo_title": "String (30-65 chars)",
+  "seo_description": "String (80-170 chars)",
   "tags": ["tag1", "tag2"]
 }}
 
@@ -149,14 +168,11 @@ Content to rewrite:
                 response = groq.chat.completions.create(
                     model="llama-3.1-70b-versatile",
                     messages=[{"role": "user", "content": prompt}],
-                    temperature=0.7,
+                    temperature=0.35,
                     max_tokens=4000,
                 )
                 result_text = response.choices[0].message.content.strip()
-                if result_text.startswith("```"):
-                    result_text = result_text.split("\n", 1)[1]
-                    result_text = result_text.rsplit("```", 1)[0]
-                return json.loads(result_text)
+                return self._parse_json_response(result_text)
             except Exception as e:
                 logger.warning("groq_rewrite_failed", error=str(e), msg="Falling back to Gemini")
 
@@ -166,10 +182,7 @@ Content to rewrite:
             model = gemini.GenerativeModel(self._resolve_gemini_model(settings.gemini_model_flash, use_pro_default=False))
             response = model.generate_content(prompt)
             result_text = response.text.strip()
-            if result_text.startswith("```"):
-                result_text = result_text.split("\n", 1)[1]
-                result_text = result_text.rsplit("```", 1)[0]
-            return json.loads(result_text)
+            return self._parse_json_response(result_text)
 
         return {"headline": "", "body_html": content, "seo_title": "", "seo_description": "", "tags": []}
 

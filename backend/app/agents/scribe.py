@@ -8,6 +8,7 @@ Single Responsibility: Write & Format only.
 """
 
 from datetime import datetime
+import re
 from uuid import uuid4
 
 from sqlalchemy import func, select
@@ -34,6 +35,35 @@ class ScribeAgent:
     @staticmethod
     def _new_work_id() -> str:
         return f"WRK-{datetime.utcnow():%Y%m%d}-{uuid4().hex[:10].upper()}"
+
+    @staticmethod
+    def _sanitize_generated_html(body_html: str, headline: str) -> str:
+        html = (body_html or "").strip()
+        if not html:
+            return f"<h1>{headline}</h1><p></p>"
+
+        # Remove markdown fences and WordPress/Gutenberg comments.
+        html = re.sub(r"```[\s\S]*?```", "", html)
+        html = re.sub(r"<!--\s*wp:[\s\S]*?-->", "", html, flags=re.IGNORECASE)
+        html = re.sub(r"<!--\s*/wp:[\s\S]*?-->", "", html, flags=re.IGNORECASE)
+        html = re.sub(r"<!--[\s\S]*?-->", "", html)
+        html = re.sub(r"<script[\s\S]*?</script>", "", html, flags=re.IGNORECASE)
+        html = re.sub(r"<style[\s\S]*?</style>", "", html, flags=re.IGNORECASE)
+
+        # Remove side-comment lines that scare non-technical journalists.
+        html = re.sub(r"(?im)^(note|ملاحظة|explanation|comment|output)\s*:\s*.*$", "", html)
+        html = re.sub(r"\n{3,}", "\n\n", html).strip()
+
+        if "<h1" not in html.lower():
+            html = f"<h1>{headline}</h1>\n{html}"
+
+        has_internal_link = bool(
+            re.search(r'href\s*=\s*["\'](?:/|https?://(?:www\.)?echoroukonline\.com)', html, flags=re.IGNORECASE)
+        )
+        if not has_internal_link:
+            html += '\n<p>للمزيد تابع آخر المستجدات عبر <a href="/news">قسم الأخبار</a>.</p>'
+
+        return html.strip()
 
     async def write_article(
         self,
@@ -73,6 +103,7 @@ class ScribeAgent:
             generated_body = result_data.get("body_html", "") or content
             generated_seo_title = result_data.get("seo_title", "") or generated_title
             generated_seo_description = result_data.get("seo_description", "") or (article.summary or "")
+            generated_body = self._sanitize_generated_html(generated_body, generated_title)
 
             if result_data.get("tags"):
                 article.keywords = result_data["tags"]

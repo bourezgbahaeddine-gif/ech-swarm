@@ -5,7 +5,7 @@ import re
 import time
 from datetime import datetime
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import aiohttp
 from bs4 import BeautifulSoup
@@ -18,7 +18,15 @@ from app.models import Article, ArticleQualityReport, EditorialDraft
 logger = get_logger("quality_gate_service")
 
 TRANSITION_WORDS_AR = {
-    "لكن", "بالمقابل", "في المقابل", "إضافة إلى", "من جهة", "من ناحية", "بالتالي", "لذلك", "علاوة على ذلك",
+    "لكن",
+    "بالمقابل",
+    "في المقابل",
+    "إضافة إلى",
+    "من جهة",
+    "من ناحية",
+    "بالتالي",
+    "لذلك",
+    "علاوة على ذلك",
 }
 PASSIVE_PATTERNS_AR = [
     r"\bتم\b",
@@ -28,9 +36,27 @@ PASSIVE_PATTERNS_AR = [
     r"\bأُشير\b",
 ]
 TRUSTED_EXTERNAL_HINTS = ["reuters", "bbc", "apnews", "france24", "who.int", "worldbank", "imf.org", "un.org"]
+AGGREGATOR_HOSTS = {
+    "news.google.com",
+    "news.googleusercontent.com",
+    "feedproxy.google.com",
+    "t.co",
+    "l.facebook.com",
+    "lm.facebook.com",
+}
 
 
 class QualityGateService:
+    @staticmethod
+    def _hostname(url: str) -> str:
+        try:
+            return (urlparse(url).hostname or "").lower().strip()
+        except Exception:
+            return ""
+
+    def _is_aggregator_url(self, url: str) -> bool:
+        return self._hostname(url) in AGGREGATOR_HOSTS
+
     async def save_report(
         self,
         db: AsyncSession,
@@ -43,7 +69,30 @@ class QualityGateService:
         actionable_fixes: list[str],
         report_json: dict[str, Any],
         created_by: str | None = None,
+        upsert_by_stage: bool = False,
     ) -> ArticleQualityReport:
+        if upsert_by_stage:
+            existing_res = await db.execute(
+                select(ArticleQualityReport)
+                .where(
+                    ArticleQualityReport.article_id == article_id,
+                    ArticleQualityReport.stage == stage,
+                )
+                .order_by(ArticleQualityReport.created_at.desc(), ArticleQualityReport.id.desc())
+                .limit(1)
+            )
+            existing = existing_res.scalar_one_or_none()
+            if existing:
+                existing.passed = 1 if passed else 0
+                existing.score = score
+                existing.blocking_reasons = blocking_reasons
+                existing.actionable_fixes = actionable_fixes
+                existing.report_json = report_json
+                existing.created_by = created_by
+                existing.created_at = datetime.utcnow()
+                await db.flush()
+                return existing
+
         row = ArticleQualityReport(
             article_id=article_id,
             stage=stage,
@@ -68,8 +117,8 @@ class QualityGateService:
         long_sentence_ratio = sum(1 for n in sentence_lengths if n > 25) / max(1, len(sentence_lengths))
 
         passive_hits = 0
-        for p in PASSIVE_PATTERNS_AR:
-            passive_hits += len(re.findall(p, clean))
+        for pattern in PASSIVE_PATTERNS_AR:
+            passive_hits += len(re.findall(pattern, clean))
         passive_ratio = passive_hits / max(1, len(sentences))
 
         para_word_lengths = [len(re.findall(r"\S+", p)) for p in paragraphs] or [0]
@@ -92,7 +141,7 @@ class QualityGateService:
             blocking.append("نسبة الجمل الطويلة أعلى من المعيار")
             fixes.append("أعد صياغة الفقرات بجمل قصيرة مباشرة")
         if passive_ratio > 0.30:
-            fixes.append("خفض المبني للمجهول وفضّل الصياغة المباشرة بالفعل والفاعل")
+            fixes.append("خفّض المبني للمجهول وفضّل الصياغة المباشرة بالفعل والفاعل")
         if long_paragraph_count > 0:
             fixes.append("قسّم الفقرات الطويلة إلى فقرات أقصر")
         if transitions_count < 2:
@@ -147,9 +196,9 @@ class QualityGateService:
         trusted_external = sum(1 for a in external_links if any(h in a["href"].lower() for h in TRUSTED_EXTERNAL_HINTS))
 
         keyword = ""
-        m = re.search(r"[\u0600-\u06FFA-Za-z]{3,}", seo_title)
-        if m:
-            keyword = m.group(0).lower()
+        match = re.search(r"[\u0600-\u06FFA-Za-z]{3,}", seo_title)
+        if match:
+            keyword = match.group(0).lower()
         density = 0.0
         if keyword and plain_text:
             words = re.findall(r"\S+", plain_text.lower())
@@ -212,7 +261,7 @@ class QualityGateService:
         url = (url or "").strip()
         if not url:
             return {
-                "stage": "PUBLISHED",
+                "stage": "POST_PUBLISH",
                 "passed": False,
                 "score": 0,
                 "blocking_reasons": ["رابط المنشور غير متوفر"],
@@ -223,7 +272,11 @@ class QualityGateService:
         headers = {"User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"}
         blocking: list[str] = []
         fixes: list[str] = []
-        metrics: dict[str, Any] = {"url": url}
+        metrics: dict[str, Any] = {
+            "url": url,
+            "input_url": url,
+            "is_aggregator_input": self._is_aggregator_url(url),
+        }
 
         try:
             timeout = aiohttp.ClientTimeout(total=20)
@@ -235,17 +288,44 @@ class QualityGateService:
                     metrics["status_code"] = resp.status
                     metrics["ttfb_ms"] = ttfb_ms
                     metrics["final_url"] = str(resp.url)
+                    audited_url = str(resp.url)
 
             soup = BeautifulSoup(html, "html.parser")
             robots = (soup.find("meta", attrs={"name": "robots"}) or {}).get("content", "")
-            canonical = (soup.find("link", rel="canonical") or {}).get("href", "")
+            canonical_raw = (soup.find("link", rel="canonical") or {}).get("href", "")
+            canonical = urljoin(metrics["final_url"], canonical_raw) if canonical_raw else ""
             og_title = (soup.find("meta", property="og:title") or {}).get("content", "")
             og_type = (soup.find("meta", property="og:type") or {}).get("content", "")
 
+            if self._is_aggregator_url(url) or self._is_aggregator_url(metrics["final_url"]):
+                if canonical and not self._is_aggregator_url(canonical):
+                    start = time.perf_counter()
+                    async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+                        async with session.get(canonical, allow_redirects=True) as real_resp:
+                            html = await real_resp.text(errors="ignore")
+                            metrics["resolved_from_aggregator"] = True
+                            metrics["resolved_canonical_url"] = canonical
+                            metrics["ttfb_ms"] = int((time.perf_counter() - start) * 1000)
+                            metrics["status_code"] = real_resp.status
+                            metrics["final_url"] = str(real_resp.url)
+                            audited_url = str(real_resp.url)
+                            soup = BeautifulSoup(html, "html.parser")
+                            robots = (soup.find("meta", attrs={"name": "robots"}) or {}).get("content", "")
+                            canonical_raw = (soup.find("link", rel="canonical") or {}).get("href", "")
+                            canonical = urljoin(metrics["final_url"], canonical_raw) if canonical_raw else ""
+                            og_title = (soup.find("meta", property="og:title") or {}).get("content", "")
+                            og_type = (soup.find("meta", property="og:type") or {}).get("content", "")
+                else:
+                    blocking.append("الرابط الحالي وسيط تجميعي (Aggregator) وليس صفحة نشر نهائية")
+                    fixes.append("استخدم رابط النشر المباشر بدل روابط news.google.com")
+
+            metrics["audited_url"] = audited_url
+            metrics["canonical_url"] = canonical or ""
             metrics["has_canonical"] = bool(canonical)
             metrics["robots"] = robots
             metrics["has_og_title"] = bool(og_title)
             metrics["has_og_type"] = bool(og_type)
+            metrics["is_aggregator_audited"] = self._is_aggregator_url(audited_url)
 
             if metrics["status_code"] != 200:
                 blocking.append("Status code ليس 200")
@@ -253,16 +333,18 @@ class QualityGateService:
                 blocking.append("الصفحة تحمل وسم noindex")
             if not canonical:
                 blocking.append("canonical مفقود")
+            if self._is_aggregator_url(audited_url):
+                blocking.append("تمت معاينة رابط تجميعي بدل رابط منشور نهائي")
             if not og_title:
                 fixes.append("أضف OG title")
             if not og_type:
                 fixes.append("أضف OG type")
-            if ttfb_ms > 2500:
+            if metrics["ttfb_ms"] > 2500:
                 fixes.append("زمن الاستجابة مرتفع، راجع الأداء/الكاش")
         except Exception as e:
             logger.warning("guardian_check_failed", url=url, error=str(e))
             return {
-                "stage": "PUBLISHED",
+                "stage": "POST_PUBLISH",
                 "passed": False,
                 "score": 0,
                 "blocking_reasons": [f"فشل الزحف: {e}"],
@@ -273,7 +355,7 @@ class QualityGateService:
         passed = len(blocking) == 0
         score = max(0, 100 - len(blocking) * 20 - len(fixes) * 5)
         return {
-            "stage": "POST_PUBLISH_VERIFIED" if passed else "PUBLISHED",
+            "stage": "POST_PUBLISH",
             "passed": passed,
             "score": score,
             "blocking_reasons": blocking,
@@ -294,6 +376,7 @@ class QualityGateService:
             actionable_fixes=report.get("actionable_fixes", []),
             report_json=report,
             created_by=created_by,
+            upsert_by_stage=True,
         )
         await db.commit()
 
@@ -310,9 +393,9 @@ class QualityGateService:
                 actionable_fixes=retry.get("actionable_fixes", []),
                 report_json=retry,
                 created_by=created_by,
+                upsert_by_stage=True,
             )
             await db.commit()
 
 
 quality_gate_service = QualityGateService()
-
