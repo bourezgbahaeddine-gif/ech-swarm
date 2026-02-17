@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { dashboardApi, type TrendAlert } from '@/lib/api';
+import { dashboardApi, newsApi, type ArticleBrief, type TrendAlert } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import {
     TrendingUp,
@@ -63,6 +63,7 @@ const CATEGORY_LABEL: Record<string, string> = {
 
 export default function TrendsPage() {
     const [trends, setTrends] = useState<TrendAlert[]>([]);
+    const [relatedNews, setRelatedNews] = useState<Record<string, ArticleBrief[]>>({});
     const [geo, setGeo] = useState('DZ');
     const [category, setCategory] = useState('all');
     const [limit, setLimit] = useState(12);
@@ -71,7 +72,9 @@ export default function TrendsPage() {
     const latestMutation = useMutation({
         mutationFn: () => dashboardApi.latestTrends({ geo, category }),
         onSuccess: (response) => {
-            setTrends(response.data?.alerts || []);
+            const alerts = response.data?.alerts || [];
+            setTrends(alerts);
+            loadRelatedNews(alerts);
         },
     });
 
@@ -80,8 +83,34 @@ export default function TrendsPage() {
         onSuccess: (response) => {
             const alerts = response.data?.alerts || [];
             setTrends(alerts);
+            loadRelatedNews(alerts);
         },
     });
+
+    const loadRelatedNews = async (alerts: TrendAlert[]) => {
+        const selected = alerts.slice(0, 10);
+        if (selected.length === 0) {
+            setRelatedNews({});
+            return;
+        }
+        const pairs = await Promise.all(
+            selected.map(async (trend) => {
+                try {
+                    const res = await newsApi.semanticSearch({
+                        q: trend.keyword,
+                        mode: 'editorial',
+                        include_aggregators: false,
+                        strict_tokens: true,
+                        limit: 3,
+                    });
+                    return [trend.keyword, res.data || []] as const;
+                } catch {
+                    return [trend.keyword, []] as const;
+                }
+            }),
+        );
+        setRelatedNews(Object.fromEntries(pairs));
+    };
 
     useEffect(() => {
         latestMutation.mutate();
@@ -379,6 +408,25 @@ export default function TrendsPage() {
                                         ))}
                                     </div>
                                 )}
+
+                                <div className="mt-3">
+                                    <h4 className="text-xs font-semibold text-emerald-300 mb-2">أخبار مرتبطة قابلة للتحرير</h4>
+                                    {(relatedNews[trend.keyword] || []).length > 0 ? (
+                                        <div className="space-y-1.5">
+                                            {(relatedNews[trend.keyword] || []).map((article) => (
+                                                <a
+                                                    key={article.id}
+                                                    href={`/workspace-drafts?article_id=${article.id}`}
+                                                    className="block rounded-lg px-2.5 py-2 bg-white/5 border border-white/10 hover:border-emerald-500/30 text-xs text-gray-200"
+                                                >
+                                                    {article.title_ar || article.original_title}
+                                                </a>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs text-gray-500">لا توجد مواد مرتبطة جاهزة حاليًا</p>
+                                    )}
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -388,7 +436,7 @@ export default function TrendsPage() {
             {!scanMutation.isPending && scoredTrends.length === 0 && (
                 <div className="text-center py-20 rounded-2xl bg-gray-800/20 border border-white/10">
                     <Radar className="w-16 h-16 text-gray-700 mx-auto mb-4" />
-                    <h3 className="text-lg font-semibold text-white">اضغط "مسح الآن" لبدء الرادار</h3>
+                    <h3 className="text-lg font-semibold text-white">اضغط &quot;مسح الآن&quot; لبدء الرادار</h3>
                     <p className="text-sm text-gray-500 mt-1">يمكنك تحديد الجغرافيا والتصنيف قبل المسح لنتائج أدق</p>
                 </div>
             )}

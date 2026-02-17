@@ -80,6 +80,16 @@ def _clean_editorial_output(text: str) -> str:
     cleaned = (text or "").strip()
     patterns = [
         r"(?im)^here\b.*$",
+        r"(?im)^sure\b.*$",
+        r"(?im)^okay\b.*$",
+        r"(?im)^as requested\b.*$",
+        r"(?im)^note\b.*$",
+        r"(?im)^explanation\b.*$",
+        r"(?im)^changes\b.*$",
+        r"(?im)^comments?\b.*$",
+        r"(?im)^ملاحظة\b.*$",
+        r"(?im)^شرح\b.*$",
+        r"(?im)^تعليق\b.*$",
         r"(?im)^alternative phrasing.*$",
         r"(?im)^explanation of choices.*$",
         r"(?im)^\*\*alternative phrasing.*$",
@@ -87,8 +97,62 @@ def _clean_editorial_output(text: str) -> str:
     ]
     for pattern in patterns:
         cleaned = re.sub(pattern, "", cleaned)
+    cleaned = re.sub(r"```[\s\S]*?```", "", cleaned)
+    cleaned = re.sub(r"(?im)^\s*(json|output|result)\s*:\s*$", "", cleaned)
+    cleaned = re.sub(r"(?im)^(final answer|response)\s*:\s*", "", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
     return cleaned
+
+
+def _editorial_prompt(action: str, text: str, value: str | None) -> str:
+    common = (
+        "Role: Senior newsroom editor at Echorouk.\n"
+        "Rules:\n"
+        "- Return only final editorial text.\n"
+        "- No explanations, no side comments, no meta text.\n"
+        "- No markdown code fences.\n"
+        "- Keep journalistic tone, clear and publishable.\n\n"
+    )
+    if action == "summarize":
+        return (
+            common
+            + "Task: Produce a concise newsroom summary in Arabic (3 short paragraphs).\n"
+            + "Focus on facts, context, and why it matters.\n\n"
+            + f"Source text:\n{text}"
+        )
+    if action == "translate":
+        target = (value or "العربية").strip()
+        return (
+            common
+            + f"Task: Translate the source text into {target} with newsroom style.\n"
+            + "Preserve facts, names, numbers, and chronology.\n\n"
+            + f"Source text:\n{text}"
+        )
+    if action == "proofread":
+        return (
+            common
+            + "Task: Proofread and rewrite the text in Arabic for publication.\n"
+            + "Fix grammar, punctuation, and clarity only.\n\n"
+            + f"Source text:\n{text}"
+        )
+    if action == "fact_check":
+        return (
+            common
+            + "Task: Build a compact fact-check brief in Arabic using this structure exactly:\n"
+            + "ادعاءات قابلة للتحقق:\n- ...\n"
+            + "ما يلزم التحقق منه:\n- ...\n"
+            + "مصادر مقترحة للتحقق:\n- ...\n"
+            + "حكم مبدئي:\n...\n\n"
+            + f"Source text:\n{text}"
+        )
+    if action == "social_summary":
+        return (
+            common
+            + "Task: Write 3 short social posts in Arabic (X/Telegram/Facebook style), factual and professional.\n"
+            + "No hashtags spam.\n\n"
+            + f"Source text:\n{text}"
+        )
+    return f"{common}Source text:\n{text}"
 
 
 def _draft_to_dict(draft: EditorialDraft) -> dict:
@@ -272,23 +336,7 @@ async def process_article(
     if payload.action in {"summarize", "translate", "proofread", "fact_check", "social_summary"}:
         _require_roles(current_user, newsroom_roles)
 
-        if payload.action == "summarize":
-            prompt = f"??? ???? ?????? ?? 3 ???? ??????? ?????:\n\n{text}"
-        elif payload.action == "translate":
-            target = payload.value or "??????? ??????"
-            prompt = f"???? ???? ?????? ??? {target} ?????? ?????:\n\n{text}"
-        elif payload.action == "proofread":
-            prompt = f"??? ???? ?????? ????? ???????? ?? ?????? ??? ??????:\n\n{text}"
-        elif payload.action == "fact_check":
-            prompt = (
-                "??? ??????? ?????? ???? ??????? ???? ?????? ???:\n"
-                "???? ????? ????:\n- ...\n"
-                "??????? ?????/?????:\n- ...\n"
-                "????? ???? ?????:\n...\n\n"
-                f"????:\n{text}"
-            )
-        else:
-            prompt = f"???? ?????? ??????? ???????? ????? ??? ???? ??????:\n\n{text}"
+        prompt = _editorial_prompt(payload.action, text, payload.value)
 
         output = _clean_editorial_output(await ai_service.generate_text(prompt))
         if not output or not output.strip():

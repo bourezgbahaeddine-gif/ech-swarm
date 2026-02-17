@@ -161,6 +161,14 @@ export const newsApi = {
         articleIds.forEach((id) => params.append('article_ids', String(id)));
         return api.get<ArticleInsight[]>(`/news/insights?${params.toString()}`);
     },
+    semanticSearch: (params: {
+        q: string;
+        limit?: number;
+        mode?: 'editorial' | 'semantic';
+        include_aggregators?: boolean;
+        strict_tokens?: boolean;
+        status?: string;
+    }) => api.get<ArticleBrief[]>('/news/search/semantic', { params }),
 };
 
 export const sourcesApi = {

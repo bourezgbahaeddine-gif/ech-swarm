@@ -9,7 +9,7 @@ import { useAuth } from '@/lib/auth';
 import {
     Newspaper, Search, Zap, ExternalLink,
     Clock, ChevronLeft, ChevronRight, Star,
-    Rocket, Route, PenSquare, Radar, RefreshCw,
+    RefreshCw,
     CheckCircle, XCircle, RotateCw,
 } from 'lucide-react';
 
@@ -69,75 +69,21 @@ export default function NewsPage() {
         refetchOnWindowFocus: true,
     });
 
-    const triggerScout = useMutation({
-        mutationFn: () => dashboardApi.triggerScout(),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['news'] });
-            queryClient.invalidateQueries({ queryKey: ['news-insights'] });
-            kickLiveRefresh(25);
-            setErrorMessage(null);
-            setInfoMessage('تم تشغيل الكشاف بنجاح');
-        },
-        onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'فشل تشغيل الكشاف'),
-    });
-
-    const triggerRouter = useMutation({
-        mutationFn: () => dashboardApi.triggerRouter(),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['news'] });
-            queryClient.invalidateQueries({ queryKey: ['news-insights'] });
-            kickLiveRefresh(25);
-            setErrorMessage(null);
-            setInfoMessage('تم تشغيل الموجّه بنجاح');
-        },
-        onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'فشل تشغيل الموجّه'),
-    });
-
-    const triggerScribe = useMutation({
-        mutationFn: () => dashboardApi.triggerScribe(),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['news'] });
-            queryClient.invalidateQueries({ queryKey: ['news-insights'] });
-            setErrorMessage(null);
-            setInfoMessage('تم تشغيل الكاتب بنجاح');
-        },
-        onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'فشل تشغيل الكاتب'),
-    });
-
-    const triggerTrends = useMutation({
-        mutationFn: () => dashboardApi.triggerTrends(),
-        onSuccess: () => {
-            setErrorMessage(null);
-            setInfoMessage('تم تشغيل الرادار بنجاح');
-        },
-        onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'فشل تشغيل الرادار'),
-    });
-
     const refreshPipeline = useMutation({
         mutationFn: async () => {
-            const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+            // Practical flow for newsroom: one click updates ingestion + routing.
             await dashboardApi.triggerScout();
-            // Jobs are queued asynchronously on the backend.
-            // Give Scout a short head-start, then queue Router.
-            await sleep(6000);
             await dashboardApi.triggerRouter();
-            // Wait briefly for first batch to be written before refetch.
-            await sleep(5000);
         },
         onSuccess: async () => {
             setPage(1);
             await queryClient.invalidateQueries({ queryKey: ['news'] });
             await queryClient.invalidateQueries({ queryKey: ['news-insights'] });
             await queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
-            kickLiveRefresh(35);
-            // One extra refetch pass to catch late writes from queued jobs.
-            setTimeout(() => {
-                queryClient.invalidateQueries({ queryKey: ['news'] });
-                queryClient.invalidateQueries({ queryKey: ['news-insights'] });
-                queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
-            }, 5000);
+            // Keep UI hot for queued jobs so new rows appear quickly.
+            kickLiveRefresh(75);
             setErrorMessage(null);
-            setInfoMessage('تم تحديث الأخبار وجلب آخر العناصر');
+            setInfoMessage('تم تشغيل التحديث الشامل (كشاف + موجه) وجلب آخر العناصر');
         },
         onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'فشل تحديث الأخبار'),
     });
@@ -247,7 +193,7 @@ export default function NewsPage() {
         queryFn: () => newsApi.insights(articleIds),
         enabled: articleIds.length > 0,
         staleTime: 0,
-        refetchInterval: () => (Date.now() < liveRefreshUntil ? 2000 : false),
+        refetchInterval: () => (Date.now() < liveRefreshUntil ? 1500 : false),
         refetchOnWindowFocus: true,
     });
 
@@ -365,38 +311,6 @@ export default function NewsPage() {
                         >
                             <RefreshCw className="w-4 h-4" />
                             {refreshPipeline.isPending ? 'جاري التحديث...' : 'تحديث'}
-                        </button>
-                        <button
-                            onClick={() => triggerScout.mutate()}
-                            disabled={triggerScout.isPending}
-                            className="px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-xs text-emerald-300 hover:bg-emerald-500/25 transition-colors flex items-center gap-2"
-                        >
-                            <Rocket className="w-4 h-4" />
-                            {triggerScout.isPending ? 'جاري التشغيل...' : 'تشغيل الكشاف'}
-                        </button>
-                        <button
-                            onClick={() => triggerRouter.mutate()}
-                            disabled={triggerRouter.isPending}
-                            className="px-3 py-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-xs text-amber-300 hover:bg-amber-500/25 transition-colors flex items-center gap-2"
-                        >
-                            <Route className="w-4 h-4" />
-                            {triggerRouter.isPending ? 'جاري التشغيل...' : 'تشغيل الموجّه'}
-                        </button>
-                        <button
-                            onClick={() => triggerScribe.mutate()}
-                            disabled={triggerScribe.isPending}
-                            className="px-3 py-2 rounded-xl bg-sky-500/15 border border-sky-500/30 text-xs text-sky-300 hover:bg-sky-500/25 transition-colors flex items-center gap-2"
-                        >
-                            <PenSquare className="w-4 h-4" />
-                            {triggerScribe.isPending ? 'جاري التشغيل...' : 'تشغيل الكاتب'}
-                        </button>
-                        <button
-                            onClick={() => triggerTrends.mutate()}
-                            disabled={triggerTrends.isPending}
-                            className="px-3 py-2 rounded-xl bg-violet-500/15 border border-violet-500/30 text-xs text-violet-300 hover:bg-violet-500/25 transition-colors flex items-center gap-2"
-                        >
-                            <Radar className="w-4 h-4" />
-                            {triggerTrends.isPending ? 'جاري التشغيل...' : 'تشغيل الرادار'}
                         </button>
                     </div>
                 </div>
