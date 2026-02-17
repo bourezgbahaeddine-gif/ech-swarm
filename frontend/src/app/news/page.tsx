@@ -238,16 +238,35 @@ export default function NewsPage() {
     });
 
     const insightsMap = useMemo(() => {
-        const map = new Map<number, { cluster_size: number; relation_count: number }>();
+        const map = new Map<number, { cluster_size: number; cluster_id?: number | null; relation_count: number }>();
         const items = insightsData?.data || [];
         for (const item of items) {
             map.set(item.article_id, {
                 cluster_size: item.cluster_size,
+                cluster_id: item.cluster_id,
                 relation_count: item.relation_count,
             });
         }
         return map;
     }, [insightsData?.data]);
+
+    const visibleArticles = useMemo(() => {
+        const seenClusters = new Set<number>();
+        const out: ArticleBrief[] = [];
+        for (const article of articles as ArticleBrief[]) {
+            const insight = insightsMap.get(article.id);
+            const clusterSize = insight?.cluster_size || 0;
+            const clusterId = insight?.cluster_id;
+            if (clusterSize > 1 && clusterId) {
+                if (seenClusters.has(clusterId)) {
+                    continue;
+                }
+                seenClusters.add(clusterId);
+            }
+            out.push(article);
+        }
+        return out;
+    }, [articles, insightsMap]);
 
     const statuses = ['', 'new', 'classified', 'candidate', 'approved_handoff', 'draft_generated', 'approved', 'rejected', 'published'];
     const categories = ['', 'politics', 'economy', 'sports', 'technology', 'local_algeria', 'international', 'culture', 'society', 'health'];
@@ -463,8 +482,8 @@ export default function NewsPage() {
                     Array.from({ length: 9 }).map((_, i) => (
                         <div key={i} className="h-56 rounded-2xl bg-gray-800/30 border border-white/5 animate-pulse" />
                     ))
-                ) : articles.length > 0 ? (
-                    articles.map((article: ArticleBrief) => {
+                ) : visibleArticles.length > 0 ? (
+                    visibleArticles.map((article: ArticleBrief) => {
                         const normalizedStatus = (article.status || '').toLowerCase();
                         const canReview = normalizedStatus === 'candidate' || normalizedStatus === 'classified';
                         const freshBreaking = isFreshBreaking(article.is_breaking, article.crawled_at);

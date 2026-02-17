@@ -141,6 +141,7 @@ export interface WorkspaceDraft {
 export interface ArticleInsight {
     article_id: number;
     cluster_size: number;
+    cluster_id?: number | null;
     relation_count: number;
 }
 

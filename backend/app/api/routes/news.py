@@ -289,13 +289,17 @@ async def news_insights(
     cluster_rows = await db.execute(
         select(
             sm_self.c.article_id.label("article_id"),
+            sm_self.c.cluster_id.label("cluster_id"),
             func.count(sm_all.c.article_id).label("cluster_size"),
         )
         .select_from(sm_self.join(sm_all, sm_self.c.cluster_id == sm_all.c.cluster_id))
         .where(sm_self.c.article_id.in_(ids))
-        .group_by(sm_self.c.article_id)
+        .group_by(sm_self.c.article_id, sm_self.c.cluster_id)
     )
-    cluster_map = {int(r.article_id): int(r.cluster_size) for r in cluster_rows}
+    cluster_map = {
+        int(r.article_id): {"cluster_size": int(r.cluster_size), "cluster_id": int(r.cluster_id)}
+        for r in cluster_rows
+    }
 
     relation_rows = await db.execute(
         select(
@@ -310,7 +314,8 @@ async def news_insights(
     return [
         {
             "article_id": aid,
-            "cluster_size": cluster_map.get(aid, 0),
+            "cluster_size": cluster_map.get(aid, {}).get("cluster_size", 0),
+            "cluster_id": cluster_map.get(aid, {}).get("cluster_id"),
             "relation_count": relation_map.get(aid, 0),
         }
         for aid in ids
