@@ -16,32 +16,42 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "article_quality_reports",
-        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column("article_id", sa.Integer(), sa.ForeignKey("articles.id"), nullable=False),
-        sa.Column("stage", sa.String(length=64), nullable=False),
-        sa.Column("passed", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("score", sa.Integer(), nullable=True),
-        sa.Column("blocking_reasons", sa.JSON(), nullable=True),
-        sa.Column("actionable_fixes", sa.JSON(), nullable=True),
-        sa.Column("report_json", sa.JSON(), nullable=True),
-        sa.Column("created_by", sa.String(length=255), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=True),
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    table_exists = "article_quality_reports" in inspector.get_table_names()
+
+    if not table_exists:
+        op.create_table(
+            "article_quality_reports",
+            sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+            sa.Column("article_id", sa.Integer(), sa.ForeignKey("articles.id"), nullable=False),
+            sa.Column("stage", sa.String(length=64), nullable=False),
+            sa.Column("passed", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column("score", sa.Integer(), nullable=True),
+            sa.Column("blocking_reasons", sa.JSON(), nullable=True),
+            sa.Column("actionable_fixes", sa.JSON(), nullable=True),
+            sa.Column("report_json", sa.JSON(), nullable=True),
+            sa.Column("created_by", sa.String(length=255), nullable=True),
+            sa.Column("created_at", sa.DateTime(), nullable=True),
+        )
+
+    # Keep migration idempotent for environments where table was pre-created manually.
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_article_quality_reports_article_id "
+        "ON article_quality_reports (article_id)"
     )
-    op.create_index("ix_article_quality_reports_article_id", "article_quality_reports", ["article_id"], unique=False)
-    op.create_index("ix_article_quality_reports_stage", "article_quality_reports", ["stage"], unique=False)
-    op.create_index(
-        "ix_quality_article_stage_created",
-        "article_quality_reports",
-        ["article_id", "stage", "created_at"],
-        unique=False,
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_article_quality_reports_stage "
+        "ON article_quality_reports (stage)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_quality_article_stage_created "
+        "ON article_quality_reports (article_id, stage, created_at)"
     )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_quality_article_stage_created", table_name="article_quality_reports")
-    op.drop_index("ix_article_quality_reports_stage", table_name="article_quality_reports")
-    op.drop_index("ix_article_quality_reports_article_id", table_name="article_quality_reports")
-    op.drop_table("article_quality_reports")
-
+    op.execute("DROP INDEX IF EXISTS ix_quality_article_stage_created")
+    op.execute("DROP INDEX IF EXISTS ix_article_quality_reports_stage")
+    op.execute("DROP INDEX IF EXISTS ix_article_quality_reports_article_id")
+    op.execute("DROP TABLE IF EXISTS article_quality_reports")
