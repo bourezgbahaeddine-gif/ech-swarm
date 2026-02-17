@@ -266,11 +266,31 @@ async def trigger_trend_scan(
 async def get_latest_trend_scan(
     geo: str = Query("DZ", min_length=2, max_length=16),
     category: str = Query("all", min_length=2, max_length=32),
+    refresh_if_empty: bool = Query(True),
+    limit: int = Query(12, ge=1, le=30),
     current_user: User = Depends(get_current_user),
 ):
     """Fetch latest cached trend scan payload for a geography/category."""
     _assert_trend_permission(current_user)
-    payload = await cache_service.get_json(f"trends:last:{geo.upper()}:{category.lower()}")
+    geo = geo.upper()
+    category = category.lower()
+    payload = await cache_service.get_json(f"trends:last:{geo}:{category}")
+    if payload and payload.get("alerts"):
+        return payload
+
+    if refresh_if_empty:
+        try:
+            alerts = await asyncio.wait_for(
+                trend_radar_agent.scan(geo=geo, category=category, limit=limit, mode="fast"),
+                timeout=15,
+            )
+            if alerts:
+                return {"alerts": [a.model_dump(mode="json") for a in alerts]}
+        except TimeoutError:
+            logger.warning("latest_trends_refresh_timeout", geo=geo, category=category)
+        except Exception as exc:
+            logger.warning("latest_trends_refresh_error", geo=geo, category=category, error=str(exc))
+
     return payload or {"alerts": []}
 
 

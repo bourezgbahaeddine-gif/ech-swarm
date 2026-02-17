@@ -74,9 +74,11 @@ GEO_NEWS_RSS: dict[str, str] = {
     "GLOBAL": "https://news.google.com/rss?hl=en&gl=US&ceid=US:en",
 }
 
-# For non-DZ scans, we relax cross-verification by providing
-# geo-scoped fallback candidates from Google Trends itself.
-NON_DZ_MIN_TRENDS = 6
+# Minimum number of trend signals we try to keep per scan.
+MIN_TRENDS_BY_GEO = {
+    "DZ": 4,
+    "DEFAULT": 6,
+}
 MIN_CONFIDENCE = 0.65
 
 WEAK_TERMS = {
@@ -114,6 +116,9 @@ class TrendRadarAgent:
             if not google_trends:
                 # Fallback source to avoid empty scans for non-DZ geos.
                 google_trends = await self._fetch_geo_news_trends(geo)
+            if not google_trends:
+                # Last-resort fallback from internal recently crawled titles.
+                google_trends = await self._fallback_from_recent_titles(geo)
             # Important: competitor feeds + RSS bursts are currently Algeria-centric.
             # We must not pollute non-DZ scans with DZ signals.
             if geo == "DZ":
@@ -133,14 +138,16 @@ class TrendRadarAgent:
             verified_trends = await self._score_with_internal_interaction(verified_trends)
             verified_trends = [t for t in verified_trends if t.get("confidence", 0.0) >= MIN_CONFIDENCE]
 
-            # For non-DZ geographies, competitor/burst overlap can be low.
-            # Promote top Google trends as fallback so newsroom still gets signals.
-            if geo != "DZ" and len(verified_trends) < NON_DZ_MIN_TRENDS:
-                verified_trends = self._expand_non_dz_fallback(
+            # Promote top geo trends as fallback so newsroom still gets usable signals
+            # even when strict cross-validation is sparse.
+            target_min = MIN_TRENDS_BY_GEO.get(geo, MIN_TRENDS_BY_GEO["DEFAULT"])
+            if len(verified_trends) < target_min:
+                verified_trends = self._expand_geo_fallback(
                     verified_trends=verified_trends,
                     google_trends=google_trends,
                     geo=geo,
                     category_filter=category,
+                    target_min=target_min,
                 )
 
             if not verified_trends:
@@ -249,12 +256,37 @@ class TrendRadarAgent:
             logger.warning("geo_news_fallback_error", geo=geo, error=str(e))
             return []
 
-    def _expand_non_dz_fallback(
+    async def _fallback_from_recent_titles(self, geo: str) -> list[str]:
+        """Build trend candidates from internal recent titles when external feeds fail."""
+        titles = await cache_service.get_recent_titles(250)
+        if not titles:
+            return []
+
+        terms_counter: Counter[str] = Counter()
+        for title in titles:
+            normalized = normalize_text(title)
+            if not normalized:
+                continue
+            for term in self._extract_candidate_terms(normalized):
+                detected_geo = self._detect_geography(term, geo)
+                if not self._is_geo_compatible(scan_geo=geo, detected_geo=detected_geo):
+                    continue
+                terms_counter[term] += 1
+
+        ranked = [
+            term
+            for term, freq in sorted(terms_counter.items(), key=lambda kv: (-kv[1], -len(kv[0])))
+            if freq >= 2 and not self._is_weak_term(term)
+        ]
+        return ranked[:40]
+
+    def _expand_geo_fallback(
         self,
         verified_trends: list[dict],
         google_trends: list[str],
         geo: str,
         category_filter: str,
+        target_min: int,
     ) -> list[dict]:
         existing = {normalize_text(v["keyword"]) for v in verified_trends}
         for trend in google_trends:
@@ -265,19 +297,22 @@ class TrendRadarAgent:
             category = self._categorize_keyword(norm)
             if category_filter != "all" and category != category_filter:
                 continue
+            detected_geo = self._detect_geography(raw, geo)
+            if not self._is_geo_compatible(scan_geo=geo, detected_geo=detected_geo):
+                continue
             verified_trends.append(
                 {
                     "keyword": raw,
                     "source_signals": ["google_trends", "geo_fallback"],
                     "strength": 5,
-                    "confidence": 0.55,
+                    "confidence": 0.58 if geo == "DZ" else 0.55,
                     "interaction_score": 0.0,
                     "category": category,
-                    "geography": self._detect_geography(raw, geo),
+                    "geography": detected_geo,
                 }
             )
             existing.add(norm)
-            if len(verified_trends) >= NON_DZ_MIN_TRENDS:
+            if len(verified_trends) >= target_min:
                 break
         return verified_trends
 
