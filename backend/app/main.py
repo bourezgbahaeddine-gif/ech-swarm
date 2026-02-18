@@ -22,7 +22,7 @@ from app.core.logging import setup_logging, get_logger
 from app.services.cache_service import cache_service
 from app.schemas import HealthResponse
 from app.core.database import async_session
-from app.agents import scout_agent, router_agent, scribe_agent, trend_radar_agent
+from app.agents import scout_agent, router_agent, scribe_agent, trend_radar_agent, published_content_monitor_agent
 
 # Import routers
 from app.api.routes.news import router as news_router
@@ -43,6 +43,7 @@ _start_time = time.time()
 _shutdown_event = asyncio.Event()
 _pipeline_task: asyncio.Task | None = None
 _trends_task: asyncio.Task | None = None
+_published_monitor_task: asyncio.Task | None = None
 
 
 async def _run_pipeline_once():
@@ -63,6 +64,17 @@ async def _run_pipeline_once():
 async def _run_trends_once():
     alerts = await trend_radar_agent.scan()
     logger.info("auto_trends_tick_done", alerts_count=len(alerts))
+
+
+async def _run_published_monitor_once():
+    report = await published_content_monitor_agent.scan()
+    logger.info(
+        "auto_published_monitor_tick_done",
+        status=report.get("status", "unknown"),
+        total_items=report.get("total_items", 0),
+        weak_items=report.get("weak_items_count", 0),
+        average_score=report.get("average_score", 0),
+    )
 
 
 async def _periodic_loop(name: str, interval_seconds: int, job):
@@ -99,7 +111,7 @@ async def lifespan(app: FastAPI):
     await cache_service.connect()
 
     # Start periodic pipeline loops (optional)
-    global _pipeline_task, _trends_task
+    global _pipeline_task, _trends_task, _published_monitor_task
     _shutdown_event.clear()
     if settings.auto_pipeline_enabled:
         newsroom_interval_seconds = 20 * 60
@@ -125,6 +137,21 @@ async def lifespan(app: FastAPI):
             auto_scribe_enabled=settings.auto_scribe_enabled,
         )
 
+    if settings.published_monitor_enabled:
+        published_monitor_interval_seconds = max(300, settings.published_monitor_interval_minutes * 60)
+        _published_monitor_task = asyncio.create_task(
+            _periodic_loop(
+                "published_monitor",
+                published_monitor_interval_seconds,
+                _run_published_monitor_once,
+            )
+        )
+        logger.info(
+            "published_monitor_enabled",
+            interval_minutes=settings.published_monitor_interval_minutes,
+            feed_url=settings.published_monitor_feed_url,
+        )
+
     logger.info(
         "app_ready",
         msg="🚀 غرفة الشروق الذكية جاهزة للعمل",
@@ -135,10 +162,13 @@ async def lifespan(app: FastAPI):
 
     # ── Shutdown ──
     _shutdown_event.set()
-    for task in (_pipeline_task, _trends_task):
+    for task in (_pipeline_task, _trends_task, _published_monitor_task):
         if task:
             task.cancel()
-    await asyncio.gather(*[t for t in (_pipeline_task, _trends_task) if t], return_exceptions=True)
+    await asyncio.gather(
+        *[t for t in (_pipeline_task, _trends_task, _published_monitor_task) if t],
+        return_exceptions=True,
+    )
 
     await cache_service.disconnect()
     logger.info("app_shutdown", msg="تم إيقاف النظام بنجاح")

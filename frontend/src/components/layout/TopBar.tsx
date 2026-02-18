@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useQuery } from '@tanstack/react-query';
-import { Bell, Search, LogOut, User, Shield, FileText, Sparkles, Loader2, Clipboard, X } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Bell, Search, LogOut, User, Shield, FileText, Sparkles, Loader2, Clipboard, X, Radar, AlertTriangle } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
-import { dashboardApi, type DashboardNotification } from '@/lib/api';
+import { dashboardApi, type DashboardNotification, type PublishedMonitorReport } from '@/lib/api';
 import { journalistServicesApi } from '@/lib/journalist-services-api';
 
 const roleLabels: Record<string, string> = {
@@ -31,10 +31,12 @@ function cleanServiceOutput(value: string): string {
 
 export default function TopBar() {
     const { user, logout } = useAuth();
+    const queryClient = useQueryClient();
     const [searchQuery, setSearchQuery] = useState('');
     const [showMenu, setShowMenu] = useState(false);
     const [showNotifications, setShowNotifications] = useState(false);
     const [showQuickTools, setShowQuickTools] = useState(false);
+    const [showPublishedMonitor, setShowPublishedMonitor] = useState(false);
     const role = (user?.role || '').toLowerCase();
     const canUseQuickTasks = ['director', 'editor_chief', 'journalist', 'print_editor', 'fact_checker'].includes(role);
 
@@ -71,6 +73,13 @@ export default function TopBar() {
                                 مهام سريعة
                             </button>
                         )}
+                        <button
+                            onClick={() => setShowPublishedMonitor(true)}
+                            className="h-10 px-3 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-200 hover:bg-cyan-500/20 text-xs flex items-center gap-1.5"
+                        >
+                            <Radar className="w-4 h-4" />
+                            جودة المنشور
+                        </button>
 
                         <div className="relative">
                             <button
@@ -99,7 +108,20 @@ export default function TopBar() {
                                             notifications.map((item) => (
                                                 <a
                                                     key={item.id}
-                                                    href={item.article_id ? `/news/${item.article_id}` : '/trends'}
+                                                    href={
+                                                        item.article_id
+                                                            ? `/news/${item.article_id}`
+                                                            : item.type === 'published_quality'
+                                                                ? '#'
+                                                                : '/trends'
+                                                    }
+                                                    onClick={(e) => {
+                                                        if (item.type === 'published_quality') {
+                                                            e.preventDefault();
+                                                            setShowNotifications(false);
+                                                            setShowPublishedMonitor(true);
+                                                        }
+                                                    }}
                                                     className="block px-3 py-2 border-b border-white/5 hover:bg-white/5"
                                                 >
                                                     <p className="text-xs text-white">{item.title}</p>
@@ -163,6 +185,15 @@ export default function TopBar() {
             </div>
 
             {showQuickTools && <QuickTasksDrawer onClose={() => setShowQuickTools(false)} />}
+            {showPublishedMonitor && (
+                <PublishedMonitorDrawer
+                    onClose={() => setShowPublishedMonitor(false)}
+                    onRefresh={async () => {
+                        await queryClient.invalidateQueries({ queryKey: ['published-monitor-latest'] });
+                        await queryClient.invalidateQueries({ queryKey: ['dashboard-notifications'] });
+                    }}
+                />
+            )}
         </header>
     );
 }
@@ -299,6 +330,127 @@ function QuickTasksDrawer({ onClose }: { onClose: () => void }) {
                         <pre className="whitespace-pre-wrap text-sm text-gray-200">{result || 'لا توجد نتيجة بعد.'}</pre>
                     )}
                 </div>
+            </div>
+        </div>,
+        document.body
+    );
+}
+
+function scoreColor(score: number): string {
+    if (score >= 90) return 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10';
+    if (score >= 75) return 'text-cyan-300 border-cyan-500/40 bg-cyan-500/10';
+    if (score >= 60) return 'text-amber-300 border-amber-500/40 bg-amber-500/10';
+    return 'text-red-300 border-red-500/40 bg-red-500/10';
+}
+
+function PublishedMonitorDrawer({
+    onClose,
+    onRefresh,
+}: {
+    onClose: () => void;
+    onRefresh: () => Promise<void>;
+}) {
+    const { data, isLoading, refetch } = useQuery({
+        queryKey: ['published-monitor-latest'],
+        queryFn: () => dashboardApi.latestPublishedMonitor({ refresh_if_empty: true, limit: 12 }),
+        refetchInterval: 900000,
+    });
+
+    const runNow = useMutation({
+        mutationFn: () => dashboardApi.triggerPublishedMonitor({ wait: true, limit: 12 }),
+        onSuccess: async (res) => {
+            if (res.data?.report) {
+                await onRefresh();
+            } else {
+                await refetch();
+            }
+        },
+    });
+    if (typeof document === 'undefined') return null;
+
+    const report = data?.data as PublishedMonitorReport | undefined;
+    const items = report?.items || [];
+
+    return createPortal(
+        <div className="fixed inset-0 z-[130] bg-black/80 flex justify-end">
+            <div className="w-full max-w-3xl h-full bg-[#0b1220] border-l border-white/20 shadow-2xl shadow-black/70 p-4 space-y-4 overflow-y-auto" dir="rtl">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h2 className="text-white font-semibold">مراقبة جودة المحتوى المنشور</h2>
+                        <p className="text-xs text-gray-400 mt-1">فحص دوري كل 15 دقيقة وفق الدستور التحريري</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => runNow.mutate()}
+                            disabled={runNow.isPending}
+                            className="px-3 py-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-xs hover:bg-cyan-500/20 disabled:opacity-50"
+                        >
+                            {runNow.isPending ? 'جاري الفحص...' : 'فحص الآن'}
+                        </button>
+                        <button onClick={onClose} className="px-2 py-1 rounded bg-white/15 text-gray-100 text-xs border border-white/20 hover:bg-white/20">إغلاق</button>
+                    </div>
+                </div>
+
+                {isLoading ? (
+                    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-gray-300">جاري تحميل تقرير المراقبة...</div>
+                ) : !report ? (
+                    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-gray-300">لا يوجد تقرير بعد.</div>
+                ) : (
+                    <>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                            <div className="rounded-xl border border-white/15 bg-white/[0.03] p-3">
+                                <p className="text-[11px] text-gray-400">المعدل العام</p>
+                                <p className="text-lg text-white font-semibold">{report.average_score}/100</p>
+                            </div>
+                            <div className="rounded-xl border border-white/15 bg-white/[0.03] p-3">
+                                <p className="text-[11px] text-gray-400">عناصر مفحوصة</p>
+                                <p className="text-lg text-white font-semibold">{report.total_items}</p>
+                            </div>
+                            <div className="rounded-xl border border-white/15 bg-white/[0.03] p-3">
+                                <p className="text-[11px] text-gray-400">تحتاج مراجعة</p>
+                                <p className="text-lg text-white font-semibold">{report.weak_items_count}</p>
+                            </div>
+                            <div className="rounded-xl border border-white/15 bg-white/[0.03] p-3">
+                                <p className="text-[11px] text-gray-400">آخر تشغيل</p>
+                                <p className="text-sm text-white font-semibold">{new Date(report.executed_at).toLocaleString('ar-DZ')}</p>
+                            </div>
+                        </div>
+
+                        {report.weak_items_count > 0 && (
+                            <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200 flex items-center gap-2">
+                                <AlertTriangle className="w-4 h-4" />
+                                تم رصد مشاكل جودة وتم إرسال تنبيه إلى تيليغرام.
+                            </div>
+                        )}
+
+                        <div className="space-y-2">
+                            {items.map((item, idx) => (
+                                <div key={`${item.url}-${idx}`} className="rounded-xl border border-white/10 bg-[#0a1424] p-3 space-y-2">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <a href={item.url} target="_blank" rel="noreferrer" className="text-sm text-white hover:text-cyan-200 leading-relaxed">
+                                            {item.title || 'بدون عنوان'}
+                                        </a>
+                                        <span className={`text-xs px-2 py-1 rounded-lg border ${scoreColor(item.score)}`}>
+                                            {item.score} - {item.grade}
+                                        </span>
+                                    </div>
+                                    {item.issues.length > 0 ? (
+                                        <ul className="text-xs text-amber-200 space-y-1">
+                                            {item.issues.slice(0, 3).map((issue, issueIdx) => (
+                                                <li key={issueIdx}>- {issue}</li>
+                                            ))}
+                                        </ul>
+                                    ) : (
+                                        <p className="text-xs text-emerald-300">لا توجد مشاكل مرصودة.</p>
+                                    )}
+                                    {item.suggestions.length > 0 && (
+                                        <p className="text-xs text-gray-300">اقتراح: {item.suggestions[0]}</p>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </>
+                )}
             </div>
         </div>,
         document.body

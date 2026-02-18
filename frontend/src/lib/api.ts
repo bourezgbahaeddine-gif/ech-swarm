@@ -122,12 +122,41 @@ export interface AgentStatus {
 
 export interface DashboardNotification {
     id: string;
-    type: 'breaking' | 'candidate' | 'trend' | string;
+    type: 'breaking' | 'candidate' | 'trend' | 'published_quality' | string;
     title: string;
     message: string;
     article_id?: number;
     created_at: string;
     severity: 'high' | 'medium' | 'low' | string;
+}
+
+export interface PublishedMonitorItem {
+    title: string;
+    url: string;
+    published_at: string;
+    score: number;
+    grade: string;
+    issues: string[];
+    suggestions: string[];
+    metrics: {
+        title_length: number;
+        word_count: number;
+        clickbait_hits: number;
+        spelling_hits: number;
+        strong_keywords_hits: number;
+    };
+}
+
+export interface PublishedMonitorReport {
+    feed_url: string;
+    executed_at: string;
+    interval_minutes: number;
+    total_items: number;
+    average_score: number;
+    weak_items_count: number;
+    issues_count: number;
+    status: 'ok' | 'alert' | 'empty' | string;
+    items: PublishedMonitorItem[];
 }
 
 export interface WorkspaceDraft {
@@ -389,6 +418,10 @@ export const dashboardApi = {
         api.post<{ message: string; alerts?: TrendAlert[] }>('/dashboard/agents/trends/scan', null, { params }),
     latestTrends: (params?: { geo?: string; category?: string }) =>
         api.get<{ alerts: TrendAlert[] }>('/dashboard/agents/trends/latest', { params }),
+    triggerPublishedMonitor: (params?: { feed_url?: string; limit?: number; wait?: boolean }) =>
+        api.post<{ message: string; report?: PublishedMonitorReport }>('/dashboard/agents/published-monitor/run', null, { params }),
+    latestPublishedMonitor: (params?: { refresh_if_empty?: boolean; limit?: number }) =>
+        api.get<PublishedMonitorReport>('/dashboard/agents/published-monitor/latest', { params }),
     notifications: (params?: { limit?: number }) =>
         api.get<{ items: DashboardNotification[]; total: number }>('/dashboard/notifications', { params }),
 };

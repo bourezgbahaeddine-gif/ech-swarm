@@ -200,5 +200,52 @@ class NotificationService:
         )
         await self.send_slack(message)
 
+    async def send_published_quality_alert(self, report: dict) -> None:
+        """
+        Send Telegram alert when published-content quality monitor detects weak items.
+        This is newsroom-critical, so it goes to the alerts channel.
+        """
+        weak_items = report.get("items", [])
+        weak_items = [item for item in weak_items if int(item.get("score", 0)) < int(settings.published_monitor_alert_threshold)]
+        if not weak_items:
+            return
+
+        avg_score = report.get("average_score", 0)
+        executed_at = report.get("executed_at", "-")
+        threshold = settings.published_monitor_alert_threshold
+
+        lines = [
+            "🚨 <b>إنذار جودة المحتوى المنشور</b>",
+            f"🕒 وقت الفحص: {self._clean_text(str(executed_at), 60)}",
+            f"📉 المعدل العام: <b>{avg_score}</b> / 100",
+            f"⚠️ عناصر تحت العتبة ({threshold}): <b>{len(weak_items)}</b>",
+            "",
+        ]
+
+        for item in weak_items[:5]:
+            title = self._clean_text(item.get("title", "بدون عنوان"), 120)
+            score = item.get("score", 0)
+            grade = self._clean_text(item.get("grade", "-"), 20)
+            url = item.get("url", "")
+            issue = self._clean_text(", ".join((item.get("issues") or [])[:2]), 180)
+            lines.append(f"• <b>{title}</b>")
+            lines.append(f"  - الدرجة: {score} ({grade})")
+            if issue and issue != "-":
+                lines.append(f"  - الملاحظات: {issue}")
+            if url:
+                lines.append(f"  - <a href=\"{url}\">فتح الرابط</a>")
+            lines.append("")
+
+        message = "\n".join(lines)[:4000]
+        alert_channel = await settings_service.get_value(
+            "TELEGRAM_CHANNEL_ALERTS",
+            settings.telegram_channel_alerts,
+        )
+        fallback_editors = await settings_service.get_value(
+            "TELEGRAM_CHANNEL_EDITORS",
+            settings.telegram_channel_editors,
+        )
+        await self.send_telegram(message, channel=alert_channel or fallback_editors)
+
 
 notification_service = NotificationService()

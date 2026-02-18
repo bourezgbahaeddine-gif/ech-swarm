@@ -17,7 +17,7 @@ from app.models.user import User, UserRole
 from app.api.routes.auth import get_current_user
 from app.schemas import DashboardStats, PipelineRunResponse
 from app.services.cache_service import cache_service
-from app.agents import scout_agent, router_agent, scribe_agent, trend_radar_agent
+from app.agents import scout_agent, router_agent, scribe_agent, trend_radar_agent, published_content_monitor_agent
 
 logger = get_logger("api.dashboard")
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
@@ -172,6 +172,17 @@ async def _run_trends_scan(geo: str, category: str, limit: int, mode: str):
     logger.info("trends_scan_completed", alerts_count=len(alerts), geo=geo, category=category, limit=limit, mode=mode)
 
 
+async def _run_published_monitor_scan(feed_url: str | None, limit: int | None):
+    report = await published_content_monitor_agent.scan(feed_url=feed_url, limit=limit)
+    logger.info(
+        "published_monitor_scan_triggered",
+        status=report.get("status", "unknown"),
+        total_items=report.get("total_items", 0),
+        weak_items=report.get("weak_items_count", 0),
+        average_score=report.get("average_score", 0),
+    )
+
+
 def _assert_agent_control_permission(user: User) -> None:
     if user.role not in {UserRole.director, UserRole.editor_chief}:
         raise HTTPException(status_code=403, detail="غير مسموح لك بتشغيل هذا الوكيل.")
@@ -294,6 +305,50 @@ async def get_latest_trend_scan(
     return payload or {"alerts": []}
 
 
+@router.post("/agents/published-monitor/run")
+async def trigger_published_monitor(
+    background_tasks: BackgroundTasks,
+    feed_url: str | None = Query(default=None),
+    limit: int | None = Query(default=None, ge=1, le=30),
+    wait: bool = Query(False),
+    current_user: User = Depends(get_current_user),
+):
+    """Run published-content quality monitor (sync or async)."""
+    _assert_newsroom_refresh_permission(current_user)
+    if wait:
+        try:
+            report = await asyncio.wait_for(
+                published_content_monitor_agent.scan(feed_url=feed_url, limit=limit),
+                timeout=30,
+            )
+            return {"message": "اكتمل فحص المحتوى المنشور.", "report": report}
+        except TimeoutError:
+            payload = await published_content_monitor_agent.latest()
+            return {
+                "message": "انتهت مهلة الفحص. تم إرجاع آخر تقرير متوفر.",
+                "report": payload or {"status": "empty", "items": []},
+            }
+
+    background_tasks.add_task(_run_published_monitor_scan, feed_url, limit)
+    return {"message": "تمت جدولة فحص المحتوى المنشور."}
+
+
+@router.get("/agents/published-monitor/latest")
+async def get_latest_published_monitor(
+    refresh_if_empty: bool = Query(True),
+    limit: int | None = Query(default=None, ge=1, le=30),
+    current_user: User = Depends(get_current_user),
+):
+    """Get latest published-content quality report."""
+    _assert_newsroom_refresh_permission(current_user)
+    payload = await published_content_monitor_agent.latest()
+    if payload:
+        return payload
+    if refresh_if_empty:
+        return await published_content_monitor_agent.scan(limit=limit)
+    return {"status": "empty", "items": []}
+
+
 @router.get("/agents/status")
 async def agents_status():
     """Get current agent statuses."""
@@ -302,6 +357,7 @@ async def agents_status():
         "router": {"status": "ready", "description": "وكيل الموجه - التصنيف والتوجيه"},
         "scribe": {"status": "ready", "description": "وكيل الكاتب - توليد المسودة"},
         "trend_radar": {"status": "ready", "description": "رادار التراند - اكتشاف الاتجاهات"},
+        "published_monitor": {"status": "ready", "description": "مراقبة جودة المحتوى المنشور"},
         "audio": {"status": "ready", "description": "وكيل الصوت - النشرات الصوتية"},
     }
 
@@ -432,6 +488,25 @@ async def dashboard_notifications(
                 "message": alert.get("reason", "اتجاه ترند يحتاج متابعة تحريرية."),
                 "created_at": alert.get("detected_at") or now.isoformat(),
                 "severity": "low",
+            }
+        )
+
+    monitor_payload = await published_content_monitor_agent.latest()
+    if monitor_payload:
+        weak_items = int(monitor_payload.get("weak_items_count", 0))
+        average_score = monitor_payload.get("average_score", 0)
+        items.append(
+            {
+                "id": "published-quality-monitor",
+                "type": "published_quality",
+                "title": "مراقبة جودة المحتوى المنشور",
+                "message": (
+                    f"تم رصد {weak_items} مقالاً يحتاج مراجعة. المعدل العام {average_score}/100."
+                    if weak_items > 0
+                    else f"لا توجد إنذارات حرجة حالياً. المعدل العام {average_score}/100."
+                ),
+                "created_at": monitor_payload.get("executed_at") or now.isoformat(),
+                "severity": "high" if weak_items > 0 else "low",
             }
         )
 

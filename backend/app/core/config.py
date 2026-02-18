@@ -80,6 +80,12 @@ class Settings(BaseSettings):
     trend_radar_interval_minutes: int = 10
     auto_pipeline_enabled: bool = False
     auto_scribe_enabled: bool = True
+    published_monitor_enabled: bool = True
+    published_monitor_interval_minutes: int = 15
+    published_monitor_feed_url: str = "https://www.echoroukonline.com/feed"
+    published_monitor_limit: int = 12
+    published_monitor_fetch_timeout: int = 12
+    published_monitor_alert_threshold: int = 75
 
     # ── FreshRSS / RSS-Bridge ──
     scout_use_freshrss: bool = False
