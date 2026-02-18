@@ -103,7 +103,7 @@ export default function StatsCards({ stats, isLoading }: StatsCardsProps) {
             icon: Newspaper,
             color: 'bg-blue-500/20',
             glowColor: 'bg-blue-500',
-            href: '/news',
+            href: '/dashboard/metric/total-articles',
         },
         {
             label: 'أخبار اليوم',
@@ -111,8 +111,8 @@ export default function StatsCards({ stats, isLoading }: StatsCardsProps) {
             icon: Clock,
             color: 'bg-cyan-500/20',
             glowColor: 'bg-cyan-500',
-            trend: 'محدّث مباشرة',
-            href: '/news',
+            trend: 'محدثة مباشرة',
+            href: '/dashboard/metric/today-articles',
         },
         {
             label: 'بانتظار المراجعة',
@@ -120,7 +120,7 @@ export default function StatsCards({ stats, isLoading }: StatsCardsProps) {
             icon: Clock,
             color: 'bg-amber-500/20',
             glowColor: 'bg-amber-500',
-            href: '/editorial',
+            href: '/dashboard/metric/pending-review',
         },
         {
             label: 'تمت الموافقة',
@@ -128,7 +128,7 @@ export default function StatsCards({ stats, isLoading }: StatsCardsProps) {
             icon: CheckCircle,
             color: 'bg-emerald-500/20',
             glowColor: 'bg-emerald-500',
-            href: '/editorial',
+            href: '/dashboard/metric/approved',
         },
         {
             label: 'تم الرفض',
@@ -136,7 +136,7 @@ export default function StatsCards({ stats, isLoading }: StatsCardsProps) {
             icon: XCircle,
             color: 'bg-red-500/20',
             glowColor: 'bg-red-500',
-            href: '/editorial',
+            href: '/dashboard/metric/rejected',
         },
         {
             label: 'تم النشر',
@@ -144,7 +144,7 @@ export default function StatsCards({ stats, isLoading }: StatsCardsProps) {
             icon: Send,
             color: 'bg-violet-500/20',
             glowColor: 'bg-violet-500',
-            href: '/news?status=published',
+            href: '/dashboard/metric/published',
         },
         {
             label: 'أخبار عاجلة',
@@ -152,7 +152,7 @@ export default function StatsCards({ stats, isLoading }: StatsCardsProps) {
             icon: Zap,
             color: 'bg-rose-500/20',
             glowColor: 'bg-rose-500',
-            href: '/news?breaking=1',
+            href: '/dashboard/metric/breaking-news',
         },
         {
             label: 'المصادر النشطة',
@@ -160,7 +160,7 @@ export default function StatsCards({ stats, isLoading }: StatsCardsProps) {
             icon: Rss,
             color: 'bg-orange-500/20',
             glowColor: 'bg-orange-500',
-            href: '/sources',
+            href: '/dashboard/metric/sources-active',
         },
         {
             label: 'استدعاءات AI اليوم',
@@ -168,7 +168,7 @@ export default function StatsCards({ stats, isLoading }: StatsCardsProps) {
             icon: Bot,
             color: 'bg-indigo-500/20',
             glowColor: 'bg-indigo-500',
-            href: '/agents',
+            href: '/dashboard/metric/ai-calls',
         },
         {
             label: 'متوسط المعالجة',
@@ -176,7 +176,7 @@ export default function StatsCards({ stats, isLoading }: StatsCardsProps) {
             icon: Timer,
             color: 'bg-teal-500/20',
             glowColor: 'bg-teal-500',
-            href: '/agents',
+            href: '/dashboard/metric/avg-processing',
         },
     ];
 
