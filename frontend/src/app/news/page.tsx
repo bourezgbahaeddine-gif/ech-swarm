@@ -535,7 +535,7 @@ function NewsPageContent() {
                             <div
                                 key={article.id}
                                 className={cn(
-                                    'rounded-2xl border border-white/5 bg-gradient-to-br from-gray-800/40 to-gray-900/70 p-4 transition-all',
+                                    'rounded-2xl border border-white/5 bg-gradient-to-br from-gray-800/40 to-gray-900/70 p-5 transition-all',
                                     'hover:border-white/10 hover:shadow-lg hover:shadow-black/30',
                                     freshBreaking && 'ring-1 ring-red-500/30'
                                 )}
@@ -552,7 +552,11 @@ function NewsPageContent() {
                                     </div>
 
                                     <div className="flex-1">
-                                        <div className="flex items-center gap-2 mb-2">
+                                        <h3 className="text-lg font-extrabold text-white leading-8 line-clamp-3" dir="rtl">
+                                            {article.title_ar || article.original_title}
+                                        </h3>
+
+                                        <div className="flex items-center gap-2 mt-2 mb-1">
                                             {freshBreaking && (
                                                 <span className="px-2 py-0.5 rounded-full bg-red-500 text-[10px] font-bold text-white flex items-center gap-1 animate-pulse">
                                                     <Zap className="w-3 h-3" /> عاجل
@@ -565,12 +569,8 @@ function NewsPageContent() {
                                             </span>
                                         </div>
 
-                                        <h3 className="text-sm font-semibold text-white leading-relaxed line-clamp-2" dir="rtl">
-                                            {article.title_ar || article.original_title}
-                                        </h3>
-
                                         {article.summary && (
-                                            <p className="text-xs text-gray-400 mt-2 line-clamp-2" dir="rtl">
+                                            <p className="text-sm text-gray-300 mt-2 line-clamp-2" dir="rtl">
                                                 {truncate(article.summary, 140)}
                                             </p>
                                         )}
