@@ -1,7 +1,7 @@
 """add user activity logs table
 
 Revision ID: 20260218_add_user_activity_logs
-Revises: 20260218_editorial_policy_gate_statuses
+Revises: 20260218_policy_gate_statuses
 Create Date: 2026-02-18 17:30:00
 """
 
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "20260218_add_user_activity_logs"
-down_revision = "20260218_editorial_policy_gate_statuses"
+down_revision = "20260218_policy_gate_statuses"
 branch_labels = None
 depends_on = None
 

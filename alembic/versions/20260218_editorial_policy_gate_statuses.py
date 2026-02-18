@@ -1,6 +1,6 @@
 """add editorial policy gate statuses to newsstatus enum
 
-Revision ID: 20260218_editorial_policy_gate_statuses
+Revision ID: 20260218_policy_gate_statuses
 Revises: 20260217_m5_smart_editor
 Create Date: 2026-02-18 10:00:00
 """
@@ -8,7 +8,7 @@ Create Date: 2026-02-18 10:00:00
 from alembic import op
 
 
-revision = "20260218_editorial_policy_gate_statuses"
+revision = "20260218_policy_gate_statuses"
 down_revision = "20260217_m5_smart_editor"
 branch_labels = None
 depends_on = None
@@ -23,4 +23,3 @@ def upgrade() -> None:
 def downgrade() -> None:
     # Postgres enum value deletion is not safe in downgrade without type recreation.
     pass
-

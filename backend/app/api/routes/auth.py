@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import func, select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -79,16 +79,29 @@ async def _log_activity(
     target: User | None = None,
     details: dict | None = None,
 ) -> None:
-    db.add(
-        UserActivityLog(
-            actor_user_id=actor.id if actor else None,
-            actor_username=actor.username if actor else None,
-            target_user_id=target.id if target else None,
-            target_username=target.username if target else None,
+    """
+    Best-effort audit logging.
+    Must never break critical auth/workflow paths when audit schema is missing or degraded.
+    """
+    try:
+        async with db.begin_nested():
+            db.add(
+                UserActivityLog(
+                    actor_user_id=actor.id if actor else None,
+                    actor_username=actor.username if actor else None,
+                    target_user_id=target.id if target else None,
+                    target_username=target.username if target else None,
+                    action=action,
+                    details=json.dumps(details, ensure_ascii=False) if details else None,
+                )
+            )
+            await db.flush()
+    except SQLAlchemyError as exc:
+        logger.warning(
+            "activity_log_write_failed",
             action=action,
-            details=json.dumps(details, ensure_ascii=False) if details else None,
+            error=str(exc.__class__.__name__),
         )
-    )
 
 
 async def _active_directors_count(db: AsyncSession) -> int:
@@ -376,4 +389,3 @@ async def user_activity(
         .limit(max(1, min(limit, 500)))
     )
     return [UserActivityItem.model_validate(item) for item in rows.scalars().all()]
-
