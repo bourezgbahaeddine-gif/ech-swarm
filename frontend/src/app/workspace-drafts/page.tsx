@@ -83,6 +83,15 @@ function cleanText(value: string): string {
         .trim();
 }
 
+function htmlToReadableText(value: string): string {
+    if (!value) return '';
+    if (typeof window !== 'undefined') {
+        const parsed = new window.DOMParser().parseFromString(value, 'text/html');
+        return cleanText(parsed.body.textContent || '');
+    }
+    return cleanText(value.replace(/<[^>]+>/g, ' '));
+}
+
 function actionKey(action: ActionId): string {
     return `${ACTION_HELP_PREFIX}${action}`;
 }
@@ -108,6 +117,7 @@ export default function WorkspaceDraftsPage() {
     const [readiness, setReadiness] = useState<any | null>(null);
     const [headlines, setHeadlines] = useState<any[]>([]);
     const [suggestion, setSuggestion] = useState<any | null>(null);
+    const [showTechnicalDiff, setShowTechnicalDiff] = useState(false);
     const [diffView, setDiffView] = useState('');
     const [cmpFrom, setCmpFrom] = useState<number | null>(null);
     const [cmpTo, setCmpTo] = useState<number | null>(null);
@@ -214,6 +224,7 @@ export default function WorkspaceDraftsPage() {
                 setBaseVersion(d.version);
             }
             setSuggestion(null);
+            setShowTechnicalDiff(false);
             queryClient.invalidateQueries({ queryKey: ['smart-editor-context', workId] });
             queryClient.invalidateQueries({ queryKey: ['smart-editor-versions', workId] });
         },
@@ -357,11 +368,39 @@ export default function WorkspaceDraftsPage() {
 
                     {suggestion && (
                         <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 p-4 space-y-2">
-                            <h3 className="text-sm text-amber-200">اقتراح الذكاء الاصطناعي (فرق)</h3>
-                            <pre className="max-h-56 overflow-auto text-xs text-amber-50 bg-black/25 rounded-xl p-2" dir="ltr">{suggestion.diff || ''}</pre>
+                            <h3 className="text-sm text-amber-200">اقتراح التحسين بصيغة واضحة</h3>
+                            <div className="rounded-xl border border-amber-300/30 bg-black/25 p-3 text-xs text-amber-100 space-y-1" dir="rtl">
+                                <p>العنوان المقترح: {cleanText(suggestion.title || title || 'بدون عنوان')}</p>
+                                <p>التعديل: +{suggestion?.diff_stats?.added || 0} / -{suggestion?.diff_stats?.removed || 0}</p>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                <div className="rounded-xl border border-white/10 bg-black/20 p-2">
+                                    <p className="text-[11px] text-gray-400 mb-1">قبل التحسين</p>
+                                    <p className="text-xs text-gray-200 whitespace-pre-wrap max-h-40 overflow-auto">
+                                        {truncate(cleanText(suggestion?.preview?.before_text || htmlToReadableText(bodyHtml)), 900)}
+                                    </p>
+                                </div>
+                                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-2">
+                                    <p className="text-[11px] text-emerald-200 mb-1">بعد التحسين</p>
+                                    <p className="text-xs text-emerald-50 whitespace-pre-wrap max-h-40 overflow-auto">
+                                        {truncate(cleanText(suggestion?.preview?.after_text || suggestion?.body_text || htmlToReadableText(suggestion?.body_html || '')), 900)}
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setShowTechnicalDiff((v) => !v)}
+                                className="px-2 py-1 rounded-lg bg-white/10 text-gray-200 text-[11px]"
+                            >
+                                {showTechnicalDiff ? 'إخفاء الفرق التقني' : 'عرض الفرق التقني'}
+                            </button>
+                            {showTechnicalDiff && (
+                                <pre className="max-h-56 overflow-auto text-xs text-amber-50 bg-black/25 rounded-xl p-2" dir="ltr">
+                                    {suggestion.diff || 'لا يوجد فرق تقني'}
+                                </pre>
+                            )}
                             <div className="flex gap-2">
                                 <button onClick={() => applySuggestion.mutate()} className="px-3 py-2 rounded-xl bg-emerald-500/30 text-emerald-100 text-xs">قبول كنسخة جديدة</button>
-                                <button onClick={() => setSuggestion(null)} className="px-3 py-2 rounded-xl bg-white/10 text-gray-300 text-xs">رفض</button>
+                                <button onClick={() => { setSuggestion(null); setShowTechnicalDiff(false); }} className="px-3 py-2 rounded-xl bg-white/10 text-gray-300 text-xs">رفض</button>
                             </div>
                         </div>
                     )}

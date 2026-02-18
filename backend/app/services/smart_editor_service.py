@@ -195,12 +195,19 @@ title, body_html, note
 
         sanitized = self.sanitize_html(candidate)
         diff = self.build_diff(draft_html, sanitized)
+        before_text = self.html_to_text(draft_html)
+        after_text = self.html_to_text(sanitized)
         return {
             "title": title,
             "body_html": sanitized,
+            "body_text": after_text,
             "note": note,
             "diff": diff.diff,
             "diff_stats": {"added": diff.added, "removed": diff.removed},
+            "preview": {
+                "before_text": before_text[:1400],
+                "after_text": after_text[:1400],
+            },
             "generated_at": datetime.utcnow().isoformat(),
         }
 
