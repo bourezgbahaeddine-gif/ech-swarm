@@ -27,9 +27,9 @@ export default function FactCheckPage() {
     const checklist = useMemo(
         () => [
             'هل الادعاء منسوب لمصدر واضح؟',
-            'هل الرقم/التاريخ مطابق لمصدر رسمي أو وكالة موثوقة؟',
-            'هل صياغة الخبر خالية من الجزم غير المؤكد؟',
-            'هل توجد صيغة تحذير [VERIFY] عند نقص الدليل؟',
+            'هل الأرقام والتواريخ مدعومة بمرجع رسمي؟',
+            'هل الخبر يتجنب الجزم بدون دليل؟',
+            'هل تم وسم المعلومات غير المؤكدة بـ [VERIFY]؟',
         ],
         [],
     );
@@ -54,7 +54,7 @@ export default function FactCheckPage() {
             <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
                 <p className="font-semibold mb-2 flex items-center gap-2">
                     <FileWarning className="w-4 h-4" />
-                    دليل عملي سريع قبل الاعتماد
+                    قائمة فحص سريعة قبل الاعتماد
                 </p>
                 <div className="space-y-1">
                     {checklist.map((item, idx) => (
@@ -67,7 +67,7 @@ export default function FactCheckPage() {
                 <div className="rounded-2xl border border-white/5 bg-gray-900/40 p-4 space-y-3">
                     <h2 className="text-sm text-gray-300 flex items-center gap-2">
                         <SearchCheck className="w-4 h-4 text-emerald-400" />
-                        تحقق نصي (تعارضات + سياق)
+                        تحقق نصي (اتساق + تعارضات)
                     </h2>
                     <textarea
                         className="w-full min-h-[140px] p-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm"
@@ -104,9 +104,9 @@ export default function FactCheckPage() {
                         value={question}
                         onChange={(e) => setQuestion(e.target.value)}
                     />
-                    <button className={btnClass} onClick={() => run(() => journalistServicesApi.vision(imageUrl, question))}>تحقق بصري</button>
+                    <button className={btnClass} onClick={() => run(() => journalistServicesApi.vision(imageUrl, question))}>تشغيل التحقق البصري</button>
                     <p className="text-[11px] text-gray-500">
-                        مثال سؤال: هل الصورة قديمة؟ هل المكان مطابق للخبر؟ هل توجد مؤشرات تعديل أو تركيب؟
+                        مثال: هل الصورة قديمة؟ هل المكان مطابق للخبر؟ هل توجد مؤشرات تعديل أو تركيب؟
                     </p>
                 </div>
             </div>
@@ -125,7 +125,7 @@ export default function FactCheckPage() {
                 {busy ? (
                     <p className="text-sm text-gray-500">جاري التحليل...</p>
                 ) : (
-                    <pre className="whitespace-pre-wrap text-gray-200 text-sm">{result || '—'}</pre>
+                    <pre className="whitespace-pre-wrap text-gray-200 text-sm">{result || 'لا توجد نتيجة بعد.'}</pre>
                 )}
             </div>
         </div>

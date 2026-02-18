@@ -23,26 +23,36 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 
+type Role =
+    | 'director'
+    | 'editor_chief'
+    | 'journalist'
+    | 'social_media'
+    | 'print_editor'
+    | 'fact_checker'
+    | 'observer';
+
 const navItems = [
-    { href: '/', label: 'لوحة القيادة', icon: LayoutDashboard },
-    { href: '/news', label: 'الأخبار', icon: Newspaper },
-    { href: '/editorial', label: 'قسم التحرير', icon: UserCheck },
-    { href: '/sources', label: 'المصادر', icon: Rss },
-    { href: '/agents', label: 'الوكلاء', icon: Bot },
-    { href: '/trends', label: 'رادار التراند', icon: TrendingUp },
-    { href: '/team', label: 'فريق التحرير', icon: Users },
-    { href: '/settings', label: 'إعدادات APIs', icon: KeyRound, directorOnly: true },
-    { href: '/constitution', label: 'الدستور', icon: FileText },
-    { href: '/services/fact-check', label: 'التحقق والاستقصاء', icon: ShieldCheck },
-    { href: '/services/multimedia', label: 'الوسائط', icon: Film },
-    { href: '/workspace-drafts', label: 'المحرر الذكي', icon: FolderGit2 },
+    { href: '/', label: 'لوحة القيادة', icon: LayoutDashboard, roles: ['director', 'editor_chief'] as Role[] },
+    { href: '/news', label: 'الأخبار', icon: Newspaper, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor', 'fact_checker'] as Role[] },
+    { href: '/editorial', label: 'قسم التحرير', icon: UserCheck, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
+    { href: '/workspace-drafts', label: 'المحرر الذكي', icon: FolderGit2, roles: ['director', 'editor_chief', 'journalist', 'print_editor'] as Role[] },
+    { href: '/trends', label: 'رادار التراند', icon: TrendingUp, roles: ['director', 'editor_chief', 'journalist', 'print_editor'] as Role[] },
+    { href: '/constitution', label: 'الدستور', icon: FileText, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor', 'fact_checker'] as Role[] },
+    { href: '/services/multimedia', label: 'الوسائط', icon: Film, roles: ['director', 'social_media'] as Role[] },
+    { href: '/team', label: 'فريق التحرير', icon: Users, roles: ['director', 'editor_chief'] as Role[] },
+    { href: '/sources', label: 'المصادر', icon: Rss, roles: ['director'] as Role[] },
+    { href: '/agents', label: 'الوكلاء', icon: Bot, roles: ['director'] as Role[] },
+    { href: '/services/fact-check', label: 'التحقق والاستقصاء', icon: ShieldCheck, roles: ['director', 'editor_chief', 'journalist', 'fact_checker', 'print_editor'] as Role[] },
+    { href: '/settings', label: 'إعدادات APIs', icon: KeyRound, roles: ['director'] as Role[] },
 ];
 
 export default function Sidebar() {
     const pathname = usePathname();
     const { user } = useAuth();
     const [collapsed, setCollapsed] = useState(false);
-    const visibleNav = navItems.filter((item) => !item.directorOnly || user?.role === 'director');
+    const role = ((user?.role || '') as Role);
+    const visibleNav = navItems.filter((item) => item.roles.includes(role));
 
     return (
         <aside

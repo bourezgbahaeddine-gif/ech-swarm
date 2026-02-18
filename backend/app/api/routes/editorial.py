@@ -30,6 +30,7 @@ from app.models.user import User, UserRole
 from app.schemas import EditorDecisionCreate, EditorDecisionResponse
 from app.services.article_index_service import article_index_service
 from app.services.ai_service import ai_service
+from app.services.notification_service import notification_service
 from app.services.quality_gate_service import quality_gate_service
 from app.services.smart_editor_service import smart_editor_service
 from app.services.trend_signal_service import bump_keyword_interactions, extract_keywords
@@ -94,6 +95,11 @@ class HeadlineSuggestionRequest(BaseModel):
 
 class ClaimVerifyRequest(BaseModel):
     threshold: float = Field(default=0.70, ge=0.1, le=0.99)
+
+
+class ChiefFinalDecisionRequest(BaseModel):
+    decision: Literal["approve", "return_for_revision"]
+    notes: Optional[str] = Field(default=None, max_length=1000)
 
 
 def _require_roles(user: User, allowed: set[UserRole]) -> None:
@@ -242,6 +248,12 @@ NEWSROOM_ROLES = {
     UserRole.print_editor,
 }
 
+AUTHOR_ROLES = {UserRole.director, UserRole.editor_chief, UserRole.journalist}
+CHIEF_REVIEW_STATUSES = {
+    NewsStatus.READY_FOR_CHIEF_APPROVAL,
+    NewsStatus.APPROVAL_REQUEST_WITH_RESERVATIONS,
+}
+
 
 async def _create_draft_version(
     db: AsyncSession,
@@ -302,6 +314,103 @@ async def _get_latest_draft_or_404(db: AsyncSession, work_id: str) -> EditorialD
     if not draft:
         raise HTTPException(404, "Draft not found")
     return draft
+
+
+async def _submit_draft_for_chief_approval(
+    *,
+    db: AsyncSession,
+    draft: EditorialDraft,
+    current_user: User,
+) -> dict[str, Any]:
+    article_result = await db.execute(select(Article).where(Article.id == draft.article_id))
+    article = article_result.scalar_one_or_none()
+    if not article:
+        raise HTTPException(404, "Article not found")
+
+    await _assert_publish_gate_and_constitution(db, article_id=article.id, user=current_user)
+
+    if draft.title:
+        article.title_ar = draft.title
+    if draft.body:
+        article.body_html = smart_editor_service.sanitize_html(draft.body)
+
+    source_text = "\n".join(
+        [
+            article.original_title or "",
+            article.summary or "",
+            article.original_content or "",
+        ]
+    ).strip()
+
+    readability_report = await _latest_stage_report(db, article_id=article.id, stage="READABILITY")
+    quality_report = await _latest_stage_report(db, article_id=article.id, stage="QUALITY_SCORE")
+    fact_report = await _latest_stage_report(db, article_id=article.id, stage="FACT_CHECK")
+
+    policy_report = await smart_editor_service.editorial_policy_review(
+        title=article.title_ar or article.original_title,
+        body_html=article.body_html or "",
+        source_text=source_text,
+        readability_report=(readability_report.report_json if readability_report else {}),
+        quality_report=(quality_report.report_json if quality_report else {}),
+        fact_report=(fact_report.report_json if fact_report else {}),
+    )
+
+    await quality_gate_service.save_report(
+        db,
+        article_id=article.id,
+        stage="EDITORIAL_POLICY",
+        passed=bool(policy_report["passed"]),
+        score=policy_report.get("score"),
+        blocking_reasons=policy_report.get("blocking_reasons", []),
+        actionable_fixes=policy_report.get("actionable_fixes", []),
+        report_json=policy_report,
+        created_by=current_user.full_name_ar,
+        upsert_by_stage=True,
+    )
+
+    decision = policy_report.get("decision", "reservations")
+    if decision == "approved":
+        article.status = NewsStatus.READY_FOR_CHIEF_APPROVAL
+        status_message = "جاهز لاعتماد رئيس التحرير"
+    else:
+        article.status = NewsStatus.APPROVAL_REQUEST_WITH_RESERVATIONS
+        status_message = "طلب اعتماد مع تحفظات"
+
+    draft.status = "applied"
+    draft.applied_by = current_user.full_name_ar
+    draft.applied_at = datetime.utcnow()
+    draft.updated_by = current_user.full_name_ar
+
+    db.add(
+        EditorDecision(
+            article_id=article.id,
+            editor_name=current_user.full_name_ar,
+            decision="process:submit_for_chief_approval",
+            reason=f"policy_decision:{decision}",
+            edited_title=draft.title,
+            edited_body=draft.body,
+        )
+    )
+
+    await article_index_service.upsert_article(db, article)
+    await db.commit()
+
+    await notification_service.send_policy_gate_alert(
+        article_id=article.id,
+        title=article.title_ar or article.original_title,
+        decision=decision,
+        reasons=policy_report.get("reasons", []),
+    )
+
+    return {
+        "article_id": article.id,
+        "work_id": draft.work_id,
+        "policy_decision": decision,
+        "status": article.status.value,
+        "status_message": status_message,
+        "blocking_reasons": policy_report.get("blocking_reasons", []),
+        "actionable_fixes": policy_report.get("actionable_fixes", []),
+    }
 
 
 async def _assert_publish_gate_and_constitution(
@@ -437,7 +546,7 @@ async def handoff_to_scribe(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_roles(current_user, {UserRole.director, UserRole.editor_chief})
+    _require_roles(current_user, AUTHOR_ROLES)
 
     result = await db.execute(select(Article).where(Article.id == article_id))
     article = result.scalar_one_or_none()
@@ -779,6 +888,85 @@ async def get_quality_reports(
         }
         for r in reports
     ]
+
+
+@router.get("/social/approved-feed")
+async def social_approved_feed(
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(current_user, {UserRole.director, UserRole.editor_chief, UserRole.social_media})
+    rows = await db.execute(
+        select(Article)
+        .where(Article.status.in_([NewsStatus.READY_FOR_MANUAL_PUBLISH, NewsStatus.PUBLISHED]))
+        .order_by(Article.updated_at.desc(), Article.id.desc())
+        .limit(max(1, min(limit, 200)))
+    )
+    articles = rows.scalars().all()
+    out: list[dict[str, Any]] = []
+    for article in articles:
+        social_report = await _latest_stage_report(db, article_id=article.id, stage="SOCIAL_VARIANTS")
+        variants = ((social_report.report_json or {}).get("variants") if social_report else {}) or {}
+        out.append(
+            {
+                "article_id": article.id,
+                "title": article.title_ar or article.original_title,
+                "status": article.status.value if article.status else None,
+                "source_name": article.source_name,
+                "updated_at": article.updated_at,
+                "variants": variants,
+            }
+        )
+    return out
+
+
+@router.get("/{article_id}/social/variants")
+async def article_social_variants(
+    article_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(current_user, {UserRole.director, UserRole.editor_chief, UserRole.social_media})
+    article_row = await db.execute(select(Article).where(Article.id == article_id))
+    article = article_row.scalar_one_or_none()
+    if not article:
+        raise HTTPException(404, "Article not found")
+
+    social_report = await _latest_stage_report(db, article_id=article_id, stage="SOCIAL_VARIANTS")
+    if social_report and (social_report.report_json or {}).get("variants"):
+        return {
+            "article_id": article.id,
+            "status": article.status.value if article.status else None,
+            "variants": (social_report.report_json or {}).get("variants"),
+            "generated_at": social_report.created_at,
+        }
+
+    source_text = "\n".join([article.original_title or "", article.summary or "", article.original_content or ""])
+    variants = await smart_editor_service.social_variants(
+        source_text=source_text,
+        draft_title=article.title_ar or article.original_title,
+        draft_html=article.body_html or "",
+    )
+    await quality_gate_service.save_report(
+        db,
+        article_id=article.id,
+        stage="SOCIAL_VARIANTS",
+        passed=True,
+        score=100,
+        blocking_reasons=[],
+        actionable_fixes=[],
+        report_json={"variants": variants, "article_id": article.id},
+        created_by=current_user.full_name_ar,
+        upsert_by_stage=True,
+    )
+    await db.commit()
+    return {
+        "article_id": article.id,
+        "status": article.status.value if article.status else None,
+        "variants": variants,
+        "generated_at": datetime.utcnow(),
+    }
 
 
 @router.get("/workspace/drafts")
@@ -1178,6 +1366,19 @@ async def workspace_ai_social(
         draft_title=latest.title or article.title_ar or article.original_title,
         draft_html=latest.body or "",
     )
+    await quality_gate_service.save_report(
+        db,
+        article_id=article.id,
+        stage="SOCIAL_VARIANTS",
+        passed=True,
+        score=100,
+        blocking_reasons=[],
+        actionable_fixes=[],
+        report_json={"variants": variants, "work_id": work_id, "version": latest.version},
+        created_by=current_user.full_name_ar,
+        upsert_by_stage=True,
+    )
+    await db.commit()
     return {"work_id": work_id, "base_version": latest.version, "variants": variants}
 
 
@@ -1317,52 +1518,138 @@ async def apply_draft_by_work_id(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_roles(
-        current_user,
-        {
-            UserRole.director,
-            UserRole.editor_chief,
-            UserRole.journalist,
-            UserRole.social_media,
-            UserRole.print_editor,
-        },
+    _require_roles(current_user, AUTHOR_ROLES)
+    draft = await _get_latest_draft_or_404(db, work_id)
+    if draft.status not in {"draft", "applied"}:
+        raise HTTPException(409, "Draft already archived")
+    submission = await _submit_draft_for_chief_approval(
+        db=db,
+        draft=draft,
+        current_user=current_user,
     )
+    return {
+        **submission,
+        "submitted_for_chief_approval": True,
+        "message": "تم إرسال النسخة إلى رئيس التحرير بعد فحص وكيل السياسة.",
+    }
 
-    draft_result = await db.execute(_resolve_latest_draft_by_work_id_stmt(work_id))
-    draft = draft_result.scalar_one_or_none()
-    if not draft:
-        raise HTTPException(404, "Draft not found")
-    if draft.status != "draft":
-        raise HTTPException(409, "Draft already applied or archived")
 
-    article_result = await db.execute(select(Article).where(Article.id == draft.article_id))
-    article = article_result.scalar_one_or_none()
+@router.post("/workspace/drafts/{work_id}/submit-for-chief-approval")
+async def submit_draft_for_chief_approval(
+    work_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(current_user, AUTHOR_ROLES)
+    draft = await _get_latest_draft_or_404(db, work_id)
+    if draft.status not in {"draft", "applied"}:
+        raise HTTPException(409, "Draft already archived")
+    submission = await _submit_draft_for_chief_approval(
+        db=db,
+        draft=draft,
+        current_user=current_user,
+    )
+    return {
+        **submission,
+        "submitted_for_chief_approval": True,
+        "message": "تم إرسال النسخة إلى رئيس التحرير بعد فحص وكيل السياسة.",
+    }
+
+
+@router.get("/chief/pending")
+async def chief_pending_queue(
+    limit: int = 100,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(current_user, {UserRole.director, UserRole.editor_chief})
+    rows = await db.execute(
+        select(Article)
+        .where(Article.status.in_(list(CHIEF_REVIEW_STATUSES)))
+        .order_by(Article.updated_at.desc(), Article.id.desc())
+        .limit(max(1, min(limit, 500)))
+    )
+    articles = rows.scalars().all()
+
+    out: list[dict[str, Any]] = []
+    for article in articles:
+        policy_report = await _latest_stage_report(db, article_id=article.id, stage="EDITORIAL_POLICY")
+        latest_draft_row = await db.execute(
+            select(EditorialDraft)
+            .where(EditorialDraft.article_id == article.id)
+            .order_by(EditorialDraft.version.desc(), EditorialDraft.updated_at.desc(), EditorialDraft.id.desc())
+            .limit(1)
+        )
+        latest_draft = latest_draft_row.scalar_one_or_none()
+        out.append(
+            {
+                "id": article.id,
+                "title_ar": article.title_ar,
+                "original_title": article.original_title,
+                "summary": article.summary,
+                "source_name": article.source_name,
+                "importance_score": article.importance_score,
+                "is_breaking": article.is_breaking,
+                "category": article.category,
+                "status": article.status.value if article.status else None,
+                "updated_at": article.updated_at,
+                "work_id": latest_draft.work_id if latest_draft else None,
+                "policy": {
+                    "passed": bool(policy_report.passed) if policy_report else False,
+                    "score": policy_report.score if policy_report else None,
+                    "decision": (policy_report.report_json or {}).get("decision") if policy_report else None,
+                    "reasons": (policy_report.report_json or {}).get("reasons", []) if policy_report else [],
+                    "required_fixes": (policy_report.report_json or {}).get("required_fixes", []) if policy_report else [],
+                    "created_at": policy_report.created_at if policy_report else None,
+                },
+            }
+        )
+    return out
+
+
+@router.post("/{article_id}/chief/final-decision")
+async def chief_final_decision(
+    article_id: int,
+    payload: ChiefFinalDecisionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(current_user, {UserRole.director, UserRole.editor_chief})
+    article_row = await db.execute(select(Article).where(Article.id == article_id))
+    article = article_row.scalar_one_or_none()
     if not article:
         raise HTTPException(404, "Article not found")
-    await _assert_publish_gate_and_constitution(db, article_id=article.id, user=current_user)
+    if article.status not in CHIEF_REVIEW_STATUSES:
+        raise HTTPException(409, "Article is not waiting chief approval")
 
-    if draft.title:
-        article.title_ar = draft.title
-    if draft.body:
-        article.body_html = smart_editor_service.sanitize_html(draft.body)
-    draft.status = "applied"
-    draft.applied_by = current_user.full_name_ar
-    draft.applied_at = datetime.utcnow()
-    draft.updated_by = current_user.full_name_ar
+    if payload.decision == "approve":
+        await _assert_publish_gate_and_constitution(db, article_id=article.id, user=current_user)
+        article.status = NewsStatus.READY_FOR_MANUAL_PUBLISH
+        message = "تم اعتماد النسخة النهائية وأصبحت جاهزة للنشر اليدوي."
+    else:
+        article.status = NewsStatus.DRAFT_GENERATED
+        message = "تمت إعادة الخبر للصحفي للمراجعة."
+
+    article.reviewed_by = current_user.full_name_ar
+    article.reviewed_at = datetime.utcnow()
 
     db.add(
         EditorDecision(
             article_id=article.id,
             editor_name=current_user.full_name_ar,
-            decision="process:apply_draft",
-            reason=f"work_id:{work_id}",
-            edited_title=draft.title,
-            edited_body=draft.body,
+            decision=f"chief:{payload.decision}",
+            reason=payload.notes or "",
+            edited_title=article.title_ar,
+            edited_body=article.body_html,
         )
     )
-    await article_index_service.upsert_article(db, article)
     await db.commit()
-    return {"article_id": article.id, "work_id": work_id, "applied": True, "draft": _draft_to_dict(draft)}
+    return {
+        "article_id": article.id,
+        "status": article.status.value if article.status else None,
+        "decision": payload.decision,
+        "message": message,
+    }
 
 
 @router.post("/workspace/drafts/{work_id}/archive")
@@ -1606,16 +1893,7 @@ async def apply_draft(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_roles(
-        current_user,
-        {
-            UserRole.director,
-            UserRole.editor_chief,
-            UserRole.journalist,
-            UserRole.social_media,
-            UserRole.print_editor,
-        },
-    )
+    _require_roles(current_user, AUTHOR_ROLES)
     article_result = await db.execute(select(Article).where(Article.id == article_id))
     article = article_result.scalar_one_or_none()
     if not article:
@@ -1630,31 +1908,20 @@ async def apply_draft(
     draft = draft_result.scalar_one_or_none()
     if not draft:
         raise HTTPException(404, "Draft not found")
-    if draft.status != "draft":
-        raise HTTPException(409, "Draft already applied or archived")
+    if draft.status not in {"draft", "applied"}:
+        raise HTTPException(409, "Draft already archived")
 
-    if draft.title:
-        article.title_ar = draft.title
-    if draft.body:
-        article.body_html = smart_editor_service.sanitize_html(draft.body)
-    draft.status = "applied"
-    draft.applied_by = current_user.full_name_ar
-    draft.applied_at = datetime.utcnow()
-    draft.updated_by = current_user.full_name_ar
-
-    db.add(
-        EditorDecision(
-            article_id=article_id,
-            editor_name=current_user.full_name_ar,
-            decision="process:apply_draft",
-            reason=f"draft_id:{draft_id}",
-            edited_title=draft.title,
-            edited_body=draft.body,
-        )
+    submission = await _submit_draft_for_chief_approval(
+        db=db,
+        draft=draft,
+        current_user=current_user,
     )
-    await article_index_service.upsert_article(db, article)
-    await db.commit()
-    return {"article_id": article_id, "draft_id": draft_id, "applied": True, "draft": _draft_to_dict(draft)}
+    return {
+        **submission,
+        "article_id": article_id,
+        "draft_id": draft_id,
+        "submitted_for_chief_approval": True,
+    }
 
 
 @router.get("/{article_id}/decisions", response_model=list[EditorDecisionResponse])

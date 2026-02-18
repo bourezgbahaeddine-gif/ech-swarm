@@ -9,11 +9,11 @@ export default function SeoServicesPage() {
             <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-6 space-y-4">
                 <div className="flex items-center gap-2">
                     <TrendingUp className="w-5 h-5 text-emerald-400" />
-                    <h1 className="text-xl font-semibold text-white">تم دمج خدمات SEO داخل المحرر الذكي</h1>
+                    <h1 className="text-xl font-semibold text-white">خدمات SEO أصبحت داخل المحرر الذكي</h1>
                 </div>
                 <p className="text-sm text-gray-300">
-                    كل أدوات SEO أصبحت مدمجة مباشرة في سير التحرير داخل المحرر الذكي:
-                    عنوان SEO، الوصف التعريفي، الكلمات المفتاحية، الوسوم، وتقييم الجاهزية للنشر.
+                    لم تعد صفحة SEO مستقلة. جميع أدوات SEO تعمل الآن من داخل المحرر الذكي:
+                    عنوان SEO، الوصف التعريفي، الوسوم، الكلمات المفتاحية، وتقييم الجاهزية.
                 </p>
                 <Link
                     href="/workspace-drafts"

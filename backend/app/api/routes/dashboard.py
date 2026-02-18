@@ -366,6 +366,62 @@ async def dashboard_notifications(
             }
         )
 
+    if current_user.role in {UserRole.director, UserRole.editor_chief}:
+        chief_rows = await db.execute(
+            select(Article)
+            .where(
+                and_(
+                    Article.status.in_(
+                        [
+                            NewsStatus.READY_FOR_CHIEF_APPROVAL,
+                            NewsStatus.APPROVAL_REQUEST_WITH_RESERVATIONS,
+                        ]
+                    ),
+                    Article.updated_at >= now - timedelta(hours=24),
+                )
+            )
+            .order_by(Article.updated_at.desc())
+            .limit(12)
+        )
+        for article in chief_rows.scalars().all():
+            with_reservations = article.status == NewsStatus.APPROVAL_REQUEST_WITH_RESERVATIONS
+            items.append(
+                {
+                    "id": f"chief-review-{article.id}",
+                    "type": "chief_review",
+                    "title": article.title_ar or article.original_title,
+                    "message": "طلب اعتماد مع تحفظات من وكيل السياسة." if with_reservations else "خبر جاهز لاعتماد رئيس التحرير.",
+                    "article_id": article.id,
+                    "created_at": article.updated_at or article.crawled_at,
+                    "severity": "high" if with_reservations else "medium",
+                }
+            )
+
+    if current_user.role in {UserRole.social_media, UserRole.director, UserRole.editor_chief}:
+        social_rows = await db.execute(
+            select(Article)
+            .where(
+                and_(
+                    Article.status.in_([NewsStatus.READY_FOR_MANUAL_PUBLISH, NewsStatus.PUBLISHED]),
+                    Article.updated_at >= now - timedelta(hours=24),
+                )
+            )
+            .order_by(Article.updated_at.desc())
+            .limit(10)
+        )
+        for article in social_rows.scalars().all():
+            items.append(
+                {
+                    "id": f"social-ready-{article.id}",
+                    "type": "social_ready",
+                    "title": article.title_ar or article.original_title,
+                    "message": "الخبر معتمد ويمكن نسخ نسخ السوشيال الجاهزة.",
+                    "article_id": article.id,
+                    "created_at": article.updated_at or article.crawled_at,
+                    "severity": "medium",
+                }
+            )
+
     trend_payload = await cache_service.get_json("trends:last:DZ:all")
     for idx, alert in enumerate((trend_payload or {}).get("alerts", [])[:8]):
         items.append(

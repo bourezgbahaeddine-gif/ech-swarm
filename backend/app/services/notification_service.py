@@ -163,5 +163,30 @@ class NotificationService:
         )
         await self.send_slack(message)
 
+    async def send_policy_gate_alert(
+        self,
+        *,
+        article_id: int,
+        title: str,
+        decision: str,
+        reasons: list[str] | None = None,
+    ) -> None:
+        """
+        Notify chief editor queue after editorial policy gate result.
+        Telegram remains breaking-only, so this alert goes to Slack.
+        """
+        safe_title = self._clean_text(title, 300)
+        reasons = reasons or []
+        compact_reasons = " | ".join(self._clean_text(r, 120) for r in reasons[:3]) if reasons else "-"
+        label = "مقبول من وكيل السياسة" if decision == "approved" else "تحفظات من وكيل السياسة"
+        message = (
+            f"🧭 <b>طلب اعتماد لرئيس التحرير</b>\n\n"
+            f"#{article_id} — <b>{safe_title}</b>\n"
+            f"الحالة: {label}\n"
+            f"التحفظات: {compact_reasons}\n\n"
+            f"الإجراء: افتح طابور اعتماد رئيس التحرير."
+        )
+        await self.send_slack(message)
+
 
 notification_service = NotificationService()

@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 
 import { editorialApi } from '@/lib/api';
+import { constitutionApi } from '@/lib/constitution-api';
 import { cn, formatRelativeTime, truncate } from '@/lib/utils';
 
 type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
@@ -48,7 +49,7 @@ const ACTION_HELP: Record<ActionId, { title: string; description: string }> = {
     social: { title: 'زر السوشيال', description: 'ينشئ نسخ Facebook وX وPush والتنبيه العاجل.' },
     quality: { title: 'زر الجودة', description: 'يقيم وضوح وبنية وحياد النص مع توصيات عملية.' },
     publish_gate: { title: 'زر بوابة النشر', description: 'يفحص الجاهزية النهائية ويمنع النشر عند وجود موانع.' },
-    apply: { title: 'زر الاعتماد', description: 'يعتمد المسودة على المقال بعد المراجعة البشرية.' },
+    apply: { title: 'زر إرسال الاعتماد', description: 'يرسل النسخة النهائية إلى رئيس التحرير بعد فحص وكيل السياسة التحريرية.' },
     save: { title: 'زر الحفظ', description: 'يحفظ التعديلات فورياً ويحدّث النسخ.' },
 };
 
@@ -145,9 +146,14 @@ export default function WorkspaceDraftsPage() {
         queryFn: () => editorialApi.draftVersions(workId!),
         enabled: !!workId,
     });
+    const { data: constitutionTipsData } = useQuery({
+        queryKey: ['smart-editor-constitution-tips'],
+        queryFn: () => constitutionApi.tips(),
+    });
 
     const context = contextData?.data;
     const versions = versionsData?.data || [];
+    const constitutionTips = constitutionTipsData?.data?.tips || [];
 
     const editor = useEditor({
         extensions: [StarterKit, Highlight, Link.configure({ openOnClick: false }), Placeholder.configure({ placeholder: 'ابدأ كتابة الخبر هنا...' })],
@@ -221,7 +227,18 @@ export default function WorkspaceDraftsPage() {
     const runReadiness = useMutation({ mutationFn: () => editorialApi.publishReadiness(workId!), onSuccess: (r) => { setReadiness(r.data); setActiveTab('quality'); } });
     const runDiff = useMutation({ mutationFn: () => editorialApi.draftDiff(workId!, cmpFrom!, cmpTo!), onSuccess: (r) => setDiffView(r.data?.diff || '') });
     const restoreVersion = useMutation({ mutationFn: (v: number) => editorialApi.restoreWorkspaceDraftVersion(workId!, v), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['smart-editor-context', workId] }); queryClient.invalidateQueries({ queryKey: ['smart-editor-versions', workId] }); } });
-    const applyToArticle = useMutation({ mutationFn: () => editorialApi.applyWorkspaceDraft(workId!), onSuccess: () => setOk('تم اعتماد المسودة على المقال.') });
+    const applyToArticle = useMutation({
+        mutationFn: () => editorialApi.submitWorkspaceDraftForChief(workId!),
+        onSuccess: (res) => {
+            const data = res.data || {};
+            if (data?.status_message) {
+                setOk(`تم الإرسال: ${data.status_message}`);
+            } else {
+                setOk('تم إرسال النسخة إلى رئيس التحرير.');
+            }
+            queryClient.invalidateQueries({ queryKey: ['smart-editor-context', workId] });
+        },
+    });
 
     const saveNode = useMemo(() => {
         if (saveState === 'saved') return <span className="text-emerald-300 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" />محفوظ</span>;
@@ -288,7 +305,7 @@ export default function WorkspaceDraftsPage() {
                     <button onClick={() => runWithGuide('social', () => runSocial.mutate())} className="px-3 py-2 rounded-xl bg-sky-500/20 border border-sky-500/30 text-sky-200 text-xs">سوشيال</button>
                     <button onClick={() => runWithGuide('quality', () => runQuality.mutate())} className="px-3 py-2 rounded-xl bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs">جودة</button>
                     <button onClick={() => runWithGuide('publish_gate', () => runReadiness.mutate())} className="px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-200 text-xs">بوابة النشر</button>
-                    <button onClick={() => runWithGuide('apply', () => applyToArticle.mutate())} className="px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs">اعتماد</button>
+                    <button onClick={() => runWithGuide('apply', () => applyToArticle.mutate())} className="px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs">إرسال لاعتماد رئيس التحرير</button>
                     <button onClick={() => runWithGuide('save', () => { setSaveState('saving'); autosave.mutate(); })} className="px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs flex items-center gap-2"><Save className="w-4 h-4" />حفظ</button>
                 </div>
 
@@ -432,6 +449,12 @@ export default function WorkspaceDraftsPage() {
                             </div>
                             <pre className="max-h-36 overflow-auto text-[11px] text-gray-200 whitespace-pre-wrap mt-2" dir="ltr">{diffView || 'لا يوجد فرق معروض بعد.'}</pre>
                             <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-xs text-gray-300"><p className="text-gray-400 mb-1">الخط الزمني المرتبط</p>{(context?.story_context?.timeline || []).slice(0, 5).map((item: any) => <p key={item.id}>- {cleanText(item.title || 'بدون عنوان')}</p>)}</div>
+                            <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-2 text-xs text-cyan-100 space-y-1">
+                                <p className="text-cyan-200">تلميحات الدستور أثناء التحرير</p>
+                                {(constitutionTips || []).slice(0, 4).map((tip: string, idx: number) => (
+                                    <p key={`${tip}-${idx}`}>- {cleanText(tip)}</p>
+                                ))}
+                            </div>
                         </Panel>
                     )}
                 </aside>

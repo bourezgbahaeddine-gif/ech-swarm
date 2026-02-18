@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Bell, Search, LogOut, User, Shield, FileText, Sparkles, Loader2 } from 'lucide-react';
+import { Bell, Search, LogOut, User, Shield, FileText, Sparkles, Loader2, Clipboard, X } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { dashboardApi, type DashboardNotification } from '@/lib/api';
 import { journalistServicesApi } from '@/lib/journalist-services-api';
@@ -11,9 +11,12 @@ const roleLabels: Record<string, string> = {
     director: 'المدير العام',
     editor_chief: 'رئيس التحرير',
     journalist: 'صحفي',
-    social_media: 'سوشيال ميديا',
-    print_editor: 'محرر الجريدة',
+    social_media: 'السوشيال ميديا',
+    print_editor: 'محرر النسخة المطبوعة',
+    fact_checker: 'مدقق حقائق',
 };
+
+const QUICK_HELP_KEY = 'quick_tasks_help_seen_v2';
 
 function cleanServiceOutput(value: string): string {
     return (value || '')
@@ -31,6 +34,8 @@ export default function TopBar() {
     const [showMenu, setShowMenu] = useState(false);
     const [showNotifications, setShowNotifications] = useState(false);
     const [showQuickTools, setShowQuickTools] = useState(false);
+    const role = (user?.role || '').toLowerCase();
+    const canUseQuickTasks = ['director', 'editor_chief', 'journalist', 'print_editor', 'fact_checker'].includes(role);
 
     const { data: notificationsData, isLoading: notificationsLoading } = useQuery({
         queryKey: ['dashboard-notifications'],
@@ -49,20 +54,22 @@ export default function TopBar() {
                             type="text"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            placeholder="ابحث عن خبر أو مصدر أو كلمة مفتاحية..."
+                            placeholder="ابحث عن خبر أو كلمة مفتاحية..."
                             className="w-full h-10 pr-10 pl-4 rounded-xl bg-white/5 border border-white/5 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-emerald-500/40 focus:ring-1 focus:ring-emerald-500/20 transition-all duration-200"
                             dir="rtl"
                         />
                     </div>
 
                     <div className="flex items-center gap-2 mr-4">
-                        <button
-                            onClick={() => setShowQuickTools(true)}
-                            className="h-10 px-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20 text-xs flex items-center gap-1.5"
-                        >
-                            <Sparkles className="w-4 h-4" />
-                            مهام سريعة
-                        </button>
+                        {canUseQuickTasks && (
+                            <button
+                                onClick={() => setShowQuickTools(true)}
+                                className="h-10 px-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20 text-xs flex items-center gap-1.5"
+                            >
+                                <Sparkles className="w-4 h-4" />
+                                مهام سريعة
+                            </button>
+                        )}
 
                         <div className="relative">
                             <button
@@ -77,7 +84,7 @@ export default function TopBar() {
                                 )}
                             </button>
                             {showNotifications && (
-                                <div className="absolute left-0 top-full mt-2 w-[340px] rounded-xl bg-gray-900 border border-white/10 shadow-xl overflow-hidden z-50">
+                                <div className="absolute left-0 top-full mt-2 w-[360px] rounded-xl bg-gray-900 border border-white/10 shadow-xl overflow-hidden z-50">
                                     <div className="px-3 py-2 border-b border-white/10 text-sm text-white">التنبيهات</div>
                                     <div className="max-h-[360px] overflow-auto">
                                         {notificationsLoading ? (
@@ -147,7 +154,7 @@ export default function TopBar() {
             <div className="px-6 py-2 border-t border-white/5 bg-white/[0.02]">
                 <div className="flex items-center gap-2 text-xs text-gray-300">
                     <FileText className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>الدستور التحريري يراقب اعتماد النسخة النهائية تلقائياً.</span>
+                    <span>الدستور التحريري يعمل كحارس قبل اعتماد النسخة النهائية.</span>
                     <a href="/constitution" className="text-emerald-300 hover:text-emerald-200 underline">
                         فتح الدستور
                     </a>
@@ -161,11 +168,25 @@ export default function TopBar() {
 
 function QuickTasksDrawer({ onClose }: { onClose: () => void }) {
     const [text, setText] = useState('');
+    const [reference, setReference] = useState('');
     const [platform, setPlatform] = useState('facebook');
     const [result, setResult] = useState('');
     const [busy, setBusy] = useState(false);
+    const [showHelp, setShowHelp] = useState(() => {
+        if (typeof window === 'undefined') return false;
+        return !window.localStorage.getItem(QUICK_HELP_KEY);
+    });
 
-    async function run(task: 'proofread' | 'inverted' | 'social' | 'metadata' | 'extract') {
+    const quickTips = useMemo(
+        () => [
+            'هذه الخانة للمهام السريعة خارج المحرر الذكي.',
+            'استخدمها للتدقيق، التلخيص، والتحقق الأولي قبل فتح خبر كامل.',
+            'كل نتيجة هنا مساعدة أولية ويجب مراجعتها بشرياً قبل الاعتماد.',
+        ],
+        [],
+    );
+
+    async function run(task: 'proofread' | 'inverted' | 'social' | 'metadata' | 'extract' | 'consistency') {
         setBusy(true);
         try {
             let raw = '';
@@ -181,6 +202,9 @@ function QuickTasksDrawer({ onClose }: { onClose: () => void }) {
             } else if (task === 'metadata') {
                 const res = await journalistServicesApi.metadata(text, 'ar');
                 raw = res?.data?.result || '';
+            } else if (task === 'consistency') {
+                const res = await journalistServicesApi.consistency(text, reference);
+                raw = res?.data?.result || '';
             } else {
                 const res = await journalistServicesApi.extract(text);
                 raw = res?.data?.result || '';
@@ -191,27 +215,52 @@ function QuickTasksDrawer({ onClose }: { onClose: () => void }) {
         }
     }
 
+    function closeHelp() {
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(QUICK_HELP_KEY, '1');
+        }
+        setShowHelp(false);
+    }
+
     return (
         <div className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm flex justify-end">
-            <div className="w-full max-w-xl h-full bg-gray-950 border-l border-white/10 p-4 space-y-3" dir="rtl">
+            <div className="w-full max-w-2xl h-full bg-gray-950 border-l border-white/10 p-4 space-y-3" dir="rtl">
                 <div className="flex items-center justify-between">
                     <h2 className="text-white font-semibold">الخانة الجانبية للمهام السريعة</h2>
                     <button onClick={onClose} className="px-2 py-1 rounded bg-white/10 text-gray-300 text-xs">إغلاق</button>
                 </div>
-                <p className="text-xs text-gray-400">
-                    للاستخدام السريع خارج المحرر الذكي: تدقيق لغوي، إعادة بناء بالهرم المقلوب، نقاط مركزة، SEO، وصياغات سوشيال.
-                </p>
+
+                {showHelp && (
+                    <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3 text-xs text-cyan-100 space-y-1 relative">
+                        <button onClick={closeHelp} className="absolute left-2 top-2 text-cyan-200 hover:text-white">
+                            <X className="w-3.5 h-3.5" />
+                        </button>
+                        {quickTips.map((tip) => (
+                            <p key={tip}>- {tip}</p>
+                        ))}
+                    </div>
+                )}
+
                 <textarea
                     value={text}
                     onChange={(e) => setText(e.target.value)}
                     className="w-full min-h-[180px] p-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm"
                     placeholder="ألصق النص هنا..."
                 />
+
+                <textarea
+                    value={reference}
+                    onChange={(e) => setReference(e.target.value)}
+                    className="w-full min-h-[90px] p-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm"
+                    placeholder="مرجع التحقق (اختياري)"
+                />
+
                 <div className="flex flex-wrap gap-2">
                     <button onClick={() => run('proofread')} className="px-3 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 text-xs">تدقيق لغوي</button>
                     <button onClick={() => run('inverted')} className="px-3 py-2 rounded-xl bg-blue-500/20 border border-blue-500/30 text-blue-200 text-xs">هرم مقلوب</button>
                     <button onClick={() => run('extract')} className="px-3 py-2 rounded-xl bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs">استخراج نقاط</button>
-                    <button onClick={() => run('metadata')} className="px-3 py-2 rounded-xl bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-200 text-xs">بيانات SEO</button>
+                    <button onClick={() => run('consistency')} className="px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-200 text-xs">تحقق من الاتساق</button>
+                    <button onClick={() => run('metadata')} className="px-3 py-2 rounded-xl bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-200 text-xs">SEO سريع</button>
                     <select
                         value={platform}
                         onChange={(e) => setPlatform(e.target.value)}
@@ -223,12 +272,22 @@ function QuickTasksDrawer({ onClose }: { onClose: () => void }) {
                     </select>
                     <button onClick={() => run('social')} className="px-3 py-2 rounded-xl bg-cyan-500/20 border border-cyan-500/30 text-cyan-200 text-xs">نسخ سوشيال</button>
                 </div>
+
                 <div className="rounded-xl border border-white/10 bg-black/20 p-3 min-h-[220px]">
-                    <p className="text-xs text-gray-400 mb-1">النتيجة</p>
+                    <div className="flex items-center justify-between mb-1">
+                        <p className="text-xs text-gray-400">النتيجة</p>
+                        <button
+                            onClick={() => navigator.clipboard.writeText(result || '')}
+                            className="text-xs text-emerald-300 hover:text-emerald-200 inline-flex items-center gap-1"
+                        >
+                            <Clipboard className="w-3.5 h-3.5" />
+                            نسخ
+                        </button>
+                    </div>
                     {busy ? (
                         <p className="text-xs text-gray-500">جاري التنفيذ...</p>
                     ) : (
-                        <pre className="whitespace-pre-wrap text-sm text-gray-200">{result || '—'}</pre>
+                        <pre className="whitespace-pre-wrap text-sm text-gray-200">{result || 'لا توجد نتيجة بعد.'}</pre>
                     )}
                 </div>
             </div>

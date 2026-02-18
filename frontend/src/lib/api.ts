@@ -209,6 +209,43 @@ export interface SmartEditorContext {
     };
 }
 
+export interface ChiefPendingItem {
+    id: number;
+    title_ar: string | null;
+    original_title: string;
+    summary: string | null;
+    source_name: string | null;
+    importance_score: number;
+    is_breaking: boolean;
+    category: string | null;
+    status: string | null;
+    updated_at: string;
+    work_id: string | null;
+    policy: {
+        passed: boolean;
+        score: number | null;
+        decision: string | null;
+        reasons: string[];
+        required_fixes: string[];
+        created_at: string | null;
+    };
+}
+
+export interface SocialApprovedItem {
+    article_id: number;
+    title: string;
+    status: string | null;
+    source_name: string | null;
+    updated_at: string;
+    variants: {
+        facebook?: string;
+        x?: string;
+        push?: string;
+        summary_120?: string;
+        breaking_alert?: string;
+    };
+}
+
 export const newsApi = {
     list: (params?: {
         page?: number; per_page?: number;
@@ -276,6 +313,8 @@ export const editorialApi = {
         api.get<WorkspaceDraft>(`/editorial/workspace/drafts/${workId}`),
     applyWorkspaceDraft: (workId: string) =>
         api.post(`/editorial/workspace/drafts/${workId}/apply`),
+    submitWorkspaceDraftForChief: (workId: string) =>
+        api.post(`/editorial/workspace/drafts/${workId}/submit-for-chief-approval`),
     archiveWorkspaceDraft: (workId: string) =>
         api.post(`/editorial/workspace/drafts/${workId}/archive`),
     regenerateWorkspaceDraft: (workId: string) =>
@@ -317,6 +356,14 @@ export const editorialApi = {
         api.post(`/editorial/workspace/drafts/${workId}/quality/score`),
     publishReadiness: (workId: string) =>
         api.get(`/editorial/workspace/drafts/${workId}/publish-readiness`),
+    chiefPending: (limit = 100) =>
+        api.get<ChiefPendingItem[]>(`/editorial/chief/pending`, { params: { limit } }),
+    chiefFinalDecision: (articleId: number, data: { decision: 'approve' | 'return_for_revision'; notes?: string }) =>
+        api.post(`/editorial/${articleId}/chief/final-decision`, data),
+    socialApprovedFeed: (limit = 50) =>
+        api.get<SocialApprovedItem[]>(`/editorial/social/approved-feed`, { params: { limit } }),
+    socialVariantsForArticle: (articleId: number) =>
+        api.get(`/editorial/${articleId}/social/variants`),
     decisions: (articleId: number) => api.get(`/editorial/${articleId}/decisions`),
     generate: (articleId: number) => api.post(`/editorial/${articleId}/generate`),
 };

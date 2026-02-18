@@ -477,5 +477,112 @@ facebook, x, push, summary_120, breaking_alert
             "source_excerpt": source_text[:280],
         }
 
+    async def editorial_policy_review(
+        self,
+        *,
+        title: str,
+        body_html: str,
+        source_text: str,
+        readability_report: dict[str, Any] | None = None,
+        quality_report: dict[str, Any] | None = None,
+        fact_report: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        body_text = self.html_to_text(body_html or "")
+        reasons: list[str] = []
+        required_fixes: list[str] = []
+
+        if not body_text.strip():
+            reasons.append("المتن فارغ أو غير صالح للتحرير.")
+            required_fixes.append("أعد تحرير متن الخبر قبل طلب الاعتماد.")
+        if self._contains_template_noise(body_text):
+            reasons.append("تم رصد نصوص قالبية أو تعليقات جانبية داخل المتن.")
+            required_fixes.append("احذف القوالب والتعليقات الجانبية ثم أعد الإرسال.")
+
+        fact_blockers = (fact_report or {}).get("blocking_reasons") or []
+        if fact_blockers:
+            reasons.append("تقرير التحقق يحتوي على موانع يجب معالجتها.")
+            required_fixes.append("عالج ادعاءات التحقق منخفضة الثقة قبل الاعتماد.")
+
+        quality_blockers = (quality_report or {}).get("blocking_reasons") or []
+        if quality_blockers:
+            reasons.append("تقرير الجودة يشير إلى مشاكل تحريرية مؤثرة.")
+            required_fixes.extend((quality_report or {}).get("actionable_fixes") or [])
+
+        readability_blockers = (readability_report or {}).get("blocking_reasons") or []
+        if readability_blockers:
+            reasons.append("قابلية القراءة غير مطابقة لمعيار التحرير.")
+            required_fixes.extend((readability_report or {}).get("actionable_fixes") or [])
+
+        baseline_decision = "approved" if not reasons else "reservations"
+        baseline_confidence = 0.86 if baseline_decision == "approved" else 0.72
+
+        prompt = f"""
+أنت وكيل السياسة التحريرية للشروق.
+أعد JSON فقط بالمفاتيح:
+decision, reasons, required_fixes, confidence
+
+شروط القرار:
+- decision = approved أو reservations
+- إذا النص يحتوي ادعاءات غير محسومة أو صياغة غير مهنية: reservations
+- ممنوع أي شروحات خارج JSON
+
+العنوان:
+{title}
+
+المتن:
+{body_text[:8000]}
+
+السياق المصدر:
+{source_text[:2500]}
+
+نتيجة أولية داخلية:
+decision={baseline_decision}
+reasons={reasons}
+required_fixes={required_fixes}
+"""
+        ai = self._get_ai_service()
+        data: dict[str, Any] = {}
+        if ai:
+            try:
+                raw = await ai.generate_json(prompt)
+                if isinstance(raw, dict):
+                    data = raw
+            except Exception:
+                data = {}
+
+        decision = str(data.get("decision") or baseline_decision).strip().lower()
+        if decision not in {"approved", "reservations"}:
+            decision = baseline_decision
+
+        ai_reasons = data.get("reasons") if isinstance(data.get("reasons"), list) else []
+        ai_fixes = data.get("required_fixes") if isinstance(data.get("required_fixes"), list) else []
+        merged_reasons = [self._strip_side_comments(str(x).strip()) for x in [*reasons, *ai_reasons] if str(x).strip()]
+        merged_fixes = [self._strip_side_comments(str(x).strip()) for x in [*required_fixes, *ai_fixes] if str(x).strip()]
+        merged_reasons = list(dict.fromkeys(merged_reasons))[:10]
+        merged_fixes = list(dict.fromkeys(merged_fixes))[:10]
+
+        confidence_raw = data.get("confidence", baseline_confidence)
+        try:
+            confidence = float(confidence_raw)
+        except Exception:
+            confidence = baseline_confidence
+        confidence = max(0.0, min(1.0, confidence))
+
+        if merged_reasons and decision == "approved":
+            # Keep deterministic safety: any blocking reason means reservations.
+            decision = "reservations"
+
+        return {
+            "stage": "EDITORIAL_POLICY",
+            "decision": decision,
+            "passed": decision == "approved",
+            "confidence": round(confidence, 3),
+            "score": int(round(confidence * 100)),
+            "reasons": merged_reasons,
+            "required_fixes": merged_fixes,
+            "blocking_reasons": merged_reasons if decision == "reservations" else [],
+            "actionable_fixes": merged_fixes,
+        }
+
 
 smart_editor_service = SmartEditorService()

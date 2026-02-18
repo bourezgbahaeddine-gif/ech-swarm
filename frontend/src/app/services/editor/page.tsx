@@ -12,16 +12,25 @@ export default function EditorServicesPage() {
                     <h1 className="text-xl font-semibold text-white">تم نقل خدمات التحرير إلى المهام السريعة</h1>
                 </div>
                 <p className="text-sm text-gray-300">
-                    خدمات التحرير الجانبية أصبحت ضمن <span className="text-emerald-300">زر «مهام سريعة»</span> في الشريط العلوي
-                    لتعمل مباشرة أثناء متابعة الأخبار خارج المحرر الذكي.
+                    تم إيقاف صفحة خدمات التحرير القديمة. استخدم خانة
+                    <span className="text-emerald-300"> «مهام سريعة» </span>
+                    من الشريط العلوي أثناء متابعة الأخبار خارج المحرر الذكي.
                 </p>
-                <Link
-                    href="/news"
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/30"
-                >
-                    <ArrowLeft className="w-4 h-4" />
-                    العودة إلى الأخبار
-                </Link>
+                <div className="flex gap-2">
+                    <Link
+                        href="/news"
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/30"
+                    >
+                        <ArrowLeft className="w-4 h-4" />
+                        العودة إلى الأخبار
+                    </Link>
+                    <Link
+                        href="/workspace-drafts"
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-gray-200 hover:text-white"
+                    >
+                        فتح المحرر الذكي
+                    </Link>
+                </div>
             </div>
         </div>
     );

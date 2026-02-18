@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { isAxiosError } from 'axios';
 import { newsApi, dashboardApi, editorialApi, type ArticleBrief } from '@/lib/api';
 import { cn, formatRelativeTime, getStatusColor, getCategoryLabel, isFreshBreaking, truncate } from '@/lib/utils';
 import { useAuth } from '@/lib/auth';
@@ -10,8 +11,18 @@ import {
     Newspaper, Search, Zap, ExternalLink,
     Clock, ChevronLeft, ChevronRight, Star,
     RefreshCw,
-    CheckCircle, XCircle, RotateCw,
+    CheckCircle, XCircle, RotateCw, Copy,
 } from 'lucide-react';
+
+function getApiErrorMessage(error: unknown, fallback: string): string {
+    if (isAxiosError(error)) {
+        const detail = error.response?.data?.detail;
+        if (typeof detail === 'string' && detail.trim()) {
+            return detail;
+        }
+    }
+    return fallback;
+}
 
 export default function NewsPage() {
     const queryClient = useQueryClient();
@@ -21,7 +32,7 @@ export default function NewsPage() {
     const [page, setPage] = useState(1);
     const [status, setStatus] = useState<string>('');
     const [category, setCategory] = useState<string>('');
-    const [search, setSearch] = useState(searchParams.get('q') || '');
+    const [search, setSearch] = useState(() => searchParams.get('q') || '');
     const [debouncedSearch, setDebouncedSearch] = useState('');
     const [isBreaking, setIsBreaking] = useState<boolean | null>(null);
     const [selectedArticle, setSelectedArticle] = useState<number | null>(null);
@@ -40,14 +51,6 @@ export default function NewsPage() {
     const [liveRefreshUntil, setLiveRefreshUntil] = useState<number>(0);
     const editorName = user?.full_name_ar || 'رئيس التحرير';
     const kickLiveRefresh = (seconds = 30) => setLiveRefreshUntil(Date.now() + seconds * 1000);
-
-    useEffect(() => {
-        const qp = searchParams.get('q') || '';
-        if (qp !== search) {
-            setSearch(qp);
-            setPage(1);
-        }
-    }, [searchParams, search]);
 
     useEffect(() => {
         const t = setTimeout(() => setDebouncedSearch(search.trim()), 400);
@@ -85,7 +88,7 @@ export default function NewsPage() {
             setErrorMessage(null);
             setInfoMessage('تم تشغيل التحديث الشامل (كشاف + موجه) وجلب آخر العناصر');
         },
-        onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'فشل تحديث الأخبار'),
+        onError: (err: unknown) => setErrorMessage(getApiErrorMessage(err, 'فشل تحديث الأخبار')),
     });
 
     const decideMutation = useMutation({
@@ -112,7 +115,7 @@ export default function NewsPage() {
             setSelectedArticle(null);
             setRejectReason('');
         },
-        onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'تعذر تنفيذ القرار'),
+        onError: (err: unknown) => setErrorMessage(getApiErrorMessage(err, 'تعذر تنفيذ القرار')),
     });
 
     const processMutation = useMutation({
@@ -132,7 +135,7 @@ export default function NewsPage() {
             });
             queryClient.invalidateQueries({ queryKey: ['news'] });
         },
-        onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'تعذرت معالجة الخبر'),
+        onError: (err: unknown) => setErrorMessage(getApiErrorMessage(err, 'تعذرت معالجة الخبر')),
     });
 
     const saveDraftMutation = useMutation({
@@ -168,7 +171,7 @@ export default function NewsPage() {
             } : prev);
             setErrorMessage(null);
         },
-        onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'تعذر حفظ المسودة'),
+        onError: (err: unknown) => setErrorMessage(getApiErrorMessage(err, 'تعذر حفظ المسودة')),
     });
 
     const applyDraftMutation = useMutation({
@@ -179,14 +182,40 @@ export default function NewsPage() {
             setDraftEditor(null);
             setErrorMessage(null);
         },
-        onError: (err: any) => setErrorMessage(err?.response?.data?.detail || 'تعذر تطبيق المسودة على الخبر'),
+        onError: (err: unknown) => setErrorMessage(getApiErrorMessage(err, 'تعذر تطبيق المسودة على الخبر')),
+    });
+
+    const socialVariantsMutation = useMutation({
+        mutationFn: (articleId: number) => editorialApi.socialVariantsForArticle(articleId),
+        onSuccess: async (res, articleId) => {
+            const variants = res.data?.variants || {};
+            const text = [
+                `Facebook: ${variants.facebook || '-'}`,
+                `X: ${variants.x || '-'}`,
+                `Push: ${variants.push || '-'}`,
+                `Breaking: ${variants.breaking_alert || '-'}`,
+            ].join('\n\n');
+            try {
+                if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                    await navigator.clipboard.writeText(text);
+                    setInfoMessage(`تم نسخ نسخ السوشيال للخبر #${articleId}`);
+                    setErrorMessage(null);
+                    return;
+                }
+            } catch {
+                // Fallback: expose text in info banner.
+            }
+            setInfoMessage(text);
+            setErrorMessage(null);
+        },
+        onError: (err: unknown) => setErrorMessage(getApiErrorMessage(err, 'تعذر جلب نسخ السوشيال')),
     });
 
     const refresh = () => refreshPipeline.mutate();
 
-    const articles = data?.data?.items || [];
+    const articles = useMemo<ArticleBrief[]>(() => data?.data?.items ?? [], [data?.data?.items]);
     const totalPages = data?.data?.pages || 0;
-    const articleIds = useMemo(() => articles.map((a: ArticleBrief) => a.id), [articles]);
+    const articleIds = useMemo(() => articles.map((a) => a.id), [articles]);
 
     const { data: insightsData } = useQuery({
         queryKey: ['news-insights', articleIds.join(',')],
@@ -213,7 +242,7 @@ export default function NewsPage() {
     const visibleArticles = useMemo(() => {
         const seenClusters = new Set<number>();
         const out: ArticleBrief[] = [];
-        for (const article of articles as ArticleBrief[]) {
+        for (const article of articles) {
             const insight = insightsMap.get(article.id);
             const clusterSize = insight?.cluster_size || 0;
             const clusterId = insight?.cluster_id;
@@ -228,7 +257,20 @@ export default function NewsPage() {
         return out;
     }, [articles, insightsMap]);
 
-    const statuses = ['', 'new', 'classified', 'candidate', 'approved_handoff', 'draft_generated', 'approved', 'rejected', 'published'];
+    const statuses = [
+        '',
+        'new',
+        'classified',
+        'candidate',
+        'approved_handoff',
+        'draft_generated',
+        'ready_for_chief_approval',
+        'approval_request_with_reservations',
+        'ready_for_manual_publish',
+        'approved',
+        'rejected',
+        'published',
+    ];
     const categories = ['', 'politics', 'economy', 'sports', 'technology', 'local_algeria', 'international', 'culture', 'society', 'health'];
 
     const categoryColor = (cat?: string | null) => {
@@ -254,6 +296,9 @@ export default function NewsPage() {
             candidate: 'مرشح',
             approved_handoff: 'جاهز للكاتب',
             draft_generated: 'مسودة جاهزة',
+            ready_for_chief_approval: 'بانتظار اعتماد رئيس التحرير',
+            approval_request_with_reservations: 'طلب اعتماد بتحفظات',
+            ready_for_manual_publish: 'جاهز للنشر اليدوي',
             approved: 'مقبول',
             rejected: 'مرفوض',
             published: 'منشور',
@@ -264,8 +309,9 @@ export default function NewsPage() {
 
     const role = (user?.role || '').toLowerCase();
     const canApproveReject = role === 'director' || role === 'editor_chief';
-    const canRewrite = ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'].includes(role);
+    const canRewrite = ['director', 'editor_chief', 'journalist', 'print_editor'].includes(role);
     const canProcess = canRewrite;
+    const isSocialRole = role === 'social_media';
 
     return (
         <div className="space-y-6">
@@ -512,6 +558,18 @@ export default function NewsPage() {
                                         فتح في Workspace
                                     </a>
                                 </div>
+
+                                {isSocialRole && ['ready_for_manual_publish', 'published'].includes(normalizedStatus) && (
+                                    <div className="mt-2">
+                                        <button
+                                            onClick={() => socialVariantsMutation.mutate(article.id)}
+                                            disabled={socialVariantsMutation.isPending}
+                                            className="w-full px-3 py-2 rounded-xl bg-cyan-500/15 border border-cyan-500/30 text-xs text-cyan-200 hover:bg-cyan-500/25 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                                        >
+                                            <Copy className="w-3.5 h-3.5" /> نسخ نسخ السوشيال الجاهزة
+                                        </button>
+                                    </div>
+                                )}
 
                                 <div className="mt-3 grid grid-cols-3 gap-2">
                                     <button

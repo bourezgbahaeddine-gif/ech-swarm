@@ -33,15 +33,11 @@ export default function MultimediaServicesPage() {
     const [ratio, setRatio] = useState('16:9');
     const [result, setResult] = useState('');
     const [busyImage, setBusyImage] = useState(false);
-    const [articleId, setArticleId] = useState('');
-    const [createdBy, setCreatedBy] = useState('');
 
     const [infText, setInfText] = useState('');
     const [infStatus, setInfStatus] = useState<'جاهز' | 'جارٍ التحليل' | 'جارٍ البناء' | 'مكتمل' | 'فشل'>('جاهز');
     const [infData, setInfData] = useState<unknown>(null);
     const [infPrompt, setInfPrompt] = useState('');
-    const [infArticleId, setInfArticleId] = useState('');
-    const [infCreatedBy, setInfCreatedBy] = useState('');
 
     const prompts = useMemo(() => splitPrompts(result), [result]);
 
@@ -49,19 +45,14 @@ export default function MultimediaServicesPage() {
         setBusyImage(true);
         try {
             const editorialBrief = [
-                `هدف الاستخدام: ${goal}`,
-                `الأسلوب البصري: ${style}`,
+                `الهدف التحريري: ${goal}`,
+                `النمط البصري: ${style}`,
                 `نسبة الأبعاد: ${ratio}`,
-                'اشتراطات: صورة صحفية مهنية، واقعية، بلا تضليل، مساحة عنوان آمنة.',
-                `نص الخبر: ${articleText}`,
+                'قيود إلزامية: صورة صحفية واقعية، بدون تضليل، بدون نص داخل الصورة، مساحة عنوان آمنة.',
+                `سياق الخبر:\n${articleText}`,
             ].join('\n');
-            const res = await journalistServicesApi.imagePrompt(
-                editorialBrief,
-                style,
-                articleId ? Number(articleId) : undefined,
-                createdBy || undefined,
-                'ar',
-            );
+
+            const res = await journalistServicesApi.imagePrompt(editorialBrief, style, undefined, undefined, 'ar');
             setResult(cleanResult(res?.data?.result || ''));
         } finally {
             setBusyImage(false);
@@ -71,22 +62,12 @@ export default function MultimediaServicesPage() {
     const generateInfographic = async () => {
         setInfStatus('جارٍ التحليل');
         try {
-            const analyzeRes = await journalistServicesApi.infographicAnalyze(
-                infText,
-                infArticleId ? Number(infArticleId) : undefined,
-                infCreatedBy || undefined,
-                'ar',
-            );
+            const analyzeRes = await journalistServicesApi.infographicAnalyze(infText, undefined, undefined, 'ar');
             const data = analyzeRes?.data?.data || null;
             setInfData(data);
 
             setInfStatus('جارٍ البناء');
-            const promptRes = await journalistServicesApi.infographicPrompt(
-                data || {},
-                infArticleId ? Number(infArticleId) : undefined,
-                infCreatedBy || undefined,
-                'ar',
-            );
+            const promptRes = await journalistServicesApi.infographicPrompt(data || {}, undefined, undefined, 'ar');
             setInfPrompt(cleanResult(promptRes?.data?.result || ''));
             setInfStatus('مكتمل');
         } catch {
@@ -104,9 +85,9 @@ export default function MultimediaServicesPage() {
             <div className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-4 text-sm text-cyan-100">
                 <p className="font-semibold mb-2 flex items-center gap-2">
                     <Sparkles className="w-4 h-4" />
-                    دليل الاستخدام السريع
+                    مولد احترافي لبرومبتات الصور والإنفوغرافيا
                 </p>
-                <p>1) ألصق نص الخبر. 2) اختر الهدف البصري والنمط. 3) ولّد برومبتات جاهزة للإنتاج. 4) راجع قبل النشر.</p>
+                <p>أدخل نص الخبر وحدد الهدف والنمط، وسيتم توليد مخرجات جاهزة لفريق التصميم أو أدوات التوليد البصري.</p>
             </div>
 
             <div className="rounded-2xl border border-white/5 bg-gray-900/40 p-4 space-y-3">
@@ -117,7 +98,7 @@ export default function MultimediaServicesPage() {
 
                 <textarea
                     className="w-full min-h-[180px] p-4 rounded-2xl bg-white/5 border border-white/10 text-white text-sm"
-                    placeholder="ألصق الخبر أو الملخص التحريري هنا..."
+                    placeholder="ألصق نص الخبر أو الملخص التحريري هنا..."
                     value={articleText}
                     onChange={(e) => setArticleText(e.target.value)}
                 />
@@ -125,8 +106,8 @@ export default function MultimediaServicesPage() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                     <select className={selectClass} value={goal} onChange={(e) => setGoal(e.target.value)}>
                         <option>خبر عاجل</option>
-                        <option>تحليل</option>
-                        <option>تقرير اقتصادي</option>
+                        <option>تقرير تحليلي</option>
+                        <option>تغطية اقتصادية</option>
                         <option>ملف استقصائي</option>
                     </select>
                     <select className={selectClass} value={style} onChange={(e) => setStyle(e.target.value)}>
@@ -136,26 +117,11 @@ export default function MultimediaServicesPage() {
                         <option>درامي مضبوط</option>
                     </select>
                     <select className={selectClass} value={ratio} onChange={(e) => setRatio(e.target.value)}>
-                        <option value="16:9">16:9 (موقع)</option>
-                        <option value="4:5">4:5 (فيسبوك)</option>
+                        <option value="16:9">16:9 (الموقع)</option>
+                        <option value="4:5">4:5 (Facebook)</option>
                         <option value="1:1">1:1 (عام)</option>
-                        <option value="9:16">9:16 (ستوري)</option>
+                        <option value="9:16">9:16 (Story)</option>
                     </select>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    <input
-                        className="h-10 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-gray-300"
-                        placeholder="معرّف الخبر (اختياري)"
-                        value={articleId}
-                        onChange={(e) => setArticleId(e.target.value)}
-                    />
-                    <input
-                        className="h-10 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-gray-300"
-                        placeholder="اسم المستخدم (اختياري)"
-                        value={createdBy}
-                        onChange={(e) => setCreatedBy(e.target.value)}
-                    />
                 </div>
 
                 <button className={btnClass} onClick={generateImagePrompts} disabled={busyImage}>
@@ -191,24 +157,10 @@ export default function MultimediaServicesPage() {
 
                 <textarea
                     className="w-full min-h-[160px] p-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm"
-                    placeholder="ألصق الخبر لبناء إنفوغرافيا احترافية..."
+                    placeholder="ألصق الخبر أو البيانات لبناء إنفوغرافيا احترافية..."
                     value={infText}
                     onChange={(e) => setInfText(e.target.value)}
                 />
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    <input
-                        className="h-10 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-gray-300"
-                        placeholder="معرّف الخبر (اختياري)"
-                        value={infArticleId}
-                        onChange={(e) => setInfArticleId(e.target.value)}
-                    />
-                    <input
-                        className="h-10 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-gray-300"
-                        placeholder="اسم المستخدم (اختياري)"
-                        value={infCreatedBy}
-                        onChange={(e) => setInfCreatedBy(e.target.value)}
-                    />
-                </div>
                 <button className={btnClass} onClick={generateInfographic}>تحليل وبناء برومبت الإنفوغرافيا</button>
                 <p className="text-[11px] text-gray-500">الحالة: {infStatus}</p>
 
@@ -228,7 +180,7 @@ export default function MultimediaServicesPage() {
                                 نسخ
                             </button>
                         </div>
-                        <pre className="whitespace-pre-wrap text-sm text-gray-200">{infPrompt || '—'}</pre>
+                        <pre className="whitespace-pre-wrap text-sm text-gray-200">{infPrompt || 'لا يوجد برومبت بعد.'}</pre>
                     </div>
                 </div>
             </div>
