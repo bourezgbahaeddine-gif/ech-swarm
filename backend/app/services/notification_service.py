@@ -117,7 +117,19 @@ class NotificationService:
             "TELEGRAM_CHANNEL_ALERTS",
             settings.telegram_channel_alerts,
         )
-        await self.send_telegram(message, channel=channel_alerts)
+        channel_editors = await settings_service.get_value(
+            "TELEGRAM_CHANNEL_EDITORS",
+            settings.telegram_channel_editors,
+        )
+
+        telegram_targets: list[str] = []
+        if channel_alerts:
+            telegram_targets.append(channel_alerts)
+        if channel_editors and channel_editors not in telegram_targets:
+            telegram_targets.append(channel_editors)
+
+        for channel in telegram_targets:
+            await self.send_telegram(message, channel=channel)
         await self.send_slack(f"خبر عاجل: {title}\n{summary}\nالمصدر: {source}")
 
     async def send_candidate_for_review(

@@ -64,8 +64,149 @@ CATEGORY_KEYWORDS = {
 }
 
 BREAKING_KEYWORDS = [
-    "عاجل", "حصري", "طارئ", "زلزال", "انفجار", "وفاة", "اغتيال",
-    "breaking", "urgent", "séisme", "explosion", "attentat",
+    "\u0639\u0627\u062c\u0644",
+    "\u0647\u0627\u0645",
+    "\u0627\u0644\u0622\u0646",
+    "\u062a\u0646\u0628\u064a\u0647",
+    "\u062e\u0627\u0635",
+    "\u0641\u0648\u0631\u0627",
+    "\u0641\u0648\u0631\u064b\u0627",
+    "\u0627\u0646\u0641\u0631\u0627\u062f",
+    "\u0645\u062a\u0627\u0628\u0639\u0629",
+    "\u0637\u0627\u0631\u0626",
+    "breaking",
+    "urgent",
+    "alerte",
+]
+
+BREAKING_ACTION_TERMS = [
+    "\u0642\u0631\u0627\u0631",
+    "\u0642\u0631\u0627\u0631\u0627\u062a",
+    "\u0642\u0631\u0631",
+    "\u0628\u064a\u0627\u0646",
+    "\u0628\u064a\u0627\u0646 \u0631\u0633\u0645\u064a",
+    "\u0628\u064a\u0627\u0646 \u0647\u0627\u0645",
+    "\u0627\u062c\u062a\u0645\u0627\u0639",
+    "\u0627\u062c\u062a\u0645\u0627\u0639 \u0627\u0644\u062d\u0643\u0648\u0645\u0629",
+    "\u064a\u0639\u0644\u0646",
+    "\u062a\u0639\u0644\u0646",
+    "\u062a\u0639\u0644\u064a\u0645\u0627\u062a",
+    "\u0625\u062c\u0631\u0627\u0621\u0627\u062a",
+    "\u062d\u0631\u0643\u0629 \u0627\u0644\u0648\u0644\u0627\u0629",
+    "\u0646\u0634\u0631\u064a\u0629 \u062e\u0627\u0635\u0629",
+    "\u062a\u0637\u0648\u0631\u0627\u062a",
+    "\u0627\u0644\u0645\u0648\u0642\u0641 \u0627\u0644\u062c\u0632\u0627\u0626\u0631\u064a",
+    "\u0627\u0643\u062a\u0634\u0627\u0641\u0627\u062a",
+    "\u0627\u062a\u0641\u0627\u0642\u064a\u0627\u062a",
+    "\u0646\u062a\u0627\u0626\u062c \u0627\u0644\u0628\u0643\u0627\u0644\u0648\u0631\u064a\u0627",
+    "\u0645\u0633\u0627\u0628\u0642\u0627\u062a \u0627\u0644\u062a\u0648\u0638\u064a\u0641",
+    "\u0633\u0639\u0631 \u0627\u0644\u0635\u0631\u0641",
+    "\u0642\u0631\u0627\u0631\u0627\u062a \u0645\u0627\u0644\u064a\u0629",
+    "\u0627\u0644\u062a\u0636\u062e\u0645",
+]
+
+BREAKING_EVENT_TERMS = [
+    "\u0632\u0644\u0632\u0627\u0644",
+    "\u0627\u0646\u0641\u062c\u0627\u0631",
+    "\u0627\u063a\u062a\u064a\u0627\u0644",
+    "\u062d\u0631\u0627\u0626\u0642",
+    "\u0641\u064a\u0636\u0627\u0646\u0627\u062a",
+    "\u062d\u0627\u062f\u062b \u062e\u0637\u064a\u0631",
+    "\u0627\u0646\u0642\u0637\u0627\u0639 \u0648\u0627\u0633\u0639",
+    "\u0648\u0641\u0627\u0629",
+    "seisme",
+    "explosion",
+    "attentat",
+]
+
+BREAKING_GOVERNANCE_TERMS = [
+    "\u0631\u0626\u0627\u0633\u0629 \u0627\u0644\u062c\u0645\u0647\u0648\u0631\u064a\u0629",
+    "\u0627\u0644\u0631\u0626\u064a\u0633 \u0639\u0628\u062f \u0627\u0644\u0645\u062c\u064a\u062f \u062a\u0628\u0648\u0646",
+    "\u0627\u0644\u0631\u0626\u064a\u0633 \u062a\u0628\u0648\u0646",
+    "\u062a\u0628\u0648\u0646",
+    "\u0642\u0631\u0627\u0631\u0627\u062a \u0633\u064a\u0627\u062f\u064a\u0629",
+    "\u0627\u0644\u0648\u0632\u064a\u0631 \u0627\u0644\u0623\u0648\u0644",
+    "\u0646\u0630\u064a\u0631 \u0627\u0644\u0639\u0631\u0628\u0627\u0648\u064a",
+    "\u0627\u0644\u0648\u0632\u0627\u0631\u0629 \u0627\u0644\u0623\u0648\u0644\u0649",
+    "\u0645\u062c\u0644\u0633 \u0627\u0644\u0648\u0632\u0631\u0627\u0621",
+]
+
+BREAKING_DEFENSE_TERMS = [
+    "\u0648\u0632\u0627\u0631\u0629 \u0627\u0644\u062f\u0641\u0627\u0639 \u0627\u0644\u0648\u0637\u0646\u064a",
+    "\u0627\u0644\u062c\u064a\u0634 \u0627\u0644\u0648\u0637\u0646\u064a \u0627\u0644\u0634\u0639\u0628\u064a",
+    "\u0627\u0644\u0641\u0631\u064a\u0642 \u0623\u0648\u0644 \u0627\u0644\u0633\u0639\u064a\u062f \u0634\u0646\u0642\u0631\u064a\u062d\u0629",
+    "\u0634\u0646\u0642\u0631\u064a\u062d\u0629",
+    "\u0628\u064a\u0627\u0646 \u0648\u0632\u0627\u0631\u0629 \u0627\u0644\u062f\u0641\u0627\u0639",
+]
+
+BREAKING_INTERIOR_TERMS = [
+    "\u0648\u0632\u0627\u0631\u0629 \u0627\u0644\u062f\u0627\u062e\u0644\u064a\u0629 \u0648\u0627\u0644\u062c\u0645\u0627\u0639\u0627\u062a \u0627\u0644\u0645\u062d\u0644\u064a\u0629",
+    "\u0625\u0628\u0631\u0627\u0647\u064a\u0645 \u0645\u0631\u0627\u062f",
+    "\u062d\u0631\u0643\u0629 \u0627\u0644\u0648\u0644\u0627\u0629",
+    "\u0627\u0644\u062d\u0645\u0627\u064a\u0629 \u0627\u0644\u0645\u062f\u0646\u064a\u0629",
+]
+
+BREAKING_WEATHER_TERMS = [
+    "\u0627\u0644\u062f\u064a\u0648\u0627\u0646 \u0627\u0644\u0648\u0637\u0646\u064a \u0644\u0644\u0623\u0631\u0635\u0627\u062f \u0627\u0644\u062c\u0648\u064a\u0629",
+    "\u0646\u0634\u0631\u064a\u0629 \u062e\u0627\u0635\u0629",
+    "\u0623\u062d\u0648\u0627\u0644 \u0627\u0644\u0637\u0642\u0633",
+    "\u0623\u0645\u0637\u0627\u0631 \u063a\u0632\u064a\u0631\u0629",
+    "\u0631\u064a\u0627\u062d \u0642\u0648\u064a\u0629",
+    "\u0639\u0627\u0635\u0641\u0629",
+    "\u0639\u0627\u0635\u0641\u0629 \u062b\u0644\u062c\u064a\u0629",
+    "\u0641\u064a\u0636\u0627\u0646\u0627\u062a",
+]
+
+BREAKING_FOREIGN_AFFAIRS_TERMS = [
+    "\u0648\u0632\u0627\u0631\u0629 \u0627\u0644\u062e\u0627\u0631\u062c\u064a\u0629",
+    "\u0623\u062d\u0645\u062f \u0639\u0637\u0627\u0641",
+    "\u0627\u0644\u0623\u0632\u0645\u0629 \u0627\u0644\u0625\u0642\u0644\u064a\u0645\u064a\u0629",
+    "\u0627\u0644\u0645\u0648\u0642\u0641 \u0627\u0644\u062c\u0632\u0627\u0626\u0631\u064a",
+    "\u0627\u0644\u0633\u0627\u062d\u0644",
+    "\u0627\u0644\u0627\u062a\u062d\u0627\u062f \u0627\u0644\u0625\u0641\u0631\u064a\u0642\u064a",
+]
+
+BREAKING_EDUCATION_TERMS = [
+    "\u0648\u0632\u0627\u0631\u0629 \u0627\u0644\u062a\u0631\u0628\u064a\u0629",
+    "\u0628\u0644\u0639\u0627\u0628\u062f",
+    "\u0646\u062a\u0627\u0626\u062c \u0627\u0644\u0628\u0643\u0627\u0644\u0648\u0631\u064a\u0627",
+    "\u0646\u062a\u0627\u0626\u062c \u0627\u0644\u062a\u0639\u0644\u064a\u0645 \u0627\u0644\u0645\u062a\u0648\u0633\u0637",
+    "\u0645\u0633\u0627\u0628\u0642\u0627\u062a \u0627\u0644\u062a\u0648\u0638\u064a\u0641",
+]
+
+BREAKING_ENERGY_TERMS = [
+    "\u0633\u0648\u0646\u0627\u0637\u0631\u0627\u0643",
+    "\u062d\u0634\u064a\u0634\u064a",
+    "\u0627\u0643\u062a\u0634\u0627\u0641\u0627\u062a \u0646\u0641\u0637\u064a\u0629",
+    "\u0627\u062a\u0641\u0627\u0642\u064a\u0627\u062a \u0637\u0627\u0642\u0629",
+    "\u0635\u0641\u0642\u0629 \u063a\u0627\u0632",
+]
+
+BREAKING_HUMANITARIAN_TERMS = [
+    "\u0627\u0644\u0647\u0644\u0627\u0644 \u0627\u0644\u0623\u062d\u0645\u0631 \u0627\u0644\u062c\u0632\u0627\u0626\u0631\u064a",
+    "\u0627\u0628\u062a\u0633\u0627\u0645 \u062d\u0645\u0644\u0627\u0648\u064a",
+    "\u0645\u0633\u0627\u0639\u062f\u0627\u062a \u0625\u0646\u0633\u0627\u0646\u064a\u0629",
+    "\u0642\u0627\u0641\u0644\u0629 \u0645\u0633\u0627\u0639\u062f\u0627\u062a",
+]
+
+BREAKING_FINANCE_TERMS = [
+    "\u0628\u0646\u0643 \u0627\u0644\u062c\u0632\u0627\u0626\u0631",
+    "\u0633\u0639\u0631 \u0627\u0644\u0635\u0631\u0641",
+    "\u0642\u0631\u0627\u0631\u0627\u062a \u0645\u0627\u0644\u064a\u0629",
+    "\u0627\u0644\u062a\u0636\u062e\u0645",
+    "\u0627\u062d\u062a\u064a\u0627\u0637\u064a \u0627\u0644\u0635\u0631\u0641",
+]
+
+BREAKING_SIGNAL_GROUPS = [
+    BREAKING_GOVERNANCE_TERMS,
+    BREAKING_DEFENSE_TERMS,
+    BREAKING_INTERIOR_TERMS,
+    BREAKING_WEATHER_TERMS,
+    BREAKING_FOREIGN_AFFAIRS_TERMS,
+    BREAKING_EDUCATION_TERMS,
+    BREAKING_ENERGY_TERMS,
+    BREAKING_HUMANITARIAN_TERMS,
+    BREAKING_FINANCE_TERMS,
 ]
 
 NOISE_PATTERNS = [
@@ -244,7 +385,7 @@ class RouterAgent:
         else:
             # Rule-based category was sufficient
             article.category = category
-            article.importance_score = self._estimate_importance(text, category)
+            article.importance_score = self._estimate_importance(text, category, urgency)
             article.urgency = urgency
             if not article.title_ar:
                 article.title_ar = article.original_title
@@ -373,32 +514,92 @@ class RouterAgent:
         return None  # Low confidence → use AI
 
     def _rule_based_urgency(self, text: str) -> UrgencyLevel:
-        """Detect urgency level from keywords."""
+        """Detect urgency level from newsroom-oriented breaking signals."""
         if not text:
             return UrgencyLevel.LOW
 
         text_lower = text.lower()
-        breaking_count = sum(1 for kw in BREAKING_KEYWORDS if kw in text_lower)
 
-        if breaking_count >= 2:
+        marker_hits = sum(1 for kw in BREAKING_KEYWORDS if kw in text_lower)
+        action_hits = sum(1 for kw in BREAKING_ACTION_TERMS if kw in text_lower)
+        event_hits = sum(1 for kw in BREAKING_EVENT_TERMS if kw in text_lower)
+
+        domain_hits = 0
+        entity_hits = 0
+        for group in BREAKING_SIGNAL_GROUPS:
+            group_hits = sum(1 for kw in group if kw in text_lower)
+            if group_hits > 0:
+                domain_hits += 1
+                entity_hits += group_hits
+
+        authority_groups = [
+            BREAKING_GOVERNANCE_TERMS,
+            BREAKING_DEFENSE_TERMS,
+            BREAKING_INTERIOR_TERMS,
+            BREAKING_FINANCE_TERMS,
+        ]
+        authority_hits = sum(
+            1 for group in authority_groups if any(kw in text_lower for kw in group)
+        )
+
+        score = (
+            marker_hits * 3
+            + min(action_hits, 4)
+            + (min(event_hits, 3) * 2)
+            + (domain_hits * 2)
+            + (authority_hits * 2)
+            + (1 if entity_hits >= 3 else 0)
+        )
+
+        # Strong newsroom rule: urgent marker + official/domain signal/action => Breaking.
+        if marker_hits >= 1 and (
+            domain_hits >= 1 or event_hits >= 1 or action_hits >= 2 or authority_hits >= 1
+        ):
             return UrgencyLevel.BREAKING
-        elif breaking_count == 1:
+
+        # Official authority domain with concrete action => Breaking.
+        if authority_hits >= 1 and action_hits >= 1:
+            return UrgencyLevel.BREAKING
+
+        # Multi-domain official signal with concrete action => Breaking.
+        if domain_hits >= 2 and (action_hits >= 1 or marker_hits >= 1):
+            return UrgencyLevel.BREAKING
+
+        # Multiple high-impact incident signals should break immediately.
+        if event_hits >= 2:
+            return UrgencyLevel.BREAKING
+
+        if score >= 8:
+            return UrgencyLevel.BREAKING
+        if score >= 3 or marker_hits >= 1 or event_hits >= 1:
             return UrgencyLevel.HIGH
 
         return UrgencyLevel.MEDIUM
 
-    def _estimate_importance(self, text: str, category: Optional[NewsCategory]) -> int:
+    def _estimate_importance(self, text: str, category: Optional[NewsCategory], urgency: Optional[UrgencyLevel] = None) -> int:
         """Estimate importance score using heuristics."""
         score = 5  # Default
 
+        text_lower = text.lower()
+
         # Algeria-specific content gets a boost
-        algeria_keywords = ["جزائر", "algérie", "algeria", "الجزائر"]
-        if any(kw in text.lower() for kw in algeria_keywords):
+        algeria_keywords = [
+            "\u0627\u0644\u062c\u0632\u0627\u0626\u0631",
+            "\u062c\u0632\u0627\u0626\u0631\u064a",
+            "algeria",
+            "algerie",
+            "dz",
+        ]
+        if any(kw in text_lower for kw in algeria_keywords):
             score += 2
 
-        # Breaking keywords boost
-        if any(kw in text.lower() for kw in BREAKING_KEYWORDS):
+        # Breaking / high urgency boost
+        if urgency == UrgencyLevel.BREAKING:
+            score += 3
+        elif urgency == UrgencyLevel.HIGH:
             score += 2
+        elif any(kw in text_lower for kw in BREAKING_KEYWORDS):
+            score += 1
 
         # Politics & Economy tend to be more important
         if category in [NewsCategory.POLITICS, NewsCategory.ECONOMY]:
