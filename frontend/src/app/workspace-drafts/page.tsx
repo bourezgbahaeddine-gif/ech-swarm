@@ -28,7 +28,7 @@ import { cn, formatRelativeTime, truncate } from '@/lib/utils';
 type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
 type RightTab = 'evidence' | 'quality' | 'seo' | 'social' | 'context';
 type GuideType = 'welcome' | 'action';
-type ActionId = 'verify' | 'improve' | 'headlines' | 'seo' | 'social' | 'quality' | 'publish_gate' | 'apply' | 'save';
+type ActionId = 'verify' | 'improve' | 'headlines' | 'seo' | 'social' | 'quality' | 'publish_gate' | 'apply' | 'save' | 'manual_draft';
 
 const TABS: Array<{ id: RightTab; label: string }> = [
     { id: 'evidence', label: 'التحقق والأدلة' },
@@ -51,6 +51,7 @@ const ACTION_HELP: Record<ActionId, { title: string; description: string }> = {
     publish_gate: { title: 'زر بوابة النشر', description: 'يفحص الجاهزية النهائية ويمنع النشر عند وجود موانع.' },
     apply: { title: 'زر إرسال الاعتماد', description: 'يرسل النسخة النهائية إلى رئيس التحرير بعد فحص وكيل السياسة التحريرية.' },
     save: { title: 'زر الحفظ', description: 'يحفظ التعديلات فورياً ويحدّث النسخ.' },
+    manual_draft: { title: 'زر مسودة جديدة', description: 'ينشئ مسودة خاصة لموضوع غير وارد من المصادر الآلية.' },
 };
 
 const STAGE_LABELS: Record<string, string> = {
@@ -336,7 +337,7 @@ export default function WorkspaceDraftsPage() {
                     </div>
                     <div className="flex items-center gap-3">
                         <button
-                            onClick={() => setNewDraftOpen(true)}
+                            onClick={() => runWithGuide('manual_draft', () => setNewDraftOpen(true))}
                             className="inline-flex items-center gap-1 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200"
                         >
                             مسودة جديدة
