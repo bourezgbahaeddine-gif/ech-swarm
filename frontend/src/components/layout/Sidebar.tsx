@@ -38,7 +38,7 @@ const navItems = [
     { href: '/workspace-drafts', label: 'المحرر الذكي', icon: FolderGit2, roles: ['director', 'editor_chief', 'journalist', 'print_editor'] as Role[] },
     { href: '/trends', label: 'رادار التراند', icon: TrendingUp, roles: ['director', 'editor_chief', 'journalist', 'print_editor'] as Role[] },
     { href: '/constitution', label: 'الدستور', icon: FileText, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor', 'fact_checker'] as Role[] },
-    { href: '/services/multimedia', label: 'الوسائط', icon: Film, roles: ['director', 'social_media'] as Role[] },
+    { href: '/services/multimedia', label: 'الوسائط', icon: Film, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
     { href: '/team', label: 'فريق التحرير', icon: Users, roles: ['director', 'editor_chief'] as Role[] },
     { href: '/sources', label: 'المصادر', icon: Rss, roles: ['director'] as Role[] },
     { href: '/agents', label: 'مراقبة النظام', icon: Activity, roles: ['director'] as Role[] },

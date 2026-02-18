@@ -338,6 +338,7 @@ function NewsPageContent() {
     const canRewrite = ['director', 'editor_chief', 'journalist', 'print_editor'].includes(role);
     const canProcess = canRewrite;
     const isSocialRole = role === 'social_media';
+    const canUseMultimedia = ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'].includes(role);
 
     return (
         <div className="space-y-6">
@@ -625,6 +626,16 @@ function NewsPageContent() {
                                         فتح في Workspace
                                     </a>
                                 </div>
+                                {canUseMultimedia && (
+                                    <div className="mt-2">
+                                        <a
+                                            href="/services/multimedia"
+                                            className="block w-full px-3 py-2 rounded-xl bg-violet-500/15 border border-violet-500/30 text-xs text-violet-200 hover:bg-violet-500/25 transition-colors text-center"
+                                        >
+                                            توليد وسائط الخبر
+                                        </a>
+                                    </div>
+                                )}
 
                                 {isSocialRole && ['ready_for_manual_publish', 'published'].includes(normalizedStatus) && (
                                     <div className="mt-2">

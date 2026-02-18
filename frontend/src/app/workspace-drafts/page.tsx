@@ -1,5 +1,5 @@
 ﻿'use client';
-/* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps */
+/* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 
 import { Suspense, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import NextLink from 'next/link';
@@ -481,6 +481,12 @@ function WorkspaceDraftsPageContent() {
                         <p className="text-xs text-gray-400">كتابة عربية احترافية + اقتراحات AI + تحقق + بوابة نشر</p>
                     </div>
                     <div className="flex items-center gap-3">
+                        <NextLink
+                            href="/services/multimedia"
+                            className="inline-flex items-center gap-1 rounded-xl border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-xs text-violet-200"
+                        >
+                            أدوات الوسائط
+                        </NextLink>
                         <button
                             onClick={() => runWithGuide('manual_draft', () => setNewDraftOpen(true))}
                             className="inline-flex items-center gap-1 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200"

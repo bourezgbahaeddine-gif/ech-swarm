@@ -11,6 +11,7 @@ import {
     SlidersHorizontal,
 } from 'lucide-react';
 import { journalistServicesApi } from '@/lib/journalist-services-api';
+import { useAuth } from '@/lib/auth';
 
 const btnClass = 'px-4 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/30 text-sm disabled:opacity-60';
 const selectClass = 'h-10 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-gray-300';
@@ -70,6 +71,10 @@ function buildNanoInfographicPrompt(basePrompt: string, ratio: string, safety: s
 }
 
 export default function MultimediaServicesPage() {
+    const { user } = useAuth();
+    const role = (user?.role || '').toLowerCase();
+    const canUseMultimedia = ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'].includes(role);
+
     const [articleText, setArticleText] = useState('');
     const [style, setStyle] = useState('صحفي واقعي');
     const [goal, setGoal] = useState('خبر عاجل');
@@ -87,6 +92,17 @@ export default function MultimediaServicesPage() {
     const [infPrompt, setInfPrompt] = useState('');
 
     const prompts = useMemo(() => splitPrompts(result), [result]);
+
+    if (!canUseMultimedia) {
+        return (
+            <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-6 space-y-3" dir="rtl">
+                <h1 className="text-xl text-white font-semibold">الوسائط</h1>
+                <p className="text-sm text-gray-300">
+                    هذه الصفحة متاحة للصحفيين وفرق التحرير والسوشيال ميديا فقط.
+                </p>
+            </div>
+        );
+    }
 
     const generateImagePrompts = async () => {
         setBusyImage(true);
