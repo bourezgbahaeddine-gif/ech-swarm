@@ -18,6 +18,7 @@ import {
     Loader2,
     Save,
     SearchCheck,
+    ShieldCheck,
     Sparkles,
 } from 'lucide-react';
 
@@ -28,7 +29,7 @@ import { cn, formatRelativeTime, truncate } from '@/lib/utils';
 type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
 type RightTab = 'evidence' | 'quality' | 'seo' | 'social' | 'context';
 type GuideType = 'welcome' | 'action';
-type ActionId = 'verify' | 'improve' | 'headlines' | 'seo' | 'social' | 'quality' | 'publish_gate' | 'apply' | 'save' | 'manual_draft';
+type ActionId = 'quick_check' | 'verify' | 'improve' | 'headlines' | 'seo' | 'social' | 'quality' | 'publish_gate' | 'apply' | 'save' | 'manual_draft';
 
 const TABS: Array<{ id: RightTab; label: string }> = [
     { id: 'evidence', label: 'التحقق والأدلة' },
@@ -42,6 +43,7 @@ const HELP_KEY = 'smart_editor_help_seen_v1';
 const ACTION_HELP_PREFIX = 'smart_editor_action_help_seen_v1_';
 
 const ACTION_HELP: Record<ActionId, { title: string; description: string }> = {
+    quick_check: { title: 'زر الفحص السريع', description: 'يشغل التحقق + الجودة + بوابة النشر دفعة واحدة ليعطيك حالة جاهزية سريعة.' },
     verify: { title: 'زر التحقق', description: 'يستخرج الادعاءات ويعرض درجة الثقة قبل النشر.' },
     improve: { title: 'زر التحسين', description: 'يولد اقتراح تحسين كفرق (Diff) قابل للقبول أو الرفض.' },
     headlines: { title: 'زر العناوين', description: 'يولد 5 عناوين متنوعة للاستخدام التحريري.' },
@@ -249,6 +251,23 @@ function WorkspaceDraftsPageContent() {
     const runSocial = useMutation({ mutationFn: () => editorialApi.aiSocialVariants(workId!), onSuccess: (r) => { setSocial(r.data?.variants || null); setActiveTab('social'); } });
     const runHeadlines = useMutation({ mutationFn: () => editorialApi.aiHeadlineSuggestion(workId!, 5), onSuccess: (r) => { setHeadlines(r.data?.headlines || []); setActiveTab('seo'); } });
     const runReadiness = useMutation({ mutationFn: () => editorialApi.publishReadiness(workId!), onSuccess: (r) => { setReadiness(r.data); setActiveTab('quality'); } });
+    const runQuickCheck = useMutation({
+        mutationFn: async () => {
+            const verifyRes = await editorialApi.verifyClaims(workId!, 0.7);
+            const qualityRes = await editorialApi.qualityScore(workId!);
+            const readinessRes = await editorialApi.publishReadiness(workId!);
+            return { verifyRes, qualityRes, readinessRes };
+        },
+        onSuccess: ({ verifyRes, qualityRes, readinessRes }) => {
+            setClaims(verifyRes.data?.claims || []);
+            setQuality(qualityRes.data);
+            setReadiness(readinessRes.data);
+            setActiveTab('quality');
+            setErr(null);
+            setOk('اكتمل الفحص السريع: تم تحديث التحقق والجودة وحالة الجاهزية.');
+        },
+        onError: (e: any) => setErr(e?.response?.data?.detail || 'تعذر تنفيذ الفحص السريع'),
+    });
     const runDiff = useMutation({ mutationFn: () => editorialApi.draftDiff(workId!, cmpFrom!, cmpTo!), onSuccess: (r) => setDiffView(r.data?.diff || '') });
     const restoreVersion = useMutation({ mutationFn: (v: number) => editorialApi.restoreWorkspaceDraftVersion(workId!, v), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['smart-editor-context', workId] }); queryClient.invalidateQueries({ queryKey: ['smart-editor-versions', workId] }); } });
     const applyToArticle = useMutation({
@@ -353,7 +372,24 @@ function WorkspaceDraftsPageContent() {
                     </div>
                 </div>
 
+                <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <div className="rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100">
+                        الذكاء الاصطناعي يقترح فقط. لا يوجد تعديل تلقائي للنص بدون موافقتك.
+                    </div>
+                    <div className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
+                        كل تعديل يُحفظ كنسخة مستقلة ويمكن الرجوع له من تبويب «السياق والنسخ».
+                    </div>
+                </div>
+
                 <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                        onClick={() => runWithGuide('quick_check', () => runQuickCheck.mutate())}
+                        disabled={runQuickCheck.isPending}
+                        className="px-3 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-100 text-xs flex items-center gap-2 disabled:opacity-60"
+                    >
+                        <ShieldCheck className="w-4 h-4" />
+                        فحص سريع
+                    </button>
                     <button onClick={() => runWithGuide('verify', () => runVerifier.mutate())} className="px-3 py-2 rounded-xl bg-cyan-500/20 border border-cyan-500/30 text-cyan-200 text-xs flex items-center gap-2"><SearchCheck className="w-4 h-4" />تحقق</button>
                     <button onClick={() => runWithGuide('improve', () => rewrite.mutate())} className="px-3 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-2"><Sparkles className="w-4 h-4" />تحسين</button>
                     <button onClick={() => runWithGuide('headlines', () => runHeadlines.mutate())} className="px-3 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-200 text-xs">عناوين</button>
@@ -633,8 +669,9 @@ function GuideModal({ type, action, onClose, onConfirm }: { type: GuideType; act
                         <h2 className="text-lg font-semibold text-white">مرحباً بك في المحرر الذكي</h2>
                         <div className="text-sm text-gray-300 space-y-2">
                             <p>هذا دليل سريع للمحرر المبتدئ.</p>
+                            <p>- النظام لا يكتب مكانك تلقائياً، كل شيء يأتي كمقترح قابل للقبول أو الرفض.</p>
                             <p>- ابدأ بكتابة النص في الوسط.</p>
-                            <p>- شغّل «تحقق» ثم «جودة» ثم «بوابة النشر».</p>
+                            <p>- استخدم «فحص سريع» للحصول على التحقق والجودة والجاهزية بضغطة واحدة.</p>
                             <p>- لا تعتمد النشر قبل زوال الموانع.</p>
                         </div>
                     </>

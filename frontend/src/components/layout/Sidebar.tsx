@@ -9,7 +9,6 @@ import {
     Newspaper,
     Rss,
     UserCheck,
-    Bot,
     TrendingUp,
     Activity,
     ChevronLeft,
@@ -42,7 +41,7 @@ const navItems = [
     { href: '/services/multimedia', label: 'الوسائط', icon: Film, roles: ['director', 'social_media'] as Role[] },
     { href: '/team', label: 'فريق التحرير', icon: Users, roles: ['director', 'editor_chief'] as Role[] },
     { href: '/sources', label: 'المصادر', icon: Rss, roles: ['director'] as Role[] },
-    { href: '/agents', label: 'الوكلاء', icon: Bot, roles: ['director'] as Role[] },
+    { href: '/agents', label: 'مراقبة النظام', icon: Activity, roles: ['director'] as Role[] },
     { href: '/services/fact-check', label: 'التحقق والاستقصاء', icon: ShieldCheck, roles: ['director', 'editor_chief', 'journalist', 'fact_checker', 'print_editor'] as Role[] },
     { href: '/settings', label: 'إعدادات APIs', icon: KeyRound, roles: ['director'] as Role[] },
 ];

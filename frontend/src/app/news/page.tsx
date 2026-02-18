@@ -4,7 +4,7 @@ import { Suspense, useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { isAxiosError } from 'axios';
-import { newsApi, dashboardApi, editorialApi, type ArticleBrief } from '@/lib/api';
+import { newsApi, dashboardApi, editorialApi, type ArticleBrief, type DashboardNotification } from '@/lib/api';
 import { cn, formatRelativeTime, getStatusColor, getCategoryLabel, isFreshBreaking, truncate } from '@/lib/utils';
 import { useAuth } from '@/lib/auth';
 import {
@@ -257,6 +257,32 @@ function NewsPageContent() {
         return out;
     }, [articles, insightsMap]);
 
+    const { data: dailySnapshot, isLoading: dailySnapshotLoading } = useQuery({
+        queryKey: ['news-daily-snapshot'],
+        queryFn: async () => {
+            const [handoffRes, draftRes, reservationsRes, readyRes, notificationsRes] = await Promise.all([
+                newsApi.list({ page: 1, per_page: 1, status: 'approved_handoff' }),
+                newsApi.list({ page: 1, per_page: 1, status: 'draft_generated' }),
+                newsApi.list({ page: 1, per_page: 1, status: 'approval_request_with_reservations' }),
+                newsApi.list({ page: 1, per_page: 1, status: 'ready_for_manual_publish' }),
+                dashboardApi.notifications({ limit: 40 }),
+            ]);
+
+            const notifications = (notificationsRes.data?.items || []) as DashboardNotification[];
+            const urgentAlerts = notifications.filter((item) => item.severity === 'high').length;
+
+            return {
+                draftsReadyForEditing: (handoffRes.data?.total || 0) + (draftRes.data?.total || 0),
+                needsVerification: reservationsRes.data?.total || 0,
+                readyForManualPublish: readyRes.data?.total || 0,
+                totalNotifications: notifications.length,
+                urgentAlerts,
+            };
+        },
+        refetchInterval: 20000,
+        refetchOnWindowFocus: true,
+    });
+
     const statuses = [
         '',
         'new',
@@ -358,6 +384,47 @@ function NewsPageContent() {
                             <RefreshCw className="w-4 h-4" />
                             {refreshPipeline.isPending ? 'جاري التحديث...' : 'تحديث'}
                         </button>
+                    </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-gray-900/45 p-4 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h2 className="text-sm font-semibold text-white">ماذا أنجز النظام لك اليوم؟</h2>
+                        <span className="text-[11px] text-gray-400">
+                            الوكلاء يعملون في الخلفية، وأنت تتعامل فقط مع النتائج الجاهزة للتحرير.
+                        </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
+                        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3">
+                            <p className="text-[11px] text-emerald-200/80">مسودات جاهزة للتحرير</p>
+                            <p className="text-xl font-semibold text-white mt-1">
+                                {dailySnapshotLoading ? '...' : (dailySnapshot?.draftsReadyForEditing || 0)}
+                            </p>
+                        </div>
+                        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
+                            <p className="text-[11px] text-amber-200/80">طلبات تحتاج تحقق</p>
+                            <p className="text-xl font-semibold text-white mt-1">
+                                {dailySnapshotLoading ? '...' : (dailySnapshot?.needsVerification || 0)}
+                            </p>
+                        </div>
+                        <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3">
+                            <p className="text-[11px] text-cyan-200/80">جاهز للنشر اليدوي</p>
+                            <p className="text-xl font-semibold text-white mt-1">
+                                {dailySnapshotLoading ? '...' : (dailySnapshot?.readyForManualPublish || 0)}
+                            </p>
+                        </div>
+                        <div className="rounded-xl border border-violet-500/30 bg-violet-500/10 p-3">
+                            <p className="text-[11px] text-violet-200/80">تنبيهات اليوم</p>
+                            <p className="text-xl font-semibold text-white mt-1">
+                                {dailySnapshotLoading ? '...' : (dailySnapshot?.totalNotifications || 0)}
+                            </p>
+                            <p className="text-[10px] text-violet-200/80 mt-1">
+                                عاجل: {dailySnapshotLoading ? '...' : (dailySnapshot?.urgentAlerts || 0)}
+                            </p>
+                        </div>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-300">
+                        المسار الأسرع للصحفي: افتح الخبر ⇦ حسّن النص ⇦ تحقق ⇦ جهّز النسخة النهائية.
                     </div>
                 </div>
 
