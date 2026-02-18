@@ -453,6 +453,52 @@ export interface UserActivityLogItem {
     created_at: string | null;
 }
 
+export interface ProjectMemoryItem {
+    id: number;
+    memory_type: 'operational' | 'knowledge' | 'session' | string;
+    title: string;
+    content: string;
+    tags: string[];
+    source_type: string | null;
+    source_ref: string | null;
+    article_id: number | null;
+    status: 'active' | 'archived' | string;
+    importance: number;
+    created_by_user_id: number | null;
+    created_by_username: string | null;
+    updated_by_user_id: number | null;
+    updated_by_username: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface ProjectMemoryEvent {
+    id: number;
+    memory_id: number;
+    event_type: string;
+    note: string | null;
+    actor_user_id: number | null;
+    actor_username: string | null;
+    created_at: string;
+}
+
+export interface ProjectMemoryOverview {
+    total_active: number;
+    operational_count: number;
+    knowledge_count: number;
+    session_count: number;
+    archived_count: number;
+    recent_updates: number;
+}
+
+export interface ProjectMemoryListResponse {
+    items: ProjectMemoryItem[];
+    total: number;
+    page: number;
+    per_page: number;
+    pages: number;
+}
+
 export interface CreateUserPayload {
     full_name_ar: string;
     username: string;
@@ -483,6 +529,44 @@ export const authApi = {
     updateUser: (userId: number, payload: UpdateUserPayload) => api.put<TeamMember>(`/auth/users/${userId}`, payload),
     userActivity: (userId: number, limit = 100) =>
         api.get<UserActivityLogItem[]>(`/auth/users/${userId}/activity`, { params: { limit } }),
+};
+
+export const memoryApi = {
+    overview: () => api.get<ProjectMemoryOverview>('/memory/overview'),
+    list: (params?: {
+        q?: string;
+        memory_type?: string;
+        status?: string;
+        tag?: string;
+        page?: number;
+        per_page?: number;
+    }) => api.get<ProjectMemoryListResponse>('/memory/items', { params }),
+    get: (itemId: number) => api.get<ProjectMemoryItem>(`/memory/items/${itemId}`),
+    create: (payload: {
+        memory_type: 'operational' | 'knowledge' | 'session';
+        title: string;
+        content: string;
+        tags?: string[];
+        source_type?: string | null;
+        source_ref?: string | null;
+        article_id?: number | null;
+        importance?: number;
+    }) => api.post<ProjectMemoryItem>('/memory/items', payload),
+    update: (itemId: number, payload: Partial<{
+        memory_type: 'operational' | 'knowledge' | 'session';
+        title: string;
+        content: string;
+        tags: string[];
+        source_type: string | null;
+        source_ref: string | null;
+        article_id: number | null;
+        importance: number;
+        status: 'active' | 'archived';
+    }>) => api.patch<ProjectMemoryItem>(`/memory/items/${itemId}`, payload),
+    markUsed: (itemId: number, note?: string) =>
+        api.post<ProjectMemoryEvent>(`/memory/items/${itemId}/use`, { note }),
+    events: (itemId: number, limit = 50) =>
+        api.get<ProjectMemoryEvent[]>(`/memory/items/${itemId}/events`, { params: { limit } }),
 };
 
 // ── Axios Interceptor: auto-redirect on 401 ──

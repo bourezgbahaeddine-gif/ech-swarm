@@ -20,6 +20,7 @@ from app.models.knowledge import (
     StoryClusterMember,
 )
 from app.models.quality import ArticleQualityReport
+from app.models.project_memory import ProjectMemoryItem, ProjectMemoryEvent
 
 __all__ = [
     "Source", "Article", "EditorDecision", "EditorialDraft", "FeedbackLog",
@@ -42,4 +43,6 @@ __all__ = [
     "StoryCluster",
     "StoryClusterMember",
     "ArticleQualityReport",
+    "ProjectMemoryItem",
+    "ProjectMemoryEvent",
 ]

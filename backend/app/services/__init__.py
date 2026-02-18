@@ -8,6 +8,7 @@ __all__ = [
     "news_knowledge_service",
     "quality_gate_service",
     "smart_editor_service",
+    "project_memory_service",
 ]
 
 
@@ -40,5 +41,8 @@ def __getattr__(name: str):
         from app.services.smart_editor_service import smart_editor_service
 
         return smart_editor_service
-    raise AttributeError(name)
+    if name == "project_memory_service":
+        from app.services.project_memory_service import project_memory_service
 
+        return project_memory_service
+    raise AttributeError(name)

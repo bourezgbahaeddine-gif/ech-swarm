@@ -34,6 +34,7 @@ from app.api.routes.rss import router as rss_router
 from app.api.routes.settings import router as settings_router
 from app.api.routes.constitution import router as constitution_router
 from app.api.routes.journalist_services import router as journalist_services_router
+from app.api.routes.memory import router as memory_router
 
 settings = get_settings()
 logger = get_logger("main")
@@ -260,6 +261,7 @@ app.include_router(rss_router, prefix="/api/v1")
 app.include_router(settings_router, prefix="/api/v1")
 app.include_router(constitution_router, prefix="/api/v1")
 app.include_router(journalist_services_router, prefix="/api/v1")
+app.include_router(memory_router, prefix="/api/v1")
 
 
 # ── Health Check ──
