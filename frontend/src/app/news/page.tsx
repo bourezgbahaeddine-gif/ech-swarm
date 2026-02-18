@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { Suspense, useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { isAxiosError } from 'axios';
@@ -24,7 +24,7 @@ function getApiErrorMessage(error: unknown, fallback: string): string {
     return fallback;
 }
 
-export default function NewsPage() {
+function NewsPageContent() {
     const queryClient = useQueryClient();
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -793,3 +793,18 @@ export default function NewsPage() {
         </div>
     );
 }
+
+export default function NewsPage() {
+    return (
+        <Suspense
+            fallback={
+                <div className="rounded-2xl border border-white/10 bg-gray-900/40 p-6 text-center text-gray-400">
+                    Loading...
+                </div>
+            }
+        >
+            <NewsPageContent />
+        </Suspense>
+    );
+}
+

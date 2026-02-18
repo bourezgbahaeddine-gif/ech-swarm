@@ -1,7 +1,8 @@
 ﻿'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import Image from 'next/image';
+import axios from 'axios';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Loader2, Eye, EyeOff, AlertCircle, FileText } from 'lucide-react';
@@ -27,8 +28,10 @@ export default function LoginPage() {
             // Use auth context to login
             login(access_token, user);
 
-        } catch (err: any) {
-            const detail = err.response?.data?.detail || 'خطأ في الاتصال بالخادم';
+        } catch (err: unknown) {
+            const detail = axios.isAxiosError(err)
+                ? (err.response?.data as { detail?: string } | undefined)?.detail || 'خطأ في الاتصال بالخادم'
+                : 'خطأ في الاتصال بالخادم';
             setError(detail);
             setIsLoading(false);
         }
@@ -49,7 +52,7 @@ export default function LoginPage() {
                     {/* Logo */}
                     <div className="text-center mb-6">
                         <div className="w-16 h-16 mx-auto rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden mb-4">
-                            <img src="/ech-logo.png" alt="Echorouk" className="w-10 h-10 object-contain" />
+                            <Image src="/ech-logo.png" alt="Echorouk" width={40} height={40} className="w-10 h-10 object-contain" />
                         </div>
                         <h1 className="text-2xl font-bold text-white">غرفة الشروق الذكية</h1>
                         <p className="text-sm text-gray-400 mt-1">AI Swarm Newsroom</p>
@@ -59,7 +62,7 @@ export default function LoginPage() {
                     <div className="mb-6 px-4 py-2 rounded-xl bg-white/[0.03] border border-white/10 flex items-center gap-2">
                         <FileText className="w-4 h-4 text-emerald-400" />
                         <p className="text-xs text-gray-300">
-                            الدستور التحريري مرجع إلزامي. <a className="underline text-emerald-300" href="/Constitution.docx" target="_blank" rel="noreferrer">فتح الدستور</a>
+                            الدستور التحريري مرجع إلزامي. <a className="underline text-emerald-300" href="/constitution">فتح الدستور</a>
                         </p>
                     </div>
 

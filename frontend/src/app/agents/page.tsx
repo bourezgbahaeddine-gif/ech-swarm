@@ -7,6 +7,14 @@ import PipelineMonitor from '@/components/dashboard/PipelineMonitor';
 import { Bot, Activity, Cpu, Wifi } from 'lucide-react';
 
 export default function AgentsPage() {
+    type FailedJob = {
+        id: number;
+        type: string;
+        error: string;
+        retries: number;
+        created_at: string;
+    };
+
     const { data: agentsData } = useQuery({
         queryKey: ['agents-status'],
         queryFn: () => dashboardApi.agentStatus(),
@@ -22,7 +30,7 @@ export default function AgentsPage() {
         queryFn: () => dashboardApi.failedJobs(),
     });
 
-    const failedJobs = failedData?.data || [];
+    const failedJobs = (failedData?.data || []) as FailedJob[];
 
     return (
         <div className="space-y-6">
@@ -79,7 +87,7 @@ export default function AgentsPage() {
                         <h2 className="text-sm font-semibold text-white">Dead Letter Queue</h2>
                     </div>
                     <div className="p-3 space-y-2 max-h-[300px] overflow-y-auto">
-                        {failedJobs.map((job: any) => (
+                        {failedJobs.map((job) => (
                             <div key={job.id} className="px-4 py-3 rounded-xl bg-gray-800/30 border border-white/[0.03]">
                                 <div className="flex items-center justify-between">
                                     <span className="text-xs font-medium text-white">{job.type}</span>

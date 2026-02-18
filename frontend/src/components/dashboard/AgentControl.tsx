@@ -5,44 +5,58 @@ import { useQueryClient } from '@tanstack/react-query';
 import { dashboardApi, type AgentStatus } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import {
-    Search,
+    AlertCircle,
+    CheckCircle,
+    Loader2,
     Navigation,
     PenTool,
-    Radio,
     Play,
-    Loader2,
-    CheckCircle,
-    AlertCircle,
+    Radio,
+    Search,
 } from 'lucide-react';
 
 interface AgentControlProps {
     agents: Record<string, AgentStatus> | undefined;
 }
 
-const agentConfig = [
-    { key: 'scout', label: 'الكشّاف', labelEn: 'Scout', icon: Search, color: 'from-blue-500 to-cyan-500', trigger: 'triggerScout' as const },
-    { key: 'router', label: 'الموجّه', labelEn: 'Router', icon: Navigation, color: 'from-purple-500 to-pink-500', trigger: 'triggerRouter' as const },
-    { key: 'scribe', label: 'الكاتب', labelEn: 'Scribe', icon: PenTool, color: 'from-amber-500 to-orange-500', trigger: 'triggerScribe' as const },
-    { key: 'trend_radar', label: 'رادار التراند', labelEn: 'Trends', icon: Radio, color: 'from-emerald-500 to-teal-500', trigger: 'triggerTrends' as const },
+type TriggerMethod = 'triggerScout' | 'triggerRouter' | 'triggerScribe' | 'triggerTrends';
+type AgentResult = { success: boolean; message: string };
+
+const agentConfig: Array<{
+    key: string;
+    label: string;
+    labelEn: string;
+    icon: import('react').ComponentType<{ className?: string }>;
+    color: string;
+    trigger: TriggerMethod;
+}> = [
+    { key: 'scout', label: 'الكشاف', labelEn: 'Scout', icon: Search, color: 'from-blue-500 to-cyan-500', trigger: 'triggerScout' },
+    { key: 'router', label: 'الموجه', labelEn: 'Router', icon: Navigation, color: 'from-purple-500 to-pink-500', trigger: 'triggerRouter' },
+    { key: 'scribe', label: 'الكاتب', labelEn: 'Scribe', icon: PenTool, color: 'from-amber-500 to-orange-500', trigger: 'triggerScribe' },
+    { key: 'trend_radar', label: 'رادار التراند', labelEn: 'Trends', icon: Radio, color: 'from-emerald-500 to-teal-500', trigger: 'triggerTrends' },
 ];
 
 export default function AgentControl({ agents }: AgentControlProps) {
     const queryClient = useQueryClient();
     const [running, setRunning] = useState<Record<string, boolean>>({});
-    const [results, setResults] = useState<Record<string, { success: boolean; message: string }>>({});
+    const [results, setResults] = useState<Record<string, AgentResult | undefined>>({});
 
-    const handleTrigger = async (agentKey: string, triggerFn: keyof typeof dashboardApi) => {
+    const handleTrigger = async (agentKey: string, triggerFn: TriggerMethod) => {
         setRunning((prev) => ({ ...prev, [agentKey]: true }));
-        setResults((prev) => ({ ...prev, [agentKey]: undefined as any }));
+        setResults((prev) => ({ ...prev, [agentKey]: undefined }));
 
         try {
             const response = await dashboardApi[triggerFn]();
+            const payload = response.data as { message?: string } | undefined;
+
             setResults((prev) => ({
                 ...prev,
-                [agentKey]: { success: true, message: (response.data as any)?.message || 'تم التنفيذ بنجاح' },
+                [agentKey]: {
+                    success: true,
+                    message: payload?.message || 'تم التنفيذ بنجاح',
+                },
             }));
 
-            // Trigger fast UI refresh because most agents run async and return "queued".
             const refresh = () => {
                 queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
                 queryClient.invalidateQueries({ queryKey: ['breaking-news'] });
@@ -53,10 +67,11 @@ export default function AgentControl({ agents }: AgentControlProps) {
             refresh();
             setTimeout(refresh, 4000);
             setTimeout(refresh, 12000);
-        } catch (error: any) {
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'حدث خطأ أثناء التشغيل';
             setResults((prev) => ({
                 ...prev,
-                [agentKey]: { success: false, message: error?.response?.data?.detail || error.message || 'حدث خطأ' },
+                [agentKey]: { success: false, message },
             }));
         } finally {
             setRunning((prev) => ({ ...prev, [agentKey]: false }));
@@ -92,9 +107,7 @@ export default function AgentControl({ agents }: AgentControlProps) {
                             className={cn(
                                 'relative rounded-xl p-4 border transition-all duration-300 cursor-pointer',
                                 'bg-gradient-to-br from-gray-800/40 to-gray-900/60',
-                                isRunning
-                                    ? 'border-amber-500/30 shadow-lg shadow-amber-500/5'
-                                    : 'border-white/5 hover:border-white/10',
+                                isRunning ? 'border-amber-500/30 shadow-lg shadow-amber-500/5' : 'border-white/5 hover:border-white/10',
                             )}
                         >
                             <div className="flex items-center gap-3 mb-3">

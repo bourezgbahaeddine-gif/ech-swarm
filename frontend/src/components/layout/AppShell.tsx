@@ -1,11 +1,11 @@
-﻿'use client';
+'use client';
 
+import { useState } from 'react';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { CheckCircle, FileText } from 'lucide-react';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
-import { FileText, CheckCircle } from 'lucide-react';
 import { constitutionApi } from '@/lib/constitution-api';
 import { useAuth } from '@/lib/auth';
 
@@ -14,9 +14,10 @@ const PUBLIC_PATHS = ['/login'];
 export default function AppShell({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const { user } = useAuth();
+    const queryClient = useQueryClient();
     const isPublic = PUBLIC_PATHS.includes(pathname);
-    const [showConstitution, setShowConstitution] = useState(false);
     const [ack, setAck] = useState(false);
+    const [ackDismissed, setAckDismissed] = useState(false);
 
     const { data: latest } = useQuery({
         queryKey: ['constitution-latest'],
@@ -32,21 +33,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
     const ackMutation = useMutation({
         mutationFn: (version: string) => constitutionApi.acknowledge(version),
-        onSuccess: () => setShowConstitution(false),
+        onSuccess: async () => {
+            setAckDismissed(true);
+            await queryClient.invalidateQueries({ queryKey: ['constitution-ack'] });
+        },
     });
 
-    useEffect(() => {
-        if (isPublic || !user) return;
-        if (latest?.data && ackStatus?.data) {
-            if (!ackStatus.data.acknowledged) {
-                setShowConstitution(true);
-            }
-        }
-    }, [isPublic, user, latest, ackStatus]);
+    if (isPublic) return <>{children}</>;
 
-    if (isPublic) {
-        return <>{children}</>;
-    }
+    const shouldShowConstitutionGate = Boolean(
+        !ackDismissed &&
+        user &&
+        latest?.data &&
+        ackStatus?.data &&
+        !ackStatus.data.acknowledged
+    );
 
     const confirm = () => {
         const version = latest?.data?.version;
@@ -59,12 +60,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <Sidebar />
             <main className="flex-1 mr-[260px] min-h-screen transition-all duration-300">
                 <TopBar />
-                <div className="p-6 mesh-gradient min-h-[calc(100vh-64px)]">
-                    {children}
-                </div>
+                <div className="p-6 mesh-gradient min-h-[calc(100vh-64px)]">{children}</div>
             </main>
 
-            {showConstitution && (
+            {shouldShowConstitutionGate && (
                 <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
                     <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-gray-900/90 p-6">
                         <div className="flex items-center gap-2 text-white mb-3">
@@ -75,12 +74,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                             الدستور التحريري هو المرجع الإلزامي لجميع المراحل. يرجى الاطلاع عليه قبل المتابعة.
                         </p>
                         <div className="mt-3">
-                            <a
-                                href="/constitution"
-                                className="text-emerald-300 hover:text-emerald-200 underline text-sm"
-                                target="_blank"
-                                rel="noreferrer"
-                            >
+                            <a href="/constitution" className="text-emerald-300 hover:text-emerald-200 underline text-sm" target="_blank" rel="noreferrer">
                                 فتح الدستور
                             </a>
                         </div>
@@ -107,3 +101,4 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </div>
     );
 }
+

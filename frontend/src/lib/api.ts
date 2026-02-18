@@ -405,6 +405,39 @@ export interface TeamMember {
     is_active: boolean;
     is_online: boolean;
     last_login_at: string | null;
+    created_at?: string;
+    updated_at?: string;
+}
+
+export interface UserActivityLogItem {
+    id: number;
+    actor_user_id: number | null;
+    actor_username: string | null;
+    target_user_id: number | null;
+    target_username: string | null;
+    action: string;
+    details: string | null;
+    created_at: string | null;
+}
+
+export interface CreateUserPayload {
+    full_name_ar: string;
+    username: string;
+    password: string;
+    role: 'director' | 'editor_chief' | 'journalist' | 'social_media' | 'print_editor';
+    departments: string[];
+    specialization?: string | null;
+    is_active?: boolean;
+}
+
+export interface UpdateUserPayload {
+    full_name_ar?: string;
+    username?: string;
+    password?: string;
+    role?: 'director' | 'editor_chief' | 'journalist' | 'social_media' | 'print_editor';
+    departments?: string[];
+    specialization?: string | null;
+    is_active?: boolean;
 }
 
 export const authApi = {
@@ -413,6 +446,10 @@ export const authApi = {
     me: () => api.get<TeamMember>('/auth/me'),
     logout: () => api.post('/auth/logout'),
     users: () => api.get<TeamMember[]>('/auth/users'),
+    createUser: (payload: CreateUserPayload) => api.post<TeamMember>('/auth/users', payload),
+    updateUser: (userId: number, payload: UpdateUserPayload) => api.put<TeamMember>(`/auth/users/${userId}`, payload),
+    userActivity: (userId: number, limit = 100) =>
+        api.get<UserActivityLogItem[]>(`/auth/users/${userId}/activity`, { params: { limit } }),
 };
 
 // ── Axios Interceptor: auto-redirect on 401 ──

@@ -1,7 +1,7 @@
 ﻿'use client';
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'next/navigation';
 import { EditorContent, useEditor } from '@tiptap/react';
@@ -93,11 +93,17 @@ function htmlToReadableText(value: string): string {
     return cleanText(value.replace(/<[^>]+>/g, ' '));
 }
 
+function normalizeDiffOutput(value: string): string {
+    if (!value) return '';
+    const hasHtml = /<[^>]+>/.test(value);
+    return hasHtml ? htmlToReadableText(value) : cleanText(value);
+}
+
 function actionKey(action: ActionId): string {
     return `${ACTION_HELP_PREFIX}${action}`;
 }
 
-export default function WorkspaceDraftsPage() {
+function WorkspaceDraftsPageContent() {
     const queryClient = useQueryClient();
     const search = useSearchParams();
     const articleId = search.get('article_id');
@@ -415,14 +421,14 @@ export default function WorkspaceDraftsPage() {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                 <div className="rounded-xl border border-white/10 bg-black/20 p-2">
                                     <p className="text-[11px] text-gray-400 mb-1">قبل التحسين</p>
-                                    <p className="text-sm leading-7 text-gray-100 whitespace-pre-wrap max-h-80 overflow-auto">
-                                        {truncate(cleanText(suggestion?.preview?.before_text || htmlToReadableText(bodyHtml)), 900)}
+                                    <p className="text-sm leading-8 text-gray-100 whitespace-pre-wrap max-h-96 overflow-auto">
+                                        {cleanText(suggestion?.preview?.before_text || htmlToReadableText(bodyHtml))}
                                     </p>
                                 </div>
                                 <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-2">
                                     <p className="text-[11px] text-emerald-200 mb-1">بعد التحسين</p>
-                                    <p className="text-sm leading-7 text-emerald-50 whitespace-pre-wrap max-h-80 overflow-auto">
-                                        {truncate(cleanText(suggestion?.preview?.after_text || suggestion?.body_text || htmlToReadableText(suggestion?.body_html || '')), 900)}
+                                    <p className="text-sm leading-8 text-emerald-50 whitespace-pre-wrap max-h-96 overflow-auto">
+                                        {cleanText(suggestion?.preview?.after_text || suggestion?.body_text || htmlToReadableText(suggestion?.body_html || ''))}
                                     </p>
                                 </div>
                             </div>
@@ -434,7 +440,7 @@ export default function WorkspaceDraftsPage() {
                             </button>
                             {showTechnicalDiff && (
                                 <pre className="max-h-56 overflow-auto text-xs text-amber-50 bg-black/25 rounded-xl p-2" dir="ltr">
-                                    {suggestion.diff || suggestion.diff_html || 'لا يوجد فرق تقني'}
+                                    {normalizeDiffOutput(suggestion.diff || suggestion.diff_html || '') || 'لا يوجد فرق تقني'}
                                 </pre>
                             )}
                             <div className="flex gap-2">
@@ -647,3 +653,18 @@ function GuideModal({ type, action, onClose, onConfirm }: { type: GuideType; act
         </div>
     );
 }
+
+export default function WorkspaceDraftsPage() {
+    return (
+        <Suspense
+            fallback={
+                <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-8 text-center text-gray-300">
+                    Loading...
+                </div>
+            }
+        >
+            <WorkspaceDraftsPageContent />
+        </Suspense>
+    );
+}
+

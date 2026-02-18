@@ -1,27 +1,32 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
-import { api, type AgentStatus } from '@/lib/api';
-import { useAuth } from '@/lib/auth';
-import { cn } from '@/lib/utils';
+import { useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { LucideIcon } from 'lucide-react';
 import {
-    Users, Shield, UserCheck, Newspaper, Radio,
-    PenTool, Globe, MessageCircle, BookOpen,
+    Shield,
+    UserCheck,
+    Newspaper,
+    MessageCircle,
+    BookOpen,
+    Users,
+    PlusCircle,
+    Clock4,
+    Activity,
 } from 'lucide-react';
+import { authApi, type CreateUserPayload, type TeamMember, type UpdateUserPayload, type UserActivityLogItem } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
+import { cn, formatRelativeTime } from '@/lib/utils';
 
-interface TeamMember {
-    id: number;
-    full_name_ar: string;
-    username: string;
-    role: string;
-    departments: string[];
-    specialization: string | null;
-    is_active: boolean;
-    is_online: boolean;
-    last_login_at: string | null;
-}
+const ROLE_OPTIONS: Array<{ value: CreateUserPayload['role']; label: string }> = [
+    { value: 'director', label: 'المدير العام' },
+    { value: 'editor_chief', label: 'رئيس التحرير' },
+    { value: 'journalist', label: 'صحفي' },
+    { value: 'social_media', label: 'سوشيال ميديا' },
+    { value: 'print_editor', label: 'مادة الجريدة' },
+];
 
-const roleConfig: Record<string, { label: string; color: string; icon: any }> = {
+const ROLE_CONFIG: Record<string, { label: string; color: string; icon: LucideIcon }> = {
     director: { label: 'المدير العام', color: 'from-amber-500 to-orange-500', icon: Shield },
     editor_chief: { label: 'رئيس التحرير', color: 'from-purple-500 to-pink-500', icon: UserCheck },
     journalist: { label: 'صحفي', color: 'from-blue-500 to-cyan-500', icon: Newspaper },
@@ -29,146 +34,463 @@ const roleConfig: Record<string, { label: string; color: string; icon: any }> = 
     print_editor: { label: 'مادة الجريدة', color: 'from-emerald-500 to-teal-500', icon: BookOpen },
 };
 
-const deptLabels: Record<string, string> = {
-    national: '🇩🇿 وطني',
-    international: '🌍 دولي',
-    economy: '💹 اقتصاد',
-    sports: '⚽ رياضة',
-    french: '🇫🇷 فرنسي',
-    social_media: '📱 سوشيال',
-    print: '📰 الجريدة',
-    variety: '🎭 منوعات',
-    jewelry: '💎 جواهر',
-    management: '🏢 إدارة',
+const DEPARTMENT_OPTIONS = [
+    { value: 'national', label: 'وطني' },
+    { value: 'international', label: 'دولي' },
+    { value: 'economy', label: 'اقتصاد' },
+    { value: 'sports', label: 'رياضة' },
+    { value: 'french', label: 'فرنسي' },
+    { value: 'social_media', label: 'سوشيال' },
+    { value: 'print', label: 'الجريدة' },
+    { value: 'variety', label: 'منوعات' },
+    { value: 'jewelry', label: 'جواهر' },
+    { value: 'management', label: 'إدارة' },
+];
+
+type UserFormState = {
+    full_name_ar: string;
+    username: string;
+    password: string;
+    role: CreateUserPayload['role'];
+    departments: string[];
+    specialization: string;
+    is_active: boolean;
 };
+
+function defaultCreateForm(): UserFormState {
+    return {
+        full_name_ar: '',
+        username: '',
+        password: '',
+        role: 'journalist',
+        departments: ['national'],
+        specialization: '',
+        is_active: true,
+    };
+}
+
+function parseDetails(details: string | null): string {
+    if (!details) return '—';
+    try {
+        const parsed = JSON.parse(details) as Record<string, unknown>;
+        return Object.entries(parsed)
+            .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : String(v)}`)
+            .join(' | ');
+    } catch {
+        return details;
+    }
+}
 
 export default function TeamPage() {
     const { user: currentUser } = useAuth();
+    const queryClient = useQueryClient();
+    const isDirector = currentUser?.role === 'director';
+    const canView = currentUser?.role === 'director' || currentUser?.role === 'editor_chief';
 
-    const { data, isLoading } = useQuery({
+    const [createForm, setCreateForm] = useState<UserFormState>(defaultCreateForm());
+    const [editTarget, setEditTarget] = useState<TeamMember | null>(null);
+    const [editForm, setEditForm] = useState<UserFormState | null>(null);
+    const [selectedLogUser, setSelectedLogUser] = useState<TeamMember | null>(null);
+    const [msg, setMsg] = useState<string | null>(null);
+    const [err, setErr] = useState<string | null>(null);
+
+    const usersQuery = useQuery({
         queryKey: ['team-members'],
-        queryFn: () => api.get<TeamMember[]>('/auth/users'),
-        enabled: currentUser?.role === 'director' || currentUser?.role === 'editor_chief',
+        queryFn: () => authApi.users(),
+        enabled: canView,
+    });
+    const members = useMemo(
+        () => (usersQuery.data?.data || []) as TeamMember[],
+        [usersQuery.data?.data]
+    );
+
+    const activityQuery = useQuery({
+        queryKey: ['team-member-activity', selectedLogUser?.id],
+        queryFn: () => authApi.userActivity(selectedLogUser!.id, 120),
+        enabled: !!selectedLogUser && canView,
+    });
+    const activityItems = (activityQuery.data?.data || []) as UserActivityLogItem[];
+
+    const createMutation = useMutation({
+        mutationFn: (payload: CreateUserPayload) => authApi.createUser(payload),
+        onSuccess: async () => {
+            setMsg('تمت إضافة العضو بنجاح');
+            setErr(null);
+            setCreateForm(defaultCreateForm());
+            await queryClient.invalidateQueries({ queryKey: ['team-members'] });
+        },
+        onError: () => setErr('تعذر إضافة العضو'),
     });
 
-    const members = data?.data || [];
+    const updateMutation = useMutation({
+        mutationFn: ({ userId, payload }: { userId: number; payload: UpdateUserPayload }) =>
+            authApi.updateUser(userId, payload),
+        onSuccess: async () => {
+            setMsg('تم تحديث العضوية بنجاح');
+            setErr(null);
+            setEditTarget(null);
+            setEditForm(null);
+            await queryClient.invalidateQueries({ queryKey: ['team-members'] });
+            if (selectedLogUser) {
+                await queryClient.invalidateQueries({ queryKey: ['team-member-activity', selectedLogUser.id] });
+            }
+        },
+        onError: () => setErr('تعذر تحديث العضوية'),
+    });
 
-    // Group by role
-    const grouped = members.reduce((acc, member) => {
-        const role = member.role;
-        if (!acc[role]) acc[role] = [];
-        acc[role].push(member);
-        return acc;
-    }, {} as Record<string, TeamMember[]>);
+    const grouped = useMemo(() => {
+        const buckets: Record<string, TeamMember[]> = {};
+        for (const member of members) {
+            if (!buckets[member.role]) buckets[member.role] = [];
+            buckets[member.role].push(member);
+        }
+        return buckets;
+    }, [members]);
 
-    const roleOrder = ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'];
-
-    if (currentUser?.role !== 'director' && currentUser?.role !== 'editor_chief') {
+    if (!canView) {
         return (
             <div className="text-center py-20">
                 <Shield className="w-16 h-16 text-gray-700 mx-auto mb-4" />
                 <h2 className="text-lg font-semibold text-white">صلاحية محدودة</h2>
-                <p className="text-sm text-gray-500 mt-1">هذه الصفحة متاحة للمدير ورؤساء التحرير فقط</p>
+                <p className="text-sm text-gray-500 mt-1">هذه الصفحة متاحة للمدير ورئيس التحرير فقط</p>
             </div>
         );
     }
 
+    const totalOnline = members.filter((m) => m.is_online).length;
+    const roleOrder = ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'];
+
     return (
         <div className="space-y-6">
-            {/* Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-white flex items-center gap-3">
                         <Users className="w-7 h-7 text-violet-400" />
-                        فريق التحرير
+                        إدارة الفريق والعضوية
                     </h1>
                     <p className="text-sm text-gray-500 mt-1">
-                        {members.length} صحفي — {members.filter(m => m.is_online).length} متصل الآن
+                        {members.length} عضو • {totalOnline} متصل الآن
                     </p>
                 </div>
-
-                {/* Online counter */}
-                <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    <span className="text-sm font-medium text-emerald-400">
-                        {members.filter(m => m.is_online).length} متصل
-                    </span>
+                <div className="px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm">
+                    اتصال مباشر: {totalOnline}
                 </div>
             </div>
 
-            {/* Loading */}
-            {isLoading && (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {Array.from({ length: 9 }).map((_, i) => (
-                        <div key={i} className="h-40 rounded-2xl bg-gray-800/30 border border-white/5 animate-pulse" />
-                    ))}
-                </div>
+            {msg && <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">{msg}</div>}
+            {err && <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{err}</div>}
+
+            {isDirector && (
+                <section className="rounded-2xl border border-white/10 bg-gray-900/40 p-4 space-y-3">
+                    <h2 className="text-white font-semibold flex items-center gap-2">
+                        <PlusCircle className="w-4 h-4 text-emerald-300" />
+                        إضافة عضو جديد
+                    </h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <input
+                            value={createForm.full_name_ar}
+                            onChange={(e) => setCreateForm((prev) => ({ ...prev, full_name_ar: e.target.value }))}
+                            className="h-10 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white"
+                            placeholder="الاسم الكامل"
+                        />
+                        <input
+                            value={createForm.username}
+                            onChange={(e) => setCreateForm((prev) => ({ ...prev, username: e.target.value }))}
+                            className="h-10 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white"
+                            placeholder="اسم المستخدم"
+                        />
+                        <input
+                            value={createForm.password}
+                            onChange={(e) => setCreateForm((prev) => ({ ...prev, password: e.target.value }))}
+                            className="h-10 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white"
+                            placeholder="كلمة المرور المبدئية"
+                            type="password"
+                        />
+                        <input
+                            value={createForm.specialization}
+                            onChange={(e) => setCreateForm((prev) => ({ ...prev, specialization: e.target.value }))}
+                            className="h-10 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white"
+                            placeholder="التخصص (اختياري)"
+                        />
+                        <select
+                            value={createForm.role}
+                            onChange={(e) => setCreateForm((prev) => ({ ...prev, role: e.target.value as CreateUserPayload['role'] }))}
+                            className="h-10 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white"
+                        >
+                            {ROLE_OPTIONS.map((role) => (
+                                <option key={role.value} value={role.value}>{role.label}</option>
+                            ))}
+                        </select>
+                        <label className="flex items-center gap-2 text-sm text-gray-300">
+                            <input
+                                type="checkbox"
+                                checked={createForm.is_active}
+                                onChange={(e) => setCreateForm((prev) => ({ ...prev, is_active: e.target.checked }))}
+                                className="accent-emerald-500"
+                            />
+                            الحساب نشط
+                        </label>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                        {DEPARTMENT_OPTIONS.map((dept) => (
+                            <button
+                                key={dept.value}
+                                type="button"
+                                onClick={() =>
+                                    setCreateForm((prev) => ({
+                                        ...prev,
+                                        departments: prev.departments.includes(dept.value)
+                                            ? prev.departments.filter((d) => d !== dept.value)
+                                            : [...prev.departments, dept.value],
+                                    }))
+                                }
+                                className={cn(
+                                    'px-3 py-1.5 rounded-lg text-xs border',
+                                    createForm.departments.includes(dept.value)
+                                        ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-200'
+                                        : 'bg-white/5 border-white/10 text-gray-300'
+                                )}
+                            >
+                                {dept.label}
+                            </button>
+                        ))}
+                    </div>
+
+                    <button
+                        onClick={() =>
+                            createMutation.mutate({
+                                full_name_ar: createForm.full_name_ar.trim(),
+                                username: createForm.username.trim(),
+                                password: createForm.password,
+                                role: createForm.role,
+                                departments: createForm.departments,
+                                specialization: createForm.specialization.trim() || null,
+                                is_active: createForm.is_active,
+                            })
+                        }
+                        disabled={createMutation.isPending || createForm.full_name_ar.trim().length < 2 || createForm.username.trim().length < 2 || createForm.password.length < 8}
+                        className="h-10 px-4 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 text-sm disabled:opacity-40"
+                    >
+                        {createMutation.isPending ? 'جاري الإضافة...' : 'إضافة العضو'}
+                    </button>
+                </section>
             )}
 
-            {/* Members by Role */}
-            {roleOrder.map((role) => {
-                const roleMembers = grouped[role];
-                if (!roleMembers || roleMembers.length === 0) return null;
-                const config = roleConfig[role] || { label: role, color: 'from-gray-500 to-gray-600', icon: Users };
-                const RoleIcon = config.icon;
-
-                return (
-                    <div key={role}>
-                        <div className="flex items-center gap-2 mb-3">
-                            <div className={cn('w-7 h-7 rounded-lg bg-gradient-to-br flex items-center justify-center', config.color)}>
-                                <RoleIcon className="w-4 h-4 text-white" />
+            {usersQuery.isLoading ? (
+                <div className="rounded-2xl border border-white/10 bg-gray-900/40 p-6 text-center text-gray-400">جاري تحميل الفريق...</div>
+            ) : (
+                roleOrder.map((roleKey) => {
+                    const roleMembers = grouped[roleKey];
+                    if (!roleMembers?.length) return null;
+                    const config = ROLE_CONFIG[roleKey] || ROLE_CONFIG.journalist;
+                    const Icon = config.icon;
+                    return (
+                        <section key={roleKey} className="space-y-3">
+                            <div className="flex items-center gap-2">
+                                <div className={cn('w-7 h-7 rounded-lg bg-gradient-to-br flex items-center justify-center', config.color)}>
+                                    <Icon className="w-4 h-4 text-white" />
+                                </div>
+                                <h3 className="text-white text-sm font-semibold">{config.label}</h3>
+                                <span className="text-xs text-gray-500">{roleMembers.length}</span>
                             </div>
-                            <h2 className="text-sm font-semibold text-white">{config.label}</h2>
-                            <span className="text-[10px] text-gray-500 px-2 py-0.5 rounded-full bg-white/5">
-                                {roleMembers.length}
-                            </span>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                            {roleMembers.map((member) => (
-                                <div
-                                    key={member.id}
-                                    className={cn(
-                                        'rounded-2xl p-4 border transition-all duration-200',
-                                        'bg-gradient-to-br from-gray-800/40 to-gray-900/60',
-                                        member.is_active ? 'border-white/5 hover:border-white/10' : 'border-white/[0.02] opacity-50',
-                                    )}
-                                >
-                                    <div className="flex items-center gap-3 mb-3">
-                                        <div className={cn(
-                                            'w-10 h-10 rounded-xl bg-gradient-to-br flex items-center justify-center relative',
-                                            config.color,
-                                        )}>
-                                            <span className="text-white text-sm font-bold">
-                                                {member.full_name_ar.charAt(0)}
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                {roleMembers.map((member) => (
+                                    <article key={member.id} className="rounded-2xl border border-white/10 bg-gray-900/40 p-4 space-y-3">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <div>
+                                                <h4 className="text-white text-sm font-semibold">{member.full_name_ar}</h4>
+                                                <p className="text-xs text-gray-500">@{member.username}</p>
+                                            </div>
+                                            <span className={cn('px-2 py-0.5 rounded-full text-[10px] border', member.is_active ? 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10' : 'border-red-500/40 text-red-300 bg-red-500/10')}>
+                                                {member.is_active ? 'نشط' : 'معطّل'}
                                             </span>
-                                            {member.is_online && (
-                                                <span className="absolute -bottom-0.5 -left-0.5 w-3 h-3 rounded-full bg-emerald-400 border-2 border-gray-900" />
+                                        </div>
+
+                                        <p className="text-xs text-gray-400">{member.specialization || '—'}</p>
+                                        <div className="flex flex-wrap gap-1">
+                                            {member.departments.map((dept) => (
+                                                <span key={`${member.id}-${dept}`} className="px-2 py-0.5 rounded-md bg-white/5 text-[10px] text-gray-300">{dept}</span>
+                                            ))}
+                                        </div>
+
+                                        <div className="text-[11px] text-gray-500 space-y-1">
+                                            <div className="flex items-center gap-1">
+                                                <Activity className="w-3 h-3" />
+                                                {member.is_online ? 'متصل الآن' : 'غير متصل'}
+                                            </div>
+                                            <div className="flex items-center gap-1">
+                                                <Clock4 className="w-3 h-3" />
+                                                آخر دخول: {member.last_login_at ? formatRelativeTime(member.last_login_at) : '—'}
+                                            </div>
+                                        </div>
+
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => setSelectedLogUser(member)}
+                                                className="flex-1 h-9 rounded-xl bg-white/5 border border-white/10 text-xs text-gray-200"
+                                            >
+                                                سجل النشاط
+                                            </button>
+                                            {isDirector && (
+                                                <button
+                                                    onClick={() => {
+                                                        setEditTarget(member);
+                                                        setEditForm({
+                                                            full_name_ar: member.full_name_ar,
+                                                            username: member.username,
+                                                            password: '',
+                                                            role: (member.role as CreateUserPayload['role']) || 'journalist',
+                                                            departments: [...member.departments],
+                                                            specialization: member.specialization || '',
+                                                            is_active: member.is_active,
+                                                        });
+                                                    }}
+                                                    className="flex-1 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-xs text-emerald-200"
+                                                >
+                                                    إدارة العضوية
+                                                </button>
                                             )}
                                         </div>
-                                        <div>
-                                            <h3 className="text-sm font-semibold text-white">{member.full_name_ar}</h3>
-                                            <p className="text-[10px] text-gray-500">@{member.username}</p>
-                                        </div>
-                                    </div>
+                                    </article>
+                                ))}
+                            </div>
+                        </section>
+                    );
+                })
+            )}
 
-                                    {member.specialization && (
-                                        <p className="text-xs text-gray-400 mb-2">{member.specialization}</p>
-                                    )}
-
-                                    <div className="flex flex-wrap gap-1">
-                                        {member.departments.map((dept) => (
-                                            <span key={dept} className="px-2 py-0.5 rounded-md bg-white/5 text-[10px] text-gray-400">
-                                                {deptLabels[dept] || dept}
-                                            </span>
-                                        ))}
+            {selectedLogUser && (
+                <section className="rounded-2xl border border-white/10 bg-gray-900/40 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                        <h3 className="text-white font-semibold">سجل نشاط العضو: {selectedLogUser.full_name_ar}</h3>
+                        <button onClick={() => setSelectedLogUser(null)} className="text-xs text-gray-400 hover:text-white">إغلاق</button>
+                    </div>
+                    {activityQuery.isLoading ? (
+                        <p className="text-sm text-gray-400">جاري تحميل السجل...</p>
+                    ) : !activityItems.length ? (
+                        <p className="text-sm text-gray-500">لا يوجد نشاط مسجل بعد.</p>
+                    ) : (
+                        <div className="space-y-2 max-h-[320px] overflow-auto">
+                            {activityItems.map((item) => (
+                                <div key={item.id} className="rounded-xl border border-white/10 bg-black/20 p-2 text-xs text-gray-300">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-white">{item.action}</span>
+                                        <span className="text-gray-500">{item.created_at ? formatRelativeTime(item.created_at) : '—'}</span>
                                     </div>
+                                    <p className="text-gray-400 mt-1">من: {item.actor_username || 'system'}</p>
+                                    <p className="text-gray-400 mt-1">تفاصيل: {parseDetails(item.details)}</p>
                                 </div>
                             ))}
                         </div>
+                    )}
+                </section>
+            )}
+
+            {editTarget && editForm && (
+                <div className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="w-full max-w-3xl rounded-2xl border border-white/10 bg-gray-950 p-5 space-y-4" dir="rtl">
+                        <h3 className="text-lg text-white font-semibold">تحديث العضوية: {editTarget.full_name_ar}</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <input
+                                value={editForm.full_name_ar}
+                                onChange={(e) => setEditForm((prev) => (prev ? { ...prev, full_name_ar: e.target.value } : prev))}
+                                className="h-10 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white"
+                                placeholder="الاسم"
+                            />
+                            <input
+                                value={editForm.username}
+                                onChange={(e) => setEditForm((prev) => (prev ? { ...prev, username: e.target.value } : prev))}
+                                className="h-10 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white"
+                                placeholder="اسم المستخدم"
+                            />
+                            <input
+                                value={editForm.password}
+                                onChange={(e) => setEditForm((prev) => (prev ? { ...prev, password: e.target.value } : prev))}
+                                className="h-10 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white"
+                                placeholder="كلمة مرور جديدة (اختياري)"
+                                type="password"
+                            />
+                            <input
+                                value={editForm.specialization}
+                                onChange={(e) => setEditForm((prev) => (prev ? { ...prev, specialization: e.target.value } : prev))}
+                                className="h-10 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white"
+                                placeholder="التخصص"
+                            />
+                            <select
+                                value={editForm.role}
+                                onChange={(e) => setEditForm((prev) => (prev ? { ...prev, role: e.target.value as CreateUserPayload['role'] } : prev))}
+                                className="h-10 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white"
+                            >
+                                {ROLE_OPTIONS.map((role) => (
+                                    <option key={role.value} value={role.value}>{role.label}</option>
+                                ))}
+                            </select>
+                            <label className="flex items-center gap-2 text-sm text-gray-300">
+                                <input
+                                    type="checkbox"
+                                    checked={editForm.is_active}
+                                    onChange={(e) => setEditForm((prev) => (prev ? { ...prev, is_active: e.target.checked } : prev))}
+                                    className="accent-emerald-500"
+                                />
+                                الحساب نشط
+                            </label>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                            {DEPARTMENT_OPTIONS.map((dept) => (
+                                <button
+                                    key={dept.value}
+                                    type="button"
+                                    onClick={() =>
+                                        setEditForm((prev) => {
+                                            if (!prev) return prev;
+                                            return {
+                                                ...prev,
+                                                departments: prev.departments.includes(dept.value)
+                                                    ? prev.departments.filter((d) => d !== dept.value)
+                                                    : [...prev.departments, dept.value],
+                                            };
+                                        })
+                                    }
+                                    className={cn(
+                                        'px-3 py-1.5 rounded-lg text-xs border',
+                                        editForm.departments.includes(dept.value)
+                                            ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-200'
+                                            : 'bg-white/5 border-white/10 text-gray-300'
+                                    )}
+                                >
+                                    {dept.label}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2">
+                            <button onClick={() => { setEditTarget(null); setEditForm(null); }} className="h-10 px-4 rounded-xl border border-white/20 text-sm text-gray-300">
+                                إلغاء
+                            </button>
+                            <button
+                                onClick={() => {
+                                    const payload: UpdateUserPayload = {
+                                        full_name_ar: editForm.full_name_ar.trim(),
+                                        username: editForm.username.trim(),
+                                        role: editForm.role,
+                                        departments: editForm.departments,
+                                        specialization: editForm.specialization.trim() || null,
+                                        is_active: editForm.is_active,
+                                    };
+                                    if (editForm.password.trim().length >= 8) payload.password = editForm.password.trim();
+                                    updateMutation.mutate({ userId: editTarget.id, payload });
+                                }}
+                                disabled={updateMutation.isPending}
+                                className="h-10 px-4 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-sm text-emerald-200 disabled:opacity-50"
+                            >
+                                {updateMutation.isPending ? 'جاري الحفظ...' : 'حفظ التغييرات'}
+                            </button>
+                        </div>
                     </div>
-                );
-            })}
+                </div>
+            )}
         </div>
     );
 }

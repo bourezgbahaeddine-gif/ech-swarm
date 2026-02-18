@@ -6,6 +6,7 @@ from app.models.news import (
 )
 from app.models.settings import ApiSetting
 from app.models.audit import SettingsAudit
+from app.models.user_activity import UserActivityLog
 from app.models.constitution import ConstitutionMeta, ConstitutionAck, ImagePrompt, InfographicData
 from app.models.knowledge import (
     ArticleProfile,
@@ -26,6 +27,7 @@ __all__ = [
     "NewsStatus", "NewsCategory", "UrgencyLevel", "Sentiment",
     "ApiSetting",
     "SettingsAudit",
+    "UserActivityLog",
     "ConstitutionMeta",
     "ConstitutionAck",
     "ImagePrompt",
