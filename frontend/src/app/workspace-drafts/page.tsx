@@ -1,7 +1,8 @@
 ﻿'use client';
-/* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
+/* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps */
 
 import { Suspense, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import NextLink from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'next/navigation';
 import { EditorContent, useEditor } from '@tiptap/react';
@@ -110,6 +111,12 @@ function WorkspaceDraftsPageContent() {
     const search = useSearchParams();
     const articleId = search.get('article_id');
     const initialWork = search.get('work_id');
+    const articleNumericId = useMemo(() => {
+        if (!articleId) return null;
+        const parsed = Number(articleId);
+        return Number.isFinite(parsed) ? parsed : null;
+    }, [articleId]);
+    const autoCreateAttemptRef = useRef(false);
 
     const [workId, setWorkId] = useState<string | null>(initialWork || null);
     const [title, setTitle] = useState('');
@@ -144,7 +151,7 @@ function WorkspaceDraftsPageContent() {
 
     const { data: listData, isLoading: listLoading } = useQuery({
         queryKey: ['smart-editor-list', articleId],
-        queryFn: () => editorialApi.workspaceDrafts({ status: 'draft', limit: 200, article_id: articleId ? Number(articleId) : undefined }),
+        queryFn: () => editorialApi.workspaceDrafts({ status: 'draft', limit: 200, article_id: articleNumericId || undefined }),
     });
     const drafts = listData?.data || [];
 
@@ -155,6 +162,10 @@ function WorkspaceDraftsPageContent() {
         setGuideAction(null);
         setGuideOpen(true);
     }, []);
+
+    useEffect(() => {
+        autoCreateAttemptRef.current = false;
+    }, [articleNumericId]);
 
     useEffect(() => {
         if (workId || drafts.length === 0) return;
@@ -308,6 +319,32 @@ function WorkspaceDraftsPageContent() {
         },
         onError: (e: any) => setErr(e?.response?.data?.detail || 'تعذر إنشاء المسودة الجديدة'),
     });
+    const createDraftFromArticle = useMutation({
+        mutationFn: () => editorialApi.handoff(articleNumericId!),
+        onSuccess: (res) => {
+            const nextWorkId = res.data?.work_id;
+            if (!nextWorkId) {
+                setErr('تم ترشيح الخبر ولكن لم يتم إنشاء Work ID. أعد المحاولة.');
+                return;
+            }
+            setWorkId(nextWorkId);
+            setErr(null);
+            setOk('تم إنشاء المسودة من الخبر وفتحها في المحرر.');
+            queryClient.invalidateQueries({ queryKey: ['smart-editor-list', articleId] });
+            queryClient.invalidateQueries({ queryKey: ['smart-editor-context', nextWorkId] });
+            queryClient.invalidateQueries({ queryKey: ['smart-editor-versions', nextWorkId] });
+        },
+        onError: (e: any) => {
+            setErr(e?.response?.data?.detail || 'تعذر إنشاء مسودة الخبر. حاول مرة أخرى.');
+        },
+    });
+
+    useEffect(() => {
+        if (!articleNumericId || listLoading || workId || drafts.length > 0) return;
+        if (autoCreateAttemptRef.current) return;
+        autoCreateAttemptRef.current = true;
+        createDraftFromArticle.mutate();
+    }, [articleNumericId, listLoading, workId, drafts.length, createDraftFromArticle]);
 
     const saveNode = useMemo(() => {
         if (saveState === 'saved') return <span className="text-emerald-300 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" />محفوظ</span>;
@@ -350,7 +387,90 @@ function WorkspaceDraftsPageContent() {
     }
 
     if (listLoading) return <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-8 text-center text-gray-300">جاري تحميل المسودات...</div>;
-    if (!drafts.length) return <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-8 text-center text-gray-400">لا توجد مسودات متاحة حالياً.</div>;
+    if (!drafts.length) {
+        return (
+            <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-8 space-y-4" dir="rtl">
+                <h2 className="text-lg text-white font-semibold">لا توجد مسودة جاهزة الآن</h2>
+                <p className="text-sm text-gray-300">
+                    {articleNumericId
+                        ? 'هذا الخبر لا يملك مسودة بعد. يمكنك إنشاء مسودة فورية من الخبر الحالي.'
+                        : 'ابدأ بإنشاء مسودة جديدة لموضوعك أو افتح خبرًا من صفحة الأخبار.'}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                    {articleNumericId && (
+                        <button
+                            onClick={() => createDraftFromArticle.mutate()}
+                            disabled={createDraftFromArticle.isPending}
+                            className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200 disabled:opacity-60"
+                        >
+                            {createDraftFromArticle.isPending ? 'جاري إنشاء المسودة...' : 'إنشاء مسودة من الخبر'}
+                        </button>
+                    )}
+                    <button
+                        onClick={() => setNewDraftOpen(true)}
+                        className="rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-4 py-2 text-sm text-cyan-200"
+                    >
+                        إنشاء مسودة موضوع خاص
+                    </button>
+                    <NextLink
+                        href="/news"
+                        className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-sm text-gray-200 hover:text-white"
+                    >
+                        العودة إلى الأخبار
+                    </NextLink>
+                </div>
+                {err && <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{err}</div>}
+                {newDraftOpen && (
+                    <div className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-3">
+                        <input
+                            value={manualTitle}
+                            onChange={(e) => setManualTitle(cleanText(e.target.value))}
+                            className="w-full rounded-xl bg-white/5 border border-white/15 px-3 py-2 text-white"
+                            placeholder="عنوان الموضوع"
+                        />
+                        <textarea
+                            value={manualBody}
+                            onChange={(e) => setManualBody(e.target.value)}
+                            className="w-full min-h-[160px] rounded-xl bg-white/5 border border-white/15 px-3 py-2 text-white"
+                            placeholder="متن المسودة الأولي"
+                        />
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            <select value={manualCategory} onChange={(e) => setManualCategory(e.target.value)} className="rounded-xl bg-white/10 px-3 py-2 text-sm text-gray-100">
+                                <option value="local_algeria">محلي الجزائر</option>
+                                <option value="politics">سياسة</option>
+                                <option value="economy">اقتصاد</option>
+                                <option value="society">مجتمع</option>
+                                <option value="technology">تكنولوجيا</option>
+                                <option value="international">دولي</option>
+                                <option value="sports">رياضة</option>
+                            </select>
+                            <select value={manualUrgency} onChange={(e) => setManualUrgency(e.target.value)} className="rounded-xl bg-white/10 px-3 py-2 text-sm text-gray-100">
+                                <option value="low">منخفض</option>
+                                <option value="medium">متوسط</option>
+                                <option value="high">عالٍ</option>
+                                <option value="breaking">عاجل</option>
+                            </select>
+                        </div>
+                        <div className="flex items-center justify-end gap-2">
+                            <button
+                                onClick={() => setNewDraftOpen(false)}
+                                className="rounded-xl border border-white/20 px-4 py-2 text-sm text-gray-300"
+                            >
+                                إلغاء
+                            </button>
+                            <button
+                                onClick={() => createManualDraft.mutate()}
+                                disabled={createManualDraft.isPending || manualTitle.trim().length < 5 || manualBody.trim().length < 30}
+                                className="rounded-xl bg-emerald-500/25 border border-emerald-400/40 px-4 py-2 text-sm text-emerald-100 disabled:opacity-50"
+                            >
+                                {createManualDraft.isPending ? 'جاري الإنشاء...' : 'إنشاء المسودة'}
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-4">

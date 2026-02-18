@@ -38,6 +38,13 @@ const AuthContext = createContext<AuthContextType>({
 
 const PUBLIC_PATHS = ['/login'];
 
+function getHomePathByRole(role: string): string {
+    const normalized = (role || '').toLowerCase();
+    if (normalized === 'director' || normalized === 'editor_chief') return '/';
+    if (normalized === 'social_media') return '/editorial';
+    return '/news';
+}
+
 function readStoredAuth(): { token: string | null; user: AuthUser | null } {
     if (typeof window === 'undefined') {
         return { token: null, user: null };
@@ -82,7 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         api.defaults.headers.common.Authorization = `Bearer ${newToken}`;
         setToken(newToken);
         setUser(newUser);
-        router.push('/');
+        router.push(getHomePathByRole(newUser.role));
     };
 
     const logout = async () => {
@@ -106,4 +113,3 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         </AuthContext.Provider>
     );
 }
-

@@ -1,18 +1,27 @@
 'use client';
 
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { dashboardApi, newsApi } from '@/lib/api';
 import StatsCards from '@/components/dashboard/StatsCards';
 import NewsFeed from '@/components/dashboard/NewsFeed';
 import PipelineMonitor from '@/components/dashboard/PipelineMonitor';
 import AgentControl from '@/components/dashboard/AgentControl';
+import { useAuth } from '@/lib/auth';
 
 export default function DashboardPage() {
+  const router = useRouter();
+  const { user } = useAuth();
+  const role = (user?.role || '').toLowerCase();
+  const isManagerView = role === 'director' || role === 'editor_chief';
+
   const { data: statsData, isLoading: statsLoading } = useQuery({
     queryKey: ['dashboard-stats'],
     queryFn: () => dashboardApi.stats(),
     refetchInterval: 20000,
     refetchOnWindowFocus: true,
+    enabled: isManagerView,
   });
 
   const { data: breakingData, isLoading: breakingLoading } = useQuery({
@@ -20,6 +29,7 @@ export default function DashboardPage() {
     queryFn: () => newsApi.breaking(5),
     refetchInterval: 12000,
     refetchOnWindowFocus: true,
+    enabled: isManagerView,
   });
 
   const { data: pendingData, isLoading: pendingLoading } = useQuery({
@@ -27,6 +37,7 @@ export default function DashboardPage() {
     queryFn: () => newsApi.pending(10),
     refetchInterval: 15000,
     refetchOnWindowFocus: true,
+    enabled: isManagerView,
   });
 
   const { data: pipelineData, isLoading: pipelineLoading } = useQuery({
@@ -34,6 +45,7 @@ export default function DashboardPage() {
     queryFn: () => dashboardApi.pipelineRuns(10),
     refetchInterval: 15000,
     refetchOnWindowFocus: true,
+    enabled: isManagerView,
   });
 
   const { data: agentsData } = useQuery({
@@ -41,13 +53,28 @@ export default function DashboardPage() {
     queryFn: () => dashboardApi.agentStatus(),
     refetchInterval: 20000,
     refetchOnWindowFocus: true,
+    enabled: isManagerView,
   });
+
+  useEffect(() => {
+    if (user && !isManagerView) {
+      router.replace('/news');
+    }
+  }, [isManagerView, router, user]);
+
+  if (user && !isManagerView) {
+    return (
+      <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-8 text-center text-gray-300">
+        جاري تحويلك إلى واجهة الأخبار...
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       <div className="animate-fade-in-up">
         <h1 className="text-2xl font-bold text-white">لوحة القيادة</h1>
-        <p className="text-sm text-gray-500 mt-1">مرحباً برئيس التحرير — إليك آخر المستجدات</p>
+        <p className="text-sm text-gray-500 mt-1">متابعة تشغيل المنصة لمدير التحرير</p>
       </div>
 
       <div className="animate-fade-in-up" style={{ animationDelay: '100ms' }}>
