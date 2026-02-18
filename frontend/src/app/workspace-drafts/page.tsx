@@ -121,6 +121,12 @@ export default function WorkspaceDraftsPage() {
     const [diffView, setDiffView] = useState('');
     const [cmpFrom, setCmpFrom] = useState<number | null>(null);
     const [cmpTo, setCmpTo] = useState<number | null>(null);
+    const [newDraftOpen, setNewDraftOpen] = useState(false);
+    const [manualTitle, setManualTitle] = useState('');
+    const [manualBody, setManualBody] = useState('');
+    const [manualSummary, setManualSummary] = useState('');
+    const [manualCategory, setManualCategory] = useState('local_algeria');
+    const [manualUrgency, setManualUrgency] = useState('medium');
 
     const [guideOpen, setGuideOpen] = useState(false);
     const [guideType, setGuideType] = useState<GuideType>('welcome');
@@ -250,6 +256,32 @@ export default function WorkspaceDraftsPage() {
             queryClient.invalidateQueries({ queryKey: ['smart-editor-context', workId] });
         },
     });
+    const createManualDraft = useMutation({
+        mutationFn: () =>
+            editorialApi.createManualWorkspaceDraft({
+                title: manualTitle,
+                body: manualBody,
+                summary: manualSummary || undefined,
+                category: manualCategory,
+                urgency: manualUrgency,
+                source_action: 'manual_topic',
+            }),
+        onSuccess: (res) => {
+            const nextWorkId = res.data?.work_id;
+            if (!nextWorkId) return;
+            setWorkId(nextWorkId);
+            setOk('تم إنشاء مسودة جديدة وفتحها في المحرر.');
+            setErr(null);
+            setNewDraftOpen(false);
+            setManualTitle('');
+            setManualBody('');
+            setManualSummary('');
+            queryClient.invalidateQueries({ queryKey: ['smart-editor-list'] });
+            queryClient.invalidateQueries({ queryKey: ['smart-editor-context', nextWorkId] });
+            queryClient.invalidateQueries({ queryKey: ['smart-editor-versions', nextWorkId] });
+        },
+        onError: (e: any) => setErr(e?.response?.data?.detail || 'تعذر إنشاء المسودة الجديدة'),
+    });
 
     const saveNode = useMemo(() => {
         if (saveState === 'saved') return <span className="text-emerald-300 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" />محفوظ</span>;
@@ -303,6 +335,12 @@ export default function WorkspaceDraftsPage() {
                         <p className="text-xs text-gray-400">كتابة عربية احترافية + اقتراحات AI + تحقق + بوابة نشر</p>
                     </div>
                     <div className="flex items-center gap-3">
+                        <button
+                            onClick={() => setNewDraftOpen(true)}
+                            className="inline-flex items-center gap-1 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200"
+                        >
+                            مسودة جديدة
+                        </button>
                         <button onClick={openWelcomeGuide} className="inline-flex items-center gap-1 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-200"><CircleHelp className="w-4 h-4" />دليل الاستخدام</button>
                         <div className="text-xs">{saveNode}</div>
                     </div>
@@ -376,13 +414,13 @@ export default function WorkspaceDraftsPage() {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                 <div className="rounded-xl border border-white/10 bg-black/20 p-2">
                                     <p className="text-[11px] text-gray-400 mb-1">قبل التحسين</p>
-                                    <p className="text-xs text-gray-200 whitespace-pre-wrap max-h-40 overflow-auto">
+                                    <p className="text-sm leading-7 text-gray-100 whitespace-pre-wrap max-h-80 overflow-auto">
                                         {truncate(cleanText(suggestion?.preview?.before_text || htmlToReadableText(bodyHtml)), 900)}
                                     </p>
                                 </div>
                                 <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-2">
                                     <p className="text-[11px] text-emerald-200 mb-1">بعد التحسين</p>
-                                    <p className="text-xs text-emerald-50 whitespace-pre-wrap max-h-40 overflow-auto">
+                                    <p className="text-sm leading-7 text-emerald-50 whitespace-pre-wrap max-h-80 overflow-auto">
                                         {truncate(cleanText(suggestion?.preview?.after_text || suggestion?.body_text || htmlToReadableText(suggestion?.body_html || '')), 900)}
                                     </p>
                                 </div>
@@ -395,7 +433,7 @@ export default function WorkspaceDraftsPage() {
                             </button>
                             {showTechnicalDiff && (
                                 <pre className="max-h-56 overflow-auto text-xs text-amber-50 bg-black/25 rounded-xl p-2" dir="ltr">
-                                    {suggestion.diff || 'لا يوجد فرق تقني'}
+                                    {suggestion.diff || suggestion.diff_html || 'لا يوجد فرق تقني'}
                                 </pre>
                             )}
                             <div className="flex gap-2">
@@ -498,6 +536,65 @@ export default function WorkspaceDraftsPage() {
                     )}
                 </aside>
             </div>
+
+            {newDraftOpen && (
+                <div className="fixed inset-0 z-[82] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="w-full max-w-3xl rounded-2xl border border-white/10 bg-gray-950 p-5 space-y-4" dir="rtl">
+                        <h2 className="text-lg text-white font-semibold">إنشاء مسودة جديدة لموضوع خاص</h2>
+                        <p className="text-xs text-gray-400">استخدم هذا النموذج عندما لا يكون الموضوع واردًا من مصادر النظام.</p>
+                        <input
+                            value={manualTitle}
+                            onChange={(e) => setManualTitle(cleanText(e.target.value))}
+                            className="w-full rounded-xl bg-white/5 border border-white/15 px-3 py-2 text-white"
+                            placeholder="عنوان الموضوع"
+                        />
+                        <textarea
+                            value={manualSummary}
+                            onChange={(e) => setManualSummary(cleanText(e.target.value))}
+                            className="w-full min-h-[70px] rounded-xl bg-white/5 border border-white/15 px-3 py-2 text-white"
+                            placeholder="ملخص اختياري"
+                        />
+                        <textarea
+                            value={manualBody}
+                            onChange={(e) => setManualBody(e.target.value)}
+                            className="w-full min-h-[220px] rounded-xl bg-white/5 border border-white/15 px-3 py-2 text-white"
+                            placeholder="متن المسودة الأولي"
+                        />
+                        <div className="grid grid-cols-2 gap-2">
+                            <select value={manualCategory} onChange={(e) => setManualCategory(e.target.value)} className="rounded-xl bg-white/10 px-3 py-2 text-sm text-gray-100">
+                                <option value="local_algeria">محلي الجزائر</option>
+                                <option value="politics">سياسة</option>
+                                <option value="economy">اقتصاد</option>
+                                <option value="society">مجتمع</option>
+                                <option value="technology">تكنولوجيا</option>
+                                <option value="international">دولي</option>
+                                <option value="sports">رياضة</option>
+                            </select>
+                            <select value={manualUrgency} onChange={(e) => setManualUrgency(e.target.value)} className="rounded-xl bg-white/10 px-3 py-2 text-sm text-gray-100">
+                                <option value="low">منخفض</option>
+                                <option value="medium">متوسط</option>
+                                <option value="high">عالٍ</option>
+                                <option value="breaking">عاجل</option>
+                            </select>
+                        </div>
+                        <div className="flex items-center justify-end gap-2">
+                            <button
+                                onClick={() => setNewDraftOpen(false)}
+                                className="rounded-xl border border-white/20 px-4 py-2 text-sm text-gray-300"
+                            >
+                                إلغاء
+                            </button>
+                            <button
+                                onClick={() => createManualDraft.mutate()}
+                                disabled={createManualDraft.isPending || manualTitle.trim().length < 5 || manualBody.trim().length < 30}
+                                className="rounded-xl bg-emerald-500/25 border border-emerald-400/40 px-4 py-2 text-sm text-emerald-100 disabled:opacity-50"
+                            >
+                                {createManualDraft.isPending ? 'جاري الإنشاء...' : 'إنشاء المسودة'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {guideOpen && <GuideModal type={guideType} action={guideAction} onClose={closeGuide} onConfirm={confirmGuide} />}
         </div>

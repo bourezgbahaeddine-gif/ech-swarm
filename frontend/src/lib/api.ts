@@ -309,6 +309,14 @@ export const editorialApi = {
         api.post(`/editorial/${articleId}/drafts/${draftId}/apply`),
     workspaceDrafts: (params?: { status?: string; limit?: number; article_id?: number; source_action?: string }) =>
         api.get<WorkspaceDraft[]>('/editorial/workspace/drafts', { params }),
+    createManualWorkspaceDraft: (data: {
+        title: string;
+        body: string;
+        summary?: string;
+        category?: string;
+        urgency?: string;
+        source_action?: string;
+    }) => api.post('/editorial/workspace/manual-drafts', data),
     workspaceDraft: (workId: string) =>
         api.get<WorkspaceDraft>(`/editorial/workspace/drafts/${workId}`),
     applyWorkspaceDraft: (workId: string) =>

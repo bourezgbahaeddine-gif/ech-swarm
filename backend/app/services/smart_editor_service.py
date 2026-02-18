@@ -194,16 +194,18 @@ title, body_html, note
             candidate = f"<h1>{title}</h1>\n{candidate}"
 
         sanitized = self.sanitize_html(candidate)
-        diff = self.build_diff(draft_html, sanitized)
         before_text = self.html_to_text(draft_html)
         after_text = self.html_to_text(sanitized)
+        diff_text = self.build_diff(before_text, after_text)
+        diff_html = self.build_diff(draft_html, sanitized)
         return {
             "title": title,
             "body_html": sanitized,
             "body_text": after_text,
             "note": note,
-            "diff": diff.diff,
-            "diff_stats": {"added": diff.added, "removed": diff.removed},
+            "diff": diff_text.diff,
+            "diff_html": diff_html.diff,
+            "diff_stats": {"added": diff_text.added, "removed": diff_text.removed},
             "preview": {
                 "before_text": before_text[:1400],
                 "after_text": after_text[:1400],

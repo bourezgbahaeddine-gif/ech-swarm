@@ -1,4 +1,5 @@
 from datetime import datetime
+import hashlib
 import re
 from typing import Any, Literal, Optional
 from uuid import uuid4
@@ -22,6 +23,7 @@ from app.models import (
     FeedbackLog,
     NewsCategory,
     NewsStatus,
+    UrgencyLevel,
     StoryCluster,
     StoryClusterMember,
 )
@@ -100,6 +102,15 @@ class ClaimVerifyRequest(BaseModel):
 class ChiefFinalDecisionRequest(BaseModel):
     decision: Literal["approve", "return_for_revision"]
     notes: Optional[str] = Field(default=None, max_length=1000)
+
+
+class ManualWorkspaceDraftCreateRequest(BaseModel):
+    title: str = Field(..., min_length=5, max_length=1024)
+    body: str = Field(..., min_length=30, max_length=50000)
+    summary: Optional[str] = Field(default=None, max_length=3000)
+    category: Optional[str] = Field(default="local_algeria", max_length=50)
+    urgency: Optional[str] = Field(default="medium", max_length=20)
+    source_action: Optional[str] = Field(default="manual_topic", max_length=100)
 
 
 def _require_roles(user: User, allowed: set[UserRole]) -> None:
@@ -229,6 +240,36 @@ def _draft_to_dict(draft: EditorialDraft) -> dict:
 
 def _new_work_id() -> str:
     return f"WRK-{datetime.utcnow():%Y%m%d}-{uuid4().hex[:10].upper()}"
+
+
+def _normalize_category(value: str | None) -> NewsCategory:
+    raw = (value or "").strip().lower()
+    try:
+        return NewsCategory(raw)
+    except Exception:
+        return NewsCategory.LOCAL_ALGERIA
+
+
+def _normalize_urgency(value: str | None) -> UrgencyLevel:
+    raw = (value or "").strip().lower()
+    try:
+        return UrgencyLevel(raw)
+    except Exception:
+        return UrgencyLevel.MEDIUM
+
+
+def _ensure_html_body(title: str, body: str) -> str:
+    candidate = (body or "").strip()
+    if not candidate:
+        return "<h1>مسودة جديدة</h1><p></p>"
+    if smart_editor_service._contains_html(candidate):
+        sanitized = smart_editor_service.sanitize_html(candidate)
+        if "<h1" not in sanitized.lower():
+            return f"<h1>{title}</h1>\n{sanitized}"
+        return sanitized
+    lines = [line.strip() for line in re.split(r"\n+", candidate) if line.strip()]
+    html_body = "\n".join(f"<p>{line}</p>" for line in lines)
+    return smart_editor_service.sanitize_html(f"<h1>{title}</h1>\n{html_body}")
 
 
 def _resolve_latest_draft_by_work_id_stmt(work_id: str):
@@ -919,6 +960,86 @@ async def social_approved_feed(
             }
         )
     return out
+
+
+@router.post("/workspace/manual-drafts")
+async def create_manual_workspace_draft(
+    payload: ManualWorkspaceDraftCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(
+        current_user,
+        {
+            UserRole.director,
+            UserRole.editor_chief,
+            UserRole.journalist,
+            UserRole.print_editor,
+        },
+    )
+
+    title = _clean_editorial_output(payload.title).strip() or "مسودة جديدة"
+    body_html = _ensure_html_body(title, payload.body)
+    summary = _clean_editorial_output(payload.summary or "")[:3000] or smart_editor_service.html_to_text(body_html)[:400]
+    work_id = _new_work_id()
+
+    unique_seed = f"manual:{title}:{datetime.utcnow().isoformat()}:{uuid4().hex}"
+    unique_hash = hashlib.sha256(unique_seed.encode("utf-8")).hexdigest()
+
+    urgency = _normalize_urgency(payload.urgency)
+    is_breaking = urgency == UrgencyLevel.BREAKING
+    importance_score = 8 if is_breaking else (6 if urgency == UrgencyLevel.HIGH else 5)
+
+    article = Article(
+        unique_hash=unique_hash,
+        original_title=title,
+        original_url=f"manual://workspace/{work_id}",
+        original_content=smart_editor_service.html_to_text(body_html),
+        source_id=None,
+        source_name="manual_newsroom",
+        title_ar=title,
+        summary=summary,
+        body_html=body_html,
+        category=_normalize_category(payload.category),
+        importance_score=importance_score,
+        urgency=urgency,
+        is_breaking=is_breaking,
+        status=NewsStatus.DRAFT_GENERATED,
+        reviewed_by=current_user.full_name_ar,
+        reviewed_at=datetime.utcnow(),
+    )
+    db.add(article)
+    await db.flush()
+
+    draft = EditorialDraft(
+        article_id=article.id,
+        work_id=work_id,
+        source_action=payload.source_action or "manual_topic",
+        change_origin="manual",
+        title=title,
+        body=body_html,
+        note="manual_workspace_topic",
+        status="draft",
+        version=1,
+        created_by=current_user.full_name_ar,
+        updated_by=current_user.full_name_ar,
+    )
+    db.add(draft)
+    await db.flush()
+
+    try:
+        await article_index_service.upsert_article(db, article)
+    except Exception as exc:  # pragma: no cover
+        logger.warning("manual_workspace_index_warn", article_id=article.id, error=str(exc))
+
+    await db.commit()
+
+    return {
+        "article_id": article.id,
+        "work_id": work_id,
+        "status": article.status.value if article.status else None,
+        "draft": _draft_to_dict(draft),
+    }
 
 
 @router.get("/{article_id}/social/variants")
