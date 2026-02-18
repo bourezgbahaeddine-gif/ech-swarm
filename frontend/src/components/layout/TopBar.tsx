@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Bell, Search, LogOut, User, Shield, FileText, Sparkles, Loader2, Clipboard, X } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
@@ -172,10 +173,16 @@ function QuickTasksDrawer({ onClose }: { onClose: () => void }) {
     const [platform, setPlatform] = useState('facebook');
     const [result, setResult] = useState('');
     const [busy, setBusy] = useState(false);
+    const [mounted, setMounted] = useState(false);
     const [showHelp, setShowHelp] = useState(() => {
         if (typeof window === 'undefined') return false;
         return !window.localStorage.getItem(QUICK_HELP_KEY);
     });
+
+    useEffect(() => {
+        setMounted(true);
+        return () => setMounted(false);
+    }, []);
 
     const quickTips = useMemo(
         () => [
@@ -222,7 +229,9 @@ function QuickTasksDrawer({ onClose }: { onClose: () => void }) {
         setShowHelp(false);
     }
 
-    return (
+    if (!mounted) return null;
+
+    return createPortal(
         <div className="fixed inset-0 z-[120] bg-black/80 flex justify-end">
             <div className="w-full max-w-2xl h-full bg-[#0b1220] border-l border-white/20 shadow-2xl shadow-black/70 p-4 space-y-3 overflow-y-auto" dir="rtl">
                 <div className="flex items-center justify-between">
@@ -291,6 +300,7 @@ function QuickTasksDrawer({ onClose }: { onClose: () => void }) {
                     )}
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body
     );
 }
