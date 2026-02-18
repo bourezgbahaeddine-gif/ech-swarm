@@ -258,6 +258,7 @@ async def multimedia_translate(payload: dict):
 async def multimedia_image_prompt(payload: dict, db: AsyncSession = Depends(get_db)):
     text = payload.get("text", "")
     style = payload.get("style", "cinematic")
+    model = (payload.get("model") or "nanobanana2").strip().lower()
     lang = _target_language(payload)
     article_id = payload.get("article_id")
     created_by = payload.get("created_by")
@@ -267,15 +268,21 @@ async def multimedia_image_prompt(payload: dict, db: AsyncSession = Depends(get_
     prompt = f"""
 {CONSTITUTION_BASE}
 أنت مهندس برومبتات بصري في غرفة أخبار الشروق.
-ابنِ 3 برومبتات احترافية لصورة خبرية باللغة {_lang_name(lang)}.
+النموذج المستهدف: {model}
+ابنِ 3 برومبتات احترافية لصورة خبرية باللغة {_lang_name(lang)} جاهزة لنموذج NanoBanana 2.
 
 إخراج إلزامي:
 - أعِد فقط 3 برومبتات مرقمة (1، 2، 3).
 - ممنوع الشرح أو التعليقات الجانبية.
 - كل برومبت يجب أن يتضمن:
-  الموضوع، النمط البصري، الإضاءة، التكوين، العدسة/الكاميرا، العناصر البصرية الداعمة،
-  ألوان الهوية (برتقالي الشروق #F37021 + أسود #0A0A0A + أبيض #FFFFFF)،
-  مساحة نص آمنة، ونسبة أبعاد واضحة.
+  [SCENE] الموضوع بصياغة تصويرية دقيقة،
+  [STYLE] النمط البصري الصحفي،
+  [CAMERA] العدسة/زاوية التصوير،
+  [LIGHTING] الإضاءة،
+  [COMPOSITION] التكوين،
+  [BRAND COLORS] (برتقالي الشروق #F37021 + أسود #0A0A0A + أبيض #FFFFFF)،
+  [NEGATIVE] ما يجب منعه (لا شعارات مشوهة، لا نص داخل الصورة، لا تشويه وجوه، لا تهويل، لا دماء صادمة)،
+  [ASPECT] نسبة الأبعاد.
 - الصورة يجب أن تكون صحفية واقعية بدون تهويل أو تضليل.
 
 نص الخبر:
@@ -339,6 +346,7 @@ async def infographic_analyze(payload: dict, db: AsyncSession = Depends(get_db))
 @router.post("/multimedia/infographic/prompt")
 async def infographic_prompt(payload: dict, db: AsyncSession = Depends(get_db)):
     data = payload.get("data", {})
+    model = (payload.get("model") or "nanobanana2").strip().lower()
     lang = _target_language(payload)
     article_id = payload.get("article_id")
     created_by = payload.get("created_by")
@@ -347,6 +355,7 @@ async def infographic_prompt(payload: dict, db: AsyncSession = Depends(get_db)):
     prompt = f"""
 {CONSTITUTION_BASE}
 أنت مهندس برومبت بصري في غرفة أخبار الشروق.
+النموذج المستهدف: {model}
 ابنِ برومبت إنفوغرافيا نهائي باللغة {_lang_name(lang)} اعتمادًا على البيانات التالية:
 {data}
 
@@ -356,6 +365,8 @@ async def infographic_prompt(payload: dict, db: AsyncSession = Depends(get_db)):
 - خطوط عربية مناسبة.
 - تحديد لوحة الألوان ونسبة الأبعاد.
 - وصف العناصر الأساسية بدقة (عناوين، أرقام، ترتيب بصري).
+- صياغة متوافقة مع NanoBanana 2 عبر أقسام:
+  [LAYOUT], [HIERARCHY], [ICONOGRAPHY], [TEXT-SAFE-ZONE], [NEGATIVE], [ASPECT].
 - بدون أي شرح جانبي؛ أعِد البرومبت النهائي فقط.
 """
     result = _sanitize_ai_text(await ai_service.generate_text(prompt))

@@ -17,11 +17,22 @@ export const journalistServicesApi = {
     videoScript: (text: string) => api.post('/services/multimedia/video-script', { text }),
     sentiment: (text: string) => api.post('/services/multimedia/sentiment', { text }),
     translate: (text: string, source_lang: string) => api.post('/services/multimedia/translate', { text, source_lang }),
-    imagePrompt: (text: string, style: string, article_id?: number, created_by?: string, language = 'ar') =>
-        api.post('/services/multimedia/image-prompt', { text, style, article_id, created_by, language }),
+    imagePrompt: (
+        text: string,
+        style: string,
+        article_id?: number,
+        created_by?: string,
+        language = 'ar',
+        model = 'nanobanana2',
+    ) => api.post('/services/multimedia/image-prompt', { text, style, article_id, created_by, language, model }),
     infographicAnalyze: (text: string, article_id?: number, created_by?: string, language = 'ar') =>
         api.post('/services/multimedia/infographic/analyze', { text, article_id, created_by, language }),
-    infographicPrompt: (data: unknown, article_id?: number, created_by?: string, language = 'ar') =>
-        api.post('/services/multimedia/infographic/prompt', { data, article_id, created_by, language }),
+    infographicPrompt: (
+        data: unknown,
+        article_id?: number,
+        created_by?: string,
+        language = 'ar',
+        model = 'nanobanana2',
+    ) => api.post('/services/multimedia/infographic/prompt', { data, article_id, created_by, language, model }),
     infographicRender: (prompt: string) => api.post('/services/multimedia/infographic/render', { prompt }),
 };

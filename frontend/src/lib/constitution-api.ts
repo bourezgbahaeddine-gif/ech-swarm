@@ -5,4 +5,5 @@ export const constitutionApi = {
     ackStatus: () => api.get('/constitution/ack'),
     acknowledge: (version: string) => api.post('/constitution/ack', { version }),
     tips: () => api.get('/constitution/tips'),
+    guide: () => api.get('/constitution/guide'),
 };
