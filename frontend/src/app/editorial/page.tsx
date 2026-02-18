@@ -31,7 +31,7 @@ export default function EditorialPage() {
     const role = (user?.role || '').toLowerCase();
     const isChief = role === 'director' || role === 'editor_chief';
     const isSocial = role === 'social_media';
-    const canNominate = role === 'journalist' || role === 'director' || role === 'editor_chief';
+    const canNominate = role === 'journalist' || role === 'social_media' || role === 'director' || role === 'editor_chief';
 
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -47,7 +47,7 @@ export default function EditorialPage() {
     const pendingCandidatesQuery = useQuery({
         queryKey: ['pending-candidates-journalist'],
         queryFn: () => newsApi.pending(80),
-        enabled: !isChief && !isSocial,
+        enabled: !isChief,
         refetchInterval: 30000,
     });
 
@@ -204,28 +204,6 @@ export default function EditorialPage() {
                         })
                     )}
                 </div>
-            ) : isSocial ? (
-                <div className="space-y-3">
-                    {socialFeedQuery.isLoading ? (
-                        <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-6 text-center text-gray-400">جاري تحميل الأخبار المعتمدة...</div>
-                    ) : socialItems.length === 0 ? (
-                        <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-6 text-center text-gray-400">لا توجد أخبار معتمدة حالياً.</div>
-                    ) : (
-                        socialItems.map((item) => (
-                            <div key={item.article_id} className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-2" dir="rtl">
-                                <h3 className="text-base text-white font-semibold">{item.title}</h3>
-                                <p className="text-xs text-gray-400">{item.source_name || 'بدون مصدر'} • {formatRelativeTime(item.updated_at)}</p>
-                                <button
-                                    onClick={() => socialCopyMutation.mutate(item.article_id)}
-                                    disabled={socialCopyMutation.isPending}
-                                    className="px-3 py-2 rounded-xl border border-cyan-500/30 bg-cyan-500/20 text-xs text-cyan-200"
-                                >
-                                    نسخ النسخ الجاهزة
-                                </button>
-                            </div>
-                        ))
-                    )}
-                </div>
             ) : (
                 <div className="space-y-3">
                     {pendingCandidatesQuery.isLoading ? (
@@ -263,6 +241,31 @@ export default function EditorialPage() {
                                         المصدر
                                     </a>
                                 </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+            )}
+
+            {isSocial && (
+                <div className="space-y-3">
+                    <h2 className="text-sm font-semibold text-white">نسخ السوشيال من الأخبار المعتمدة</h2>
+                    {socialFeedQuery.isLoading ? (
+                        <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-6 text-center text-gray-400">جاري تحميل الأخبار المعتمدة...</div>
+                    ) : socialItems.length === 0 ? (
+                        <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-6 text-center text-gray-400">لا توجد أخبار معتمدة حالياً.</div>
+                    ) : (
+                        socialItems.map((item) => (
+                            <div key={item.article_id} className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-2" dir="rtl">
+                                <h3 className="text-base text-white font-semibold">{item.title}</h3>
+                                <p className="text-xs text-gray-400">{item.source_name || 'بدون مصدر'} • {formatRelativeTime(item.updated_at)}</p>
+                                <button
+                                    onClick={() => socialCopyMutation.mutate(item.article_id)}
+                                    disabled={socialCopyMutation.isPending}
+                                    className="px-3 py-2 rounded-xl border border-cyan-500/30 bg-cyan-500/20 text-xs text-cyan-200"
+                                >
+                                    نسخ النسخ الجاهزة
+                                </button>
                             </div>
                         ))
                     )}

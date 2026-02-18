@@ -41,7 +41,6 @@ const PUBLIC_PATHS = ['/login'];
 function getHomePathByRole(role: string): string {
     const normalized = (role || '').toLowerCase();
     if (normalized === 'director' || normalized === 'editor_chief') return '/';
-    if (normalized === 'social_media') return '/editorial';
     return '/news';
 }
 

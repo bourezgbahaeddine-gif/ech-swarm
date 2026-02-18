@@ -289,7 +289,7 @@ NEWSROOM_ROLES = {
     UserRole.print_editor,
 }
 
-AUTHOR_ROLES = {UserRole.director, UserRole.editor_chief, UserRole.journalist}
+AUTHOR_ROLES = {UserRole.director, UserRole.editor_chief, UserRole.journalist, UserRole.social_media}
 CHIEF_REVIEW_STATUSES = {
     NewsStatus.READY_FOR_CHIEF_APPROVAL,
     NewsStatus.APPROVAL_REQUEST_WITH_RESERVATIONS,
@@ -2076,7 +2076,7 @@ async def generate_article(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_roles(current_user, {UserRole.director, UserRole.editor_chief, UserRole.journalist})
+    _require_roles(current_user, {UserRole.director, UserRole.editor_chief, UserRole.journalist, UserRole.social_media})
     result = await scribe_agent.write_article(db, article_id)
     if "error" in result:
         raise HTTPException(400, result["error"])

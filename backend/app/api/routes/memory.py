@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routes.auth import get_current_user
@@ -38,6 +38,7 @@ WRITE_ROLES = {
     UserRole.director,
     UserRole.editor_chief,
     UserRole.journalist,
+    UserRole.social_media,
     UserRole.print_editor,
 }
 MANAGE_ROLES = {
@@ -65,12 +66,31 @@ def _assert_manage(user: User) -> None:
         raise HTTPException(status_code=403, detail="غير مسموح لك بإدارة حالة ذاكرة المشروع.")
 
 
+async def _ensure_memory_tables(db: AsyncSession) -> None:
+    checks = await db.execute(
+        text(
+            """
+            SELECT
+                to_regclass('public.project_memory_items') AS items_tbl,
+                to_regclass('public.project_memory_events') AS events_tbl
+            """
+        )
+    )
+    row = checks.mappings().first()
+    if not row or not row["items_tbl"] or not row["events_tbl"]:
+        raise HTTPException(
+            status_code=503,
+            detail="جداول ذاكرة المشروع غير جاهزة. نفّذ ترحيل قاعدة البيانات: alembic upgrade head",
+        )
+
+
 @router.get("/overview", response_model=MemoryOverviewResponse)
 async def overview(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     _assert_read(current_user)
+    await _ensure_memory_tables(db)
     data = await project_memory_service.overview(db)
     return MemoryOverviewResponse(**data)
 
@@ -87,6 +107,7 @@ async def list_items(
     db: AsyncSession = Depends(get_db),
 ):
     _assert_read(current_user)
+    await _ensure_memory_tables(db)
     items, total = await project_memory_service.search_items(
         db,
         q=q,
@@ -113,6 +134,7 @@ async def create_item(
     db: AsyncSession = Depends(get_db),
 ):
     _assert_write(current_user)
+    await _ensure_memory_tables(db)
     if payload.article_id is not None:
         article_exists = await db.execute(select(Article.id).where(Article.id == payload.article_id))
         if article_exists.scalar_one_or_none() is None:
@@ -142,6 +164,7 @@ async def get_item(
     db: AsyncSession = Depends(get_db),
 ):
     _assert_read(current_user)
+    await _ensure_memory_tables(db)
     row = await db.execute(select(ProjectMemoryItem).where(ProjectMemoryItem.id == item_id))
     item = row.scalar_one_or_none()
     if not item:
@@ -157,6 +180,7 @@ async def update_item(
     db: AsyncSession = Depends(get_db),
 ):
     _assert_write(current_user)
+    await _ensure_memory_tables(db)
     row = await db.execute(select(ProjectMemoryItem).where(ProjectMemoryItem.id == item_id))
     item = row.scalar_one_or_none()
     if not item:
@@ -218,6 +242,7 @@ async def mark_item_used(
     db: AsyncSession = Depends(get_db),
 ):
     _assert_read(current_user)
+    await _ensure_memory_tables(db)
     row = await db.execute(select(ProjectMemoryItem).where(ProjectMemoryItem.id == item_id))
     item = row.scalar_one_or_none()
     if not item:
@@ -248,6 +273,7 @@ async def get_item_events(
     db: AsyncSession = Depends(get_db),
 ):
     _assert_read(current_user)
+    await _ensure_memory_tables(db)
     row = await db.execute(select(ProjectMemoryItem.id).where(ProjectMemoryItem.id == item_id))
     if row.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail="عنصر الذاكرة غير موجود.")

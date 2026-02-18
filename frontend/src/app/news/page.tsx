@@ -335,7 +335,7 @@ function NewsPageContent() {
 
     const role = (user?.role || '').toLowerCase();
     const canApproveReject = role === 'director' || role === 'editor_chief';
-    const canRewrite = ['director', 'editor_chief', 'journalist', 'print_editor'].includes(role);
+    const canRewrite = ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'].includes(role);
     const canProcess = canRewrite;
     const isSocialRole = role === 'social_media';
     const canUseMultimedia = ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'].includes(role);

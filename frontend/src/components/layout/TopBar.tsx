@@ -38,7 +38,7 @@ export default function TopBar() {
     const [showQuickTools, setShowQuickTools] = useState(false);
     const [showPublishedMonitor, setShowPublishedMonitor] = useState(false);
     const role = (user?.role || '').toLowerCase();
-    const canUseQuickTasks = ['director', 'editor_chief', 'journalist', 'print_editor', 'fact_checker'].includes(role);
+    const canUseQuickTasks = ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor', 'fact_checker'].includes(role);
 
     const { data: notificationsData, isLoading: notificationsLoading } = useQuery({
         queryKey: ['dashboard-notifications'],
