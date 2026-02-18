@@ -223,11 +223,11 @@ function QuickTasksDrawer({ onClose }: { onClose: () => void }) {
     }
 
     return (
-        <div className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm flex justify-end">
-            <div className="w-full max-w-2xl h-full bg-gray-950 border-l border-white/10 p-4 space-y-3" dir="rtl">
+        <div className="fixed inset-0 z-[120] bg-black/80 flex justify-end">
+            <div className="w-full max-w-2xl h-full bg-[#0b1220] border-l border-white/20 shadow-2xl shadow-black/70 p-4 space-y-3 overflow-y-auto" dir="rtl">
                 <div className="flex items-center justify-between">
                     <h2 className="text-white font-semibold">الخانة الجانبية للمهام السريعة</h2>
-                    <button onClick={onClose} className="px-2 py-1 rounded bg-white/10 text-gray-300 text-xs">إغلاق</button>
+                    <button onClick={onClose} className="px-2 py-1 rounded bg-white/15 text-gray-100 text-xs border border-white/20 hover:bg-white/20">إغلاق</button>
                 </div>
 
                 {showHelp && (
@@ -244,14 +244,14 @@ function QuickTasksDrawer({ onClose }: { onClose: () => void }) {
                 <textarea
                     value={text}
                     onChange={(e) => setText(e.target.value)}
-                    className="w-full min-h-[180px] p-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm"
+                    className="w-full min-h-[180px] p-3 rounded-xl bg-[#111a2b] border border-white/20 text-white text-sm placeholder:text-gray-400"
                     placeholder="ألصق النص هنا..."
                 />
 
                 <textarea
                     value={reference}
                     onChange={(e) => setReference(e.target.value)}
-                    className="w-full min-h-[90px] p-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm"
+                    className="w-full min-h-[90px] p-3 rounded-xl bg-[#111a2b] border border-white/20 text-white text-sm placeholder:text-gray-400"
                     placeholder="مرجع التحقق (اختياري)"
                 />
 
@@ -264,7 +264,7 @@ function QuickTasksDrawer({ onClose }: { onClose: () => void }) {
                     <select
                         value={platform}
                         onChange={(e) => setPlatform(e.target.value)}
-                        className="px-2 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-gray-200"
+                        className="px-2 py-2 rounded-xl bg-[#111a2b] border border-white/20 text-xs text-gray-100"
                     >
                         <option value="facebook">Facebook</option>
                         <option value="twitter">X</option>
@@ -273,7 +273,7 @@ function QuickTasksDrawer({ onClose }: { onClose: () => void }) {
                     <button onClick={() => run('social')} className="px-3 py-2 rounded-xl bg-cyan-500/20 border border-cyan-500/30 text-cyan-200 text-xs">نسخ سوشيال</button>
                 </div>
 
-                <div className="rounded-xl border border-white/10 bg-black/20 p-3 min-h-[220px]">
+                <div className="rounded-xl border border-white/20 bg-[#0a1424] p-3 min-h-[220px]">
                     <div className="flex items-center justify-between mb-1">
                         <p className="text-xs text-gray-400">النتيجة</p>
                         <button
