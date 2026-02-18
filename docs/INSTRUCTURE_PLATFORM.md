@@ -6,6 +6,14 @@
 - فرض حوكمة تحريرية قبل الاعتماد النهائي.
 - إبقاء النشر النهائي يدويًا 100%.
 
+### ملاحق تشغيل مرتبطة
+- `docs/EXPERIMENT_PACKAGE_INDEX.md`
+- `docs/PLATFORM_CONTENT_MAP.md`
+- `docs/EXPERIMENT_SMOKE_TEST_PLAN.md`
+- `docs/TROUBLESHOOTING_PLAYBOOK.md`
+- `docs/OPERATIONS_QUICK_COMMANDS.md`
+- `docs/FINAL_REVIEW_2026-02-18.md`
+
 ## 2) الحالة التشغيلية الحالية (تدقيق الوكيل المراقب)
 تاريخ التدقيق: 2026-02-18
 
@@ -24,13 +32,11 @@
   - النتيجة: **pass**
 - Frontend lint (فحص جودة الكود العام):
   - الأمر: `npm run lint`
-  - النتيجة: **fails** (تفاصيل في قسم الأخطاء)
+  - النتيجة: **pass مع warnings فقط** (بدون errors)
 
-### عوائق منعت E2E كامل
-- Docker daemon غير متاح محليًا:
-  - خطأ: `dockerDesktopLinuxEngine pipe not found`
-- Backend غير قابل للتشغيل مباشرة من `.venv` الحالي بسبب نقص تبعيات runtime (مثل `fastapi`).
-- نتيجة ذلك: تم تنفيذ تدقيق شامل على مستوى build/type/tests + مراجعة مسارات الواجهة والكود، لكن ليس اختبار E2E حيّ عبر خادم شغال محليًا.
+### ملاحظة على نطاق التدقيق
+- تدقيق هذه النسخة يغطي build/type/tests ومراجعة المسارات والواجهات.
+- اختبار E2E الحي يعتمد على بيئة Docker السيرفر (وليس جلسة Windows المحلية فقط).
 
 ## 3) البنية التقنية
 
