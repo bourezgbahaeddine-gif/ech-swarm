@@ -40,6 +40,7 @@ export default function MsiPage() {
     const [runId, setRunId] = useState('');
     const [liveEvents, setLiveEvents] = useState<string[]>([]);
     const [watchEntity, setWatchEntity] = useState('');
+    const [watchAliases, setWatchAliases] = useState('');
 
     const { data: profilesData } = useQuery({
         queryKey: ['msi-profiles'],
@@ -130,12 +131,21 @@ export default function MsiPage() {
             msiApi.addWatchlist({
                 profile_id: profileId,
                 entity: watchEntity.trim(),
+                aliases: watchAliases.split(',').map((v) => v.trim()).filter(Boolean),
                 run_daily: true,
                 run_weekly: true,
                 enabled: true,
             }),
         onSuccess: async () => {
             setWatchEntity('');
+            setWatchAliases('');
+            await queryClient.invalidateQueries({ queryKey: ['msi-watchlist'] });
+        },
+    });
+
+    const seedWatchlistMutation = useMutation({
+        mutationFn: () => msiApi.seedWatchlist(),
+        onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: ['msi-watchlist'] });
         },
     });
@@ -227,6 +237,11 @@ export default function MsiPage() {
                             <p key={d.name} className="text-gray-200">{d.name}: <span className="text-white font-semibold">{d.value}%</span></p>
                         ))}
                         {!report && <p className="text-gray-500">شغّل التحليل لعرض الدوافع.</p>}
+                        {!!report?.confidence && (
+                            <p className="text-cyan-200 pt-1">
+                                موثوقية القياس: <span className="font-semibold">{report.confidence.score}%</span> ({report.confidence.level})
+                            </p>
+                        )}
                     </div>
                 </div>
             </div>
@@ -312,6 +327,13 @@ export default function MsiPage() {
                                     className="flex-1 h-10 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white"
                                     dir="rtl"
                                 />
+                                <input
+                                    value={watchAliases}
+                                    onChange={(e) => setWatchAliases(e.target.value)}
+                                    placeholder="أسماء بديلة مفصولة بفاصلة"
+                                    className="flex-1 h-10 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white"
+                                    dir="rtl"
+                                />
                                 <button
                                     onClick={() => addWatchMutation.mutate()}
                                     disabled={!watchEntity.trim() || addWatchMutation.isPending}
@@ -319,12 +341,22 @@ export default function MsiPage() {
                                 >
                                     إضافة
                                 </button>
+                                <button
+                                    onClick={() => seedWatchlistMutation.mutate()}
+                                    disabled={seedWatchlistMutation.isPending}
+                                    className="h-10 px-4 rounded-xl border border-emerald-500/30 bg-emerald-500/20 text-emerald-200 text-sm disabled:opacity-50"
+                                >
+                                    تحميل قائمة مهمة
+                                </button>
                             </div>
                             <div className="space-y-2 max-h-56 overflow-auto">
                                 {(watchlistData?.data || []).map((item) => (
                                     <div key={item.id} className="rounded-xl bg-white/5 border border-white/10 px-3 py-2">
                                         <p className="text-sm text-gray-200">{item.entity}</p>
                                         <p className="text-xs text-gray-500 mt-1">{item.profile_id} • {item.enabled ? 'مفعل' : 'معطل'}</p>
+                                        {!!item.aliases?.length && (
+                                            <p className="text-xs text-cyan-200 mt-1">أسماء بديلة: {item.aliases.join('، ')}</p>
+                                        )}
                                     </div>
                                 ))}
                             </div>

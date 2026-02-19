@@ -95,6 +95,7 @@ class MsiGraphNodes:
     async def build_queries(self, state: dict[str, Any]) -> dict[str, Any]:
         st = MSIState.model_validate(state)
         aliases = [st.entity]
+        aliases.extend([a for a in st.watchlist_aliases if isinstance(a, str)])
         profile_aliases = (((st.profile or {}).get("entities") or {}).get("aliases") or [])
         aliases.extend([a for a in profile_aliases if isinstance(a, str)])
         aliases = [a.strip() for a in aliases if a and a.strip()]
@@ -217,6 +218,8 @@ class MsiGraphNodes:
         shock_hits = 0
         novelty_values: list[float] = []
         topic_counter: Counter[str] = Counter()
+        llm_failed_count = 0
+        unique_domains: set[str] = set()
 
         for item in items:
             pressure = max(0.0, (-item.tone * 0.7) + (item.intensity * 0.3))
@@ -224,6 +227,10 @@ class MsiGraphNodes:
             novelty_values.append(item.novelty)
             if item.intensity >= 0.8:
                 shock_hits += 1
+            if item.llm_failed:
+                llm_failed_count += 1
+            if item.domain:
+                unique_domains.add(item.domain)
             for topic in item.topics:
                 topic_counter[topic] += 1
 
@@ -255,6 +262,8 @@ class MsiGraphNodes:
 
         aggregates = MSIAggregates(
             total_items=len(items),
+            unique_sources=len(unique_domains),
+            llm_failure_ratio=round(llm_failed_count / max(1, len(items)), 4),
             pressure=round(float(max(0.0, min(1.0, pressure))), 4),
             shock=round(float(max(0.0, min(1.0, shock))), 4),
             novelty=round(float(max(0.0, min(1.0, novelty))), 4),
@@ -326,6 +335,12 @@ class MsiGraphNodes:
         ]
         drivers = sorted(drivers, key=lambda d: d["value"], reverse=True)
 
+        sample_score = min(1.0, st.aggregates.total_items / 12)
+        source_score = min(1.0, st.aggregates.unique_sources / 6)
+        llm_score = max(0.0, 1.0 - st.aggregates.llm_failure_ratio)
+        confidence_value = round((sample_score * 0.5 + source_score * 0.35 + llm_score * 0.15) * 100, 1)
+        confidence_level = "HIGH" if confidence_value >= 75 else ("MEDIUM" if confidence_value >= 50 else "LOW")
+
         explanation = (
             f"مؤشر MSI للكيان {st.entity} في نمط {st.mode} بلغ {st.computed.msi}/100 ({st.computed.level}). "
             f"أكثر العوامل تأثيرًا: {drivers[0]['name']} ثم {drivers[1]['name']}"
@@ -350,6 +365,15 @@ class MsiGraphNodes:
             },
             "explanation": explanation,
             "components": st.computed.components,
+            "confidence": {
+                "score": confidence_value,
+                "level": confidence_level,
+            },
+            "data_quality": {
+                "total_items": st.aggregates.total_items,
+                "unique_sources": st.aggregates.unique_sources,
+                "llm_failure_ratio": st.aggregates.llm_failure_ratio,
+            },
         }
         await self.emit_event("generate_report", "state_update", {"has_report": True})
         return {"report": report}

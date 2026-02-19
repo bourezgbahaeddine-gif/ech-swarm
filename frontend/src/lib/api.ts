@@ -537,6 +537,8 @@ export interface MsiReport {
     topic_shift: { current: Record<string, number>; baseline: Record<string, number> };
     explanation: string;
     components: Record<string, number>;
+    confidence?: { score: number; level: 'HIGH' | 'MEDIUM' | 'LOW' | string };
+    data_quality?: { total_items: number; unique_sources: number; llm_failure_ratio: number };
 }
 
 export interface MsiTimeseriesPoint {
@@ -569,6 +571,7 @@ export interface MsiWatchlistItem {
     enabled: boolean;
     run_daily: boolean;
     run_weekly: boolean;
+    aliases: string[];
     created_by_username?: string | null;
     created_at: string;
     updated_at: string;
@@ -664,13 +667,15 @@ export const msiApi = {
     addWatchlist: (payload: {
         profile_id: string;
         entity: string;
+        aliases?: string[];
         run_daily?: boolean;
         run_weekly?: boolean;
         enabled?: boolean;
     }) => api.post<MsiWatchlistItem>('/msi/watchlist', payload),
-    updateWatchlist: (itemId: number, payload: { run_daily?: boolean; run_weekly?: boolean; enabled?: boolean }) =>
+    updateWatchlist: (itemId: number, payload: { run_daily?: boolean; run_weekly?: boolean; enabled?: boolean; aliases?: string[] }) =>
         api.patch<MsiWatchlistItem>(`/msi/watchlist/${itemId}`, payload),
     deleteWatchlist: (itemId: number) => api.delete(`/msi/watchlist/${itemId}`),
+    seedWatchlist: () => api.post<{ created: number; updated: number; total_defaults: number }>('/msi/watchlist/seed'),
 };
 
 // ── Axios Interceptor: auto-redirect on 401 ──

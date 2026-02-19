@@ -53,6 +53,21 @@ def _require_watchlist_manage(user: User) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="إدارة قائمة المراقبة متاحة للمدير/رئيس التحرير فقط")
 
 
+def _map_watchlist_item(item) -> MsiWatchlistItem:
+    return MsiWatchlistItem(
+        id=item.id,
+        profile_id=item.profile_id,
+        entity=item.entity,
+        enabled=item.enabled,
+        run_daily=item.run_daily,
+        run_weekly=item.run_weekly,
+        aliases=item.aliases_json or [],
+        created_by_username=item.created_by_username,
+        created_at=item.created_at,
+        updated_at=item.updated_at,
+    )
+
+
 @router.get("/profiles", response_model=list[MsiProfileInfo])
 async def get_profiles(current_user: User = Depends(get_current_user)):
     _require_view(current_user)
@@ -228,7 +243,7 @@ async def get_watchlist(
 ):
     _require_view(current_user)
     rows = await msi_monitor_service.list_watchlist(db, enabled_only=enabled_only)
-    return [MsiWatchlistItem.model_validate(r) for r in rows]
+    return [_map_watchlist_item(r) for r in rows]
 
 
 @router.post("/watchlist", response_model=MsiWatchlistItem, status_code=status.HTTP_201_CREATED)
@@ -245,9 +260,10 @@ async def add_watchlist(
         run_daily=payload.run_daily,
         run_weekly=payload.run_weekly,
         enabled=payload.enabled,
+        aliases=payload.aliases,
         actor=current_user,
     )
-    return MsiWatchlistItem.model_validate(item)
+    return _map_watchlist_item(item)
 
 
 @router.patch("/watchlist/{item_id}", response_model=MsiWatchlistItem)
@@ -264,10 +280,11 @@ async def patch_watchlist(
         run_daily=payload.run_daily,
         run_weekly=payload.run_weekly,
         enabled=payload.enabled,
+        aliases=payload.aliases,
     )
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="العنصر غير موجود")
-    return MsiWatchlistItem.model_validate(item)
+    return _map_watchlist_item(item)
 
 
 @router.delete("/watchlist/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -281,3 +298,12 @@ async def delete_watchlist(
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="العنصر غير موجود")
     return None
+
+
+@router.post("/watchlist/seed", response_model=dict)
+async def seed_watchlist(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_watchlist_manage(current_user)
+    return await msi_monitor_service.seed_default_watchlist(db, actor=current_user)

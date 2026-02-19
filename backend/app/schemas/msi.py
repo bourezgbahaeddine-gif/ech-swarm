@@ -54,6 +54,8 @@ class MsiReportResponse(BaseModel):
     topic_shift: dict[str, Any]
     explanation: str
     components: dict[str, Any]
+    confidence: dict[str, Any] | None = None
+    data_quality: dict[str, Any] | None = None
 
 
 class MsiTimeseriesPoint(BaseModel):
@@ -90,12 +92,14 @@ class MsiWatchlistCreateRequest(BaseModel):
     run_daily: bool = True
     run_weekly: bool = True
     enabled: bool = True
+    aliases: list[str] = Field(default_factory=list)
 
 
 class MsiWatchlistUpdateRequest(BaseModel):
     run_daily: bool | None = None
     run_weekly: bool | None = None
     enabled: bool | None = None
+    aliases: list[str] | None = None
 
 
 class MsiWatchlistItem(BaseModel):
@@ -107,6 +111,7 @@ class MsiWatchlistItem(BaseModel):
     enabled: bool
     run_daily: bool
     run_weekly: bool
+    aliases: list[str] = Field(default_factory=list)
     created_by_username: str | None = None
     created_at: datetime
     updated_at: datetime

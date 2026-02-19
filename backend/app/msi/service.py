@@ -23,6 +23,24 @@ from app.msi.state import MSIState
 logger = get_logger("msi.service")
 settings = get_settings()
 
+DEFAULT_MSI_WATCHLIST: list[dict] = [
+    {"profile_id": "institution_presidency", "entity": "رئاسة الجمهورية", "aliases": ["الرئاسة", "بيان رئاسة الجمهورية"]},
+    {"profile_id": "institution_presidency", "entity": "عبد المجيد تبون", "aliases": ["الرئيس عبد المجيد تبون", "الرئيس تبون", "تبون"]},
+    {"profile_id": "institution_ministry", "entity": "الوزارة الأولى", "aliases": ["الوزير الأول", "بيان الوزارة الأولى", "اجتماع الحكومة"]},
+    {"profile_id": "institution_ministry", "entity": "نذير العرباوي", "aliases": ["الوزير الأول نذير العرباوي", "العرباوي"]},
+    {"profile_id": "institution_security", "entity": "وزارة الدفاع الوطني", "aliases": ["الدفاع الوطني", "بيان وزارة الدفاع"]},
+    {"profile_id": "institution_security", "entity": "الجيش الوطني الشعبي", "aliases": ["الجيش الجزائري", "الناحية العسكرية"]},
+    {"profile_id": "institution_security", "entity": "الفريق أول السعيد شنقريحة", "aliases": ["شنقريحة", "الفريق أول شنقريحة"]},
+    {"profile_id": "institution_ministry", "entity": "وزارة الداخلية والجماعات المحلية", "aliases": ["وزارة الداخلية", "الداخلية والجماعات المحلية"]},
+    {"profile_id": "institution_ministry", "entity": "إبراهيم مراد", "aliases": ["وزير الداخلية إبراهيم مراد", "مراد"]},
+    {"profile_id": "institution_ministry", "entity": "وزارة الخارجية", "aliases": ["الخارجية الجزائرية", "بيان وزارة الخارجية"]},
+    {"profile_id": "institution_ministry", "entity": "أحمد عطاف", "aliases": ["وزير الخارجية أحمد عطاف", "عطاف"]},
+    {"profile_id": "institution_economy", "entity": "سوناطراك", "aliases": ["مجمع سوناطراك", "شركة سوناطراك"]},
+    {"profile_id": "institution_economy", "entity": "رشيد حشيشي", "aliases": ["حشيشي", "الرئيس المدير العام لسوناطراك"]},
+    {"profile_id": "institution_economy", "entity": "بنك الجزائر", "aliases": ["البنك المركزي الجزائري", "قرارات بنك الجزائر"]},
+    {"profile_id": "institution_economy", "entity": "الديوان الوطني للأرصاد الجوية", "aliases": ["الأرصاد الجوية", "نشرية خاصة", "أحوال الطقس"]},
+]
+
 
 class MsiMonitorService:
     def __init__(self):
@@ -72,6 +90,17 @@ class MsiMonitorService:
         await db.refresh(run)
         return run
 
+    @staticmethod
+    def _normalize_aliases(aliases: list[str] | None) -> list[str]:
+        cleaned: list[str] = []
+        for alias in aliases or []:
+            value = (alias or "").strip()
+            if not value:
+                continue
+            if value not in cleaned:
+                cleaned.append(value)
+        return cleaned[:24]
+
     async def start_run_task(self, run_id: str) -> None:
         if run_id in self._running_tasks and not self._running_tasks[run_id].done():
             return
@@ -94,6 +123,14 @@ class MsiMonitorService:
 
             nodes = MsiGraphNodes(db, emit)
             graph = MsiGraphRunner(nodes, emit)
+            watchlist_row = await db.execute(
+                select(MsiWatchlist).where(
+                    MsiWatchlist.profile_id == run.profile_id,
+                    MsiWatchlist.entity == run.entity,
+                )
+            )
+            watchlist_item = watchlist_row.scalar_one_or_none()
+            watchlist_aliases = self._normalize_aliases((watchlist_item.aliases_json or []) if watchlist_item else [])
             initial_state = MSIState(
                 run_id=run.run_id,
                 profile_id=run.profile_id,
@@ -102,6 +139,7 @@ class MsiMonitorService:
                 period_start=run.period_start,
                 period_end=run.period_end,
                 timezone=run.timezone or settings.msi_timezone,
+                watchlist_aliases=watchlist_aliases,
             )
 
             try:
@@ -281,8 +319,10 @@ class MsiMonitorService:
         run_daily: bool,
         run_weekly: bool,
         enabled: bool,
+        aliases: list[str] | None,
         actor: User | None,
     ) -> MsiWatchlist:
+        clean_aliases = self._normalize_aliases(aliases)
         existing = await db.execute(
             select(MsiWatchlist).where(
                 MsiWatchlist.profile_id == profile_id,
@@ -294,6 +334,7 @@ class MsiMonitorService:
             row.run_daily = run_daily
             row.run_weekly = run_weekly
             row.enabled = enabled
+            row.aliases_json = clean_aliases
             row.updated_at = datetime.utcnow()
             await db.commit()
             await db.refresh(row)
@@ -305,6 +346,7 @@ class MsiMonitorService:
             run_daily=run_daily,
             run_weekly=run_weekly,
             enabled=enabled,
+            aliases_json=clean_aliases,
             created_by_user_id=actor.id if actor else None,
             created_by_username=actor.username if actor else None,
         )
@@ -320,7 +362,10 @@ class MsiMonitorService:
             return None
         for key, value in changes.items():
             if value is not None and hasattr(item, key):
-                setattr(item, key, value)
+                if key == "aliases":
+                    item.aliases_json = self._normalize_aliases(value)
+                else:
+                    setattr(item, key, value)
         item.updated_at = datetime.utcnow()
         await db.commit()
         await db.refresh(item)
@@ -363,6 +408,42 @@ class MsiMonitorService:
                 await self.start_run_task(run.run_id)
                 triggered += 1
             return {"mode": mode, "triggered": triggered}
+
+    async def seed_default_watchlist(self, db: AsyncSession, actor: User | None = None) -> dict:
+        created = 0
+        updated = 0
+        for row in DEFAULT_MSI_WATCHLIST:
+            existing = await db.execute(
+                select(MsiWatchlist).where(
+                    MsiWatchlist.profile_id == row["profile_id"],
+                    MsiWatchlist.entity == row["entity"],
+                )
+            )
+            item = existing.scalar_one_or_none()
+            aliases = self._normalize_aliases(row.get("aliases", []))
+            if item:
+                item.aliases_json = aliases
+                item.enabled = True
+                item.run_daily = True
+                item.run_weekly = True
+                item.updated_at = datetime.utcnow()
+                updated += 1
+            else:
+                db.add(
+                    MsiWatchlist(
+                        profile_id=row["profile_id"],
+                        entity=row["entity"],
+                        aliases_json=aliases,
+                        enabled=True,
+                        run_daily=True,
+                        run_weekly=True,
+                        created_by_user_id=actor.id if actor else None,
+                        created_by_username=actor.username if actor else "system_seed",
+                    )
+                )
+                created += 1
+        await db.commit()
+        return {"created": created, "updated": updated, "total_defaults": len(DEFAULT_MSI_WATCHLIST)}
 
 
 msi_monitor_service = MsiMonitorService()

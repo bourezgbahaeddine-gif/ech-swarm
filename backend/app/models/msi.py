@@ -87,6 +87,7 @@ class MsiWatchlist(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     profile_id = Column(String(64), nullable=False, index=True)
     entity = Column(String(255), nullable=False, index=True)
+    aliases_json = Column(JSON, nullable=False, default=list)
     enabled = Column(Boolean, nullable=False, default=True, index=True)
     run_daily = Column(Boolean, nullable=False, default=True)
     run_weekly = Column(Boolean, nullable=False, default=True)

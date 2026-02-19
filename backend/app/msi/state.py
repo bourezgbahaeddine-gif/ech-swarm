@@ -32,6 +32,8 @@ class MSIAnalyzedItem(MSICollectedItem):
 
 class MSIAggregates(BaseModel):
     total_items: int = 0
+    unique_sources: int = 0
+    llm_failure_ratio: float = 0.0
     pressure: float = 0.0
     shock: float = 0.0
     novelty: float = 0.0
@@ -55,6 +57,7 @@ class MSIState(BaseModel):
     period_start: datetime
     period_end: datetime
     timezone: str = "Africa/Algiers"
+    watchlist_aliases: list[str] = Field(default_factory=list)
 
     profile: dict[str, Any] = Field(default_factory=dict)
     queries: list[str] = Field(default_factory=list)
