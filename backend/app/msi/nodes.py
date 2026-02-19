@@ -7,6 +7,7 @@ import math
 import re
 from collections import Counter
 from datetime import datetime
+from inspect import signature
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
@@ -401,15 +402,39 @@ class MsiGraphNodes:
         if not queries:
             return []
         try:
-            from gdeltdoc import GdeltDoc  # type: ignore
+            from gdeltdoc import Filters, GdeltDoc  # type: ignore
         except Exception:
             return []
 
         query = " OR ".join(queries[:5])
         gd = GdeltDoc()
-        rows = gd.article_search(query=query, startdatetime=period_start, enddatetime=period_end, maxrecords=50)
+        rows: list[dict[str, Any]] | Any = []
+        try:
+            # Newer signatures can accept direct keyword args.
+            sig = signature(gd.article_search)
+            if "query" in sig.parameters:
+                rows = gd.article_search(query=query, startdatetime=period_start, enddatetime=period_end, maxrecords=50)
+            else:
+                # Compatibility path for gdeltdoc versions that require Filters object.
+                filters = Filters(
+                    keyword=query,
+                    start_date=period_start.strftime("%Y-%m-%d"),
+                    end_date=period_end.strftime("%Y-%m-%d"),
+                )
+                rows = gd.article_search(filters)
+        except Exception:
+            try:
+                filters = Filters(
+                    keyword=query,
+                    start_date=period_start.strftime("%Y-%m-%d"),
+                    end_date=period_end.strftime("%Y-%m-%d"),
+                )
+                rows = gd.article_search(filters)
+            except Exception:
+                return []
         out: list[MSICollectedItem] = []
-        for row in rows or []:
+        iterable_rows = rows.to_dict("records") if hasattr(rows, "to_dict") else (rows or [])
+        for row in iterable_rows:
             url = str(row.get("url") or "").strip()
             title = str(row.get("title") or "").strip()
             if not url or not title:
