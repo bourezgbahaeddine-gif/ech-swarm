@@ -1,0 +1,33 @@
+{
+  "id": "personas_dz_v1",
+  "version": "1.0.0",
+  "personas": [
+    {
+      "id": "skeptic",
+      "label": "المواطن الناقد",
+      "language_style": "fusha:0.7,darja:0.3",
+      "typical_concerns": ["المصدر", "الدقة", "المبالغة"],
+      "taboo_sensitivity": 0.6,
+      "sarcasm_tendency": 0.2,
+      "severity": 0.8
+    },
+    {
+      "id": "memer",
+      "label": "الشاب الساخر",
+      "language_style": "fusha:0.4,darja:0.6",
+      "typical_concerns": ["الطرافة", "الوضوح", "القابلية للمشاركة"],
+      "taboo_sensitivity": 0.4,
+      "sarcasm_tendency": 0.9,
+      "severity": 0.5
+    },
+    {
+      "id": "traditionalist",
+      "label": "الحارس القيمي",
+      "language_style": "fusha:0.85,darja:0.15",
+      "typical_concerns": ["القيم", "الاحترام", "اللغة الرصينة"],
+      "taboo_sensitivity": 0.85,
+      "sarcasm_tendency": 0.1,
+      "severity": 0.9
+    }
+  ]
+}

@@ -577,6 +577,65 @@ export interface MsiWatchlistItem {
     updated_at: string;
 }
 
+export interface SimRunResponse {
+    run_id: string;
+    status: string;
+    platform: 'facebook' | 'x' | string;
+    mode: 'fast' | 'deep' | string;
+    headline: string;
+}
+
+export interface SimRunStatusResponse {
+    run_id: string;
+    status: string;
+    error?: string | null;
+    created_at: string;
+    finished_at?: string | null;
+}
+
+export interface SimResult {
+    run_id: string;
+    status: string;
+    headline: string;
+    platform: string;
+    mode: string;
+    risk_score: number;
+    virality_score: number;
+    confidence_score: number;
+    breakdown: {
+        risk: Record<string, number>;
+        virality: Record<string, number>;
+    };
+    reactions: Array<{
+        persona_id: string;
+        persona_label?: string;
+        comment: string;
+        sentiment: string;
+        risk_signal: number;
+        virality_signal: number;
+    }>;
+    advice: {
+        summary?: string;
+        improvements?: string[];
+        alternative_headlines?: string[];
+    };
+    red_flags: Record<string, number>;
+    policy_level: 'LOW_RISK' | 'REVIEW_RECOMMENDED' | 'HIGH_RISK' | string;
+    created_at: string;
+}
+
+export interface SimHistoryItem {
+    run_id: string;
+    status: string;
+    headline: string;
+    platform: string;
+    mode: string;
+    created_at?: string | null;
+    risk_score?: number | null;
+    virality_score?: number | null;
+    policy_level?: string | null;
+}
+
 export interface CreateUserPayload {
     full_name_ar: string;
     username: string;
@@ -676,6 +735,22 @@ export const msiApi = {
         api.patch<MsiWatchlistItem>(`/msi/watchlist/${itemId}`, payload),
     deleteWatchlist: (itemId: number) => api.delete(`/msi/watchlist/${itemId}`),
     seedWatchlist: () => api.post<{ created: number; updated: number; total_defaults: number }>('/msi/watchlist/seed'),
+};
+
+export const simApi = {
+    run: (payload: {
+        headline: string;
+        excerpt?: string;
+        platform?: 'facebook' | 'x';
+        article_id?: number;
+        draft_id?: number;
+        mode?: 'fast' | 'deep';
+        idempotency_key?: string;
+    }) => api.post<SimRunResponse>('/sim/run', payload),
+    runStatus: (runId: string) => api.get<SimRunStatusResponse>(`/sim/runs/${runId}`),
+    result: (runId: string) => api.get<SimResult>('/sim/result', { params: { run_id: runId } }),
+    history: (params?: { article_id?: number; draft_id?: number; limit?: number }) =>
+        api.get<{ items: SimHistoryItem[]; total: number }>('/sim/history', { params }),
 };
 
 // ── Axios Interceptor: auto-redirect on 401 ──

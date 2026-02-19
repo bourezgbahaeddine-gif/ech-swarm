@@ -23,14 +23,14 @@ import {
     Sparkles,
 } from 'lucide-react';
 
-import { editorialApi, msiApi } from '@/lib/api';
+import { editorialApi, msiApi, simApi } from '@/lib/api';
 import { constitutionApi } from '@/lib/constitution-api';
 import { cn, formatRelativeTime, truncate } from '@/lib/utils';
 
 type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
-type RightTab = 'evidence' | 'quality' | 'seo' | 'social' | 'context' | 'msi';
+type RightTab = 'evidence' | 'quality' | 'seo' | 'social' | 'context' | 'msi' | 'simulator';
 type GuideType = 'welcome' | 'action';
-type ActionId = 'quick_check' | 'verify' | 'improve' | 'headlines' | 'seo' | 'social' | 'quality' | 'publish_gate' | 'apply' | 'save' | 'manual_draft';
+type ActionId = 'quick_check' | 'verify' | 'improve' | 'headlines' | 'seo' | 'social' | 'quality' | 'publish_gate' | 'apply' | 'save' | 'manual_draft' | 'audience_test';
 
 const TABS: Array<{ id: RightTab; label: string }> = [
     { id: 'evidence', label: 'التحقق والأدلة' },
@@ -39,6 +39,7 @@ const TABS: Array<{ id: RightTab; label: string }> = [
     { id: 'social', label: 'نسخ السوشيال' },
     { id: 'context', label: 'السياق والنسخ' },
     { id: 'msi', label: 'MSI السياقي' },
+    { id: 'simulator', label: 'محاكي الجمهور' },
 ];
 
 const HELP_KEY = 'smart_editor_help_seen_v1';
@@ -56,6 +57,7 @@ const ACTION_HELP: Record<ActionId, { title: string; description: string }> = {
     apply: { title: 'زر إرسال الاعتماد', description: 'يرسل النسخة النهائية إلى رئيس التحرير بعد فحص وكيل السياسة التحريرية.' },
     save: { title: 'زر الحفظ', description: 'يحفظ التعديلات فورياً ويحدّث النسخ.' },
     manual_draft: { title: 'زر مسودة جديدة', description: 'ينشئ مسودة خاصة لموضوع غير وارد من المصادر الآلية.' },
+    audience_test: { title: 'زر محاكي الجمهور', description: 'يحاكي ردود الجمهور المتوقعة ويعرض مخاطر المحتوى وقابلية الانتشار قبل الاعتماد.' },
 };
 
 const STAGE_LABELS: Record<string, string> = {
@@ -148,6 +150,7 @@ function WorkspaceDraftsPageContent() {
     const [quality, setQuality] = useState<any | null>(null);
     const [seoPack, setSeoPack] = useState<any | null>(null);
     const [social, setSocial] = useState<any | null>(null);
+    const [simResult, setSimResult] = useState<any | null>(null);
     const [readiness, setReadiness] = useState<any | null>(null);
     const [headlines, setHeadlines] = useState<any[]>([]);
     const [suggestion, setSuggestion] = useState<any | null>(null);
@@ -250,6 +253,7 @@ function WorkspaceDraftsPageContent() {
         setBaseVersion(draft.version || 1);
         setSaveState('saved');
         setSuggestion(null);
+        setSimResult(null);
     }, [context?.draft?.id, editor]);
 
     useEffect(() => {
@@ -315,6 +319,44 @@ function WorkspaceDraftsPageContent() {
             setOk('اكتمل الفحص السريع: تم تحديث التحقق والجودة وحالة الجاهزية.');
         },
         onError: (e: any) => setErr(e?.response?.data?.detail || 'تعذر تنفيذ الفحص السريع'),
+    });
+    const runAudienceSimulation = useMutation({
+        mutationFn: async () => {
+            const headline = cleanText(title || context?.article?.title_ar || context?.article?.original_title || '');
+            const excerpt = htmlToReadableText(bodyHtml || context?.draft?.body || '').slice(0, 1800);
+            if (!headline || headline.length < 6) {
+                throw new Error('العنوان غير كافٍ لتشغيل محاكي الجمهور.');
+            }
+            const runRes = await simApi.run({
+                headline,
+                excerpt,
+                platform: 'facebook',
+                mode: 'fast',
+                article_id: context?.article?.id,
+                draft_id: context?.draft?.id,
+            });
+            const runId = runRes.data.run_id;
+            for (let i = 0; i < 30; i += 1) {
+                const statusRes = await simApi.runStatus(runId);
+                const status = statusRes.data?.status;
+                if (status === 'completed') {
+                    const resultRes = await simApi.result(runId);
+                    return { runId, result: resultRes.data };
+                }
+                if (status === 'failed') {
+                    throw new Error(statusRes.data?.error || 'فشل تشغيل محاكي الجمهور.');
+                }
+                await new Promise((resolve) => setTimeout(resolve, 1500));
+            }
+            throw new Error('انتهت مهلة انتظار نتيجة محاكي الجمهور.');
+        },
+        onSuccess: ({ runId, result }) => {
+            setSimResult({ ...result, run_id: runId });
+            setActiveTab('simulator');
+            setErr(null);
+            setOk('تم تحديث نتائج محاكي الجمهور بنجاح.');
+        },
+        onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر تشغيل محاكي الجمهور'),
     });
     const runDiff = useMutation({ mutationFn: () => editorialApi.draftDiff(workId!, cmpFrom!, cmpTo!), onSuccess: (r) => setDiffView(r.data?.diff || '') });
     const restoreVersion = useMutation({ mutationFn: (v: number) => editorialApi.restoreWorkspaceDraftVersion(workId!, v), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['smart-editor-context', workId] }); queryClient.invalidateQueries({ queryKey: ['smart-editor-versions', workId] }); } });
@@ -559,6 +601,9 @@ function WorkspaceDraftsPageContent() {
                     <button onClick={() => runWithGuide('seo', () => runSeo.mutate())} className="px-3 py-2 rounded-xl bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-200 text-xs">SEO</button>
                     <button onClick={() => runWithGuide('social', () => runSocial.mutate())} className="px-3 py-2 rounded-xl bg-sky-500/20 border border-sky-500/30 text-sky-200 text-xs">سوشيال</button>
                     <button onClick={() => runWithGuide('quality', () => runQuality.mutate())} className="px-3 py-2 rounded-xl bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs">جودة</button>
+                    <button onClick={() => runWithGuide('audience_test', () => runAudienceSimulation.mutate())} className="px-3 py-2 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-100 text-xs">
+                        محاكي الجمهور
+                    </button>
                     <button onClick={() => runWithGuide('publish_gate', () => runReadiness.mutate())} className="px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-200 text-xs">بوابة النشر</button>
                     <button onClick={() => runWithGuide('apply', () => applyToArticle.mutate())} className="px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs">إرسال لاعتماد رئيس التحرير</button>
                     <button onClick={() => runWithGuide('save', () => { setSaveState('saving'); autosave.mutate(); })} className="px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs flex items-center gap-2"><Save className="w-4 h-4" />حفظ</button>
@@ -750,6 +795,38 @@ function WorkspaceDraftsPageContent() {
                                     </div>
                                 ))}
                             </div>
+                        </Panel>
+                    )}
+
+                    {activeTab === 'simulator' && (
+                        <Panel title="محاكي الجمهور">
+                            {simResult ? (
+                                <div className="space-y-2 text-xs text-gray-200">
+                                    <div className="rounded-xl border border-white/10 bg-black/20 p-2">
+                                        <p>مخاطر المحتوى: <span className="font-semibold text-red-200">{Number(simResult.risk_score || 0).toFixed(1)}/10</span></p>
+                                        <p>قابلية الانتشار: <span className="font-semibold text-cyan-200">{Number(simResult.virality_score || 0).toFixed(1)}/10</span></p>
+                                        <p>تصنيف الحوكمة: <span className="font-semibold text-amber-200">{cleanText(simResult.policy_level || '-')}</span></p>
+                                        <p>موثوقية القياس: <span className="font-semibold text-gray-100">{Number(simResult.confidence_score || 0).toFixed(1)}%</span></p>
+                                    </div>
+                                    <div className="rounded-xl border border-white/10 bg-black/20 p-2">
+                                        <p className="text-gray-400 mb-1">ردود الشخصيات</p>
+                                        {(simResult.reactions || []).map((rx: any, idx: number) => (
+                                            <p key={`${rx.persona_id || 'persona'}-${idx}`}>
+                                                - {cleanText(rx.persona_label || rx.persona_id || 'شخصية')}: {cleanText(rx.comment || '')}
+                                            </p>
+                                        ))}
+                                    </div>
+                                    <div className="rounded-xl border border-white/10 bg-black/20 p-2">
+                                        <p className="text-gray-400 mb-1">نصائح التحرير</p>
+                                        <p>{cleanText(simResult?.advice?.summary || '') || '—'}</p>
+                                        {(simResult?.advice?.improvements || []).map((fix: string, idx: number) => (
+                                            <p key={`${fix}-${idx}`}>- {cleanText(fix)}</p>
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : (
+                                <Empty text="اضغط زر «محاكي الجمهور» لتقييم العنوان قبل الاعتماد." />
+                            )}
                         </Panel>
                     )}
 

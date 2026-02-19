@@ -30,6 +30,13 @@ from app.models.msi import (
     MsiWatchlist,
     MsiBaseline,
 )
+from app.models.simulator import (
+    SimRun,
+    SimResult,
+    SimFeedback,
+    SimCalibration,
+    SimJobEvent,
+)
 
 __all__ = [
     "Source", "Article", "EditorDecision", "EditorialDraft", "FeedbackLog",
@@ -61,4 +68,9 @@ __all__ = [
     "MsiJobEvent",
     "MsiWatchlist",
     "MsiBaseline",
+    "SimRun",
+    "SimResult",
+    "SimFeedback",
+    "SimCalibration",
+    "SimJobEvent",
 ]
