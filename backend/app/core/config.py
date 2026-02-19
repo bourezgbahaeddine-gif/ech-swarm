@@ -86,6 +86,16 @@ class Settings(BaseSettings):
     published_monitor_limit: int = 12
     published_monitor_fetch_timeout: int = 12
     published_monitor_alert_threshold: int = 75
+    msi_enabled: bool = True
+    msi_scheduler_enabled: bool = True
+    msi_timezone: str = "Africa/Algiers"
+    msi_daily_hour: int = 6
+    msi_daily_minute: int = 0
+    msi_weekly_day_of_week: str = "mon"
+    msi_weekly_hour: int = 6
+    msi_weekly_minute: int = 30
+    msi_default_baseline_days: int = 90
+    msi_default_report_limit: int = 30
 
     # ── FreshRSS / RSS-Bridge ──
     scout_use_freshrss: bool = False

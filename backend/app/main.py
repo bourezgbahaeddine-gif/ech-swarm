@@ -35,6 +35,8 @@ from app.api.routes.settings import router as settings_router
 from app.api.routes.constitution import router as constitution_router
 from app.api.routes.journalist_services import router as journalist_services_router
 from app.api.routes.memory import router as memory_router
+from app.api.routes.msi import router as msi_router
+from app.msi.scheduler import start_msi_scheduler, stop_msi_scheduler
 
 settings = get_settings()
 logger = get_logger("main")
@@ -153,6 +155,9 @@ async def lifespan(app: FastAPI):
             feed_url=settings.published_monitor_feed_url,
         )
 
+    if settings.msi_enabled and settings.msi_scheduler_enabled:
+        start_msi_scheduler()
+
     logger.info(
         "app_ready",
         msg="🚀 غرفة الشروق الذكية جاهزة للعمل",
@@ -170,6 +175,8 @@ async def lifespan(app: FastAPI):
         *[t for t in (_pipeline_task, _trends_task, _published_monitor_task) if t],
         return_exceptions=True,
     )
+    if settings.msi_enabled and settings.msi_scheduler_enabled:
+        stop_msi_scheduler()
 
     await cache_service.disconnect()
     logger.info("app_shutdown", msg="تم إيقاف النظام بنجاح")
@@ -262,6 +269,7 @@ app.include_router(settings_router, prefix="/api/v1")
 app.include_router(constitution_router, prefix="/api/v1")
 app.include_router(journalist_services_router, prefix="/api/v1")
 app.include_router(memory_router, prefix="/api/v1")
+app.include_router(msi_router, prefix="/api/v1")
 
 
 # ── Health Check ──

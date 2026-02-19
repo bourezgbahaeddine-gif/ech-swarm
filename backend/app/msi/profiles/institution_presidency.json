@@ -1,0 +1,31 @@
+﻿{
+  "id": "institution_presidency",
+  "display_name": "رئاسة الجمهورية",
+  "description": "مراقبة استقرار التغطية الإعلامية المرتبطة بالرئاسة",
+  "languages": ["ar", "fr", "en"],
+  "geo_focus": ["DZ", "MENA"],
+  "source_weights": {
+    "tier_1": 1.0,
+    "tier_2": 0.8,
+    "tier_3": 0.6
+  },
+  "source_tiers": {
+    "tier_1_domains": ["aps.dz", "el-mouradia.dz", "echoroukonline.com"],
+    "tier_2_domains": ["reuters.com", "afp.com"],
+    "tier_3_domains": []
+  },
+  "weights": {
+    "alpha": 0.4,
+    "beta": 0.25,
+    "gamma": 0.2,
+    "delta": 0.15
+  },
+  "risk_dictionary": ["أزمة", "تصعيد", "احتجاج", "تحقيق", "توتر", "خلاف", "إدانة"],
+  "baseline": {
+    "window_days": 90
+  },
+  "default_sources": {
+    "rss_feeds": ["https://www.echoroukonline.com/feed"],
+    "gdelt": true
+  }
+}

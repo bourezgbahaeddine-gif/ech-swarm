@@ -21,6 +21,15 @@ from app.models.knowledge import (
 )
 from app.models.quality import ArticleQualityReport
 from app.models.project_memory import ProjectMemoryItem, ProjectMemoryEvent
+from app.models.msi import (
+    MsiRun,
+    MsiReport,
+    MsiTimeseries,
+    MsiArtifact,
+    MsiJobEvent,
+    MsiWatchlist,
+    MsiBaseline,
+)
 
 __all__ = [
     "Source", "Article", "EditorDecision", "EditorialDraft", "FeedbackLog",
@@ -45,4 +54,11 @@ __all__ = [
     "ArticleQualityReport",
     "ProjectMemoryItem",
     "ProjectMemoryEvent",
+    "MsiRun",
+    "MsiReport",
+    "MsiTimeseries",
+    "MsiArtifact",
+    "MsiJobEvent",
+    "MsiWatchlist",
+    "MsiBaseline",
 ]

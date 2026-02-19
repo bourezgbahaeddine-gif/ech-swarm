@@ -499,6 +499,81 @@ export interface ProjectMemoryListResponse {
     pages: number;
 }
 
+export interface MsiProfileInfo {
+    id: string;
+    display_name: string;
+    description?: string | null;
+}
+
+export interface MsiRunResponse {
+    run_id: string;
+    status: string;
+    profile_id: string;
+    entity: string;
+    mode: 'daily' | 'weekly' | string;
+    start: string;
+    end: string;
+}
+
+export interface MsiRunStatusResponse {
+    run_id: string;
+    status: string;
+    error?: string | null;
+    created_at: string;
+    finished_at?: string | null;
+}
+
+export interface MsiReport {
+    run_id: string;
+    profile_id: string;
+    entity: string;
+    mode: string;
+    period_start: string;
+    period_end: string;
+    msi: number;
+    level: 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED' | string;
+    drivers: Array<{ name: string; value: number }>;
+    top_negative_items: Array<{ title: string; url: string; source?: string; tone?: number; intensity?: number; score?: number }>;
+    topic_shift: { current: Record<string, number>; baseline: Record<string, number> };
+    explanation: string;
+    components: Record<string, number>;
+}
+
+export interface MsiTimeseriesPoint {
+    ts: string;
+    msi: number;
+    level: string;
+    components: Record<string, number>;
+}
+
+export interface MsiTimeseriesResponse {
+    profile_id: string;
+    entity: string;
+    mode: string;
+    points: MsiTimeseriesPoint[];
+}
+
+export interface MsiTopEntityItem {
+    profile_id: string;
+    entity: string;
+    mode: string;
+    msi: number;
+    level: string;
+    period_end: string;
+}
+
+export interface MsiWatchlistItem {
+    id: number;
+    profile_id: string;
+    entity: string;
+    enabled: boolean;
+    run_daily: boolean;
+    run_weekly: boolean;
+    created_by_username?: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
 export interface CreateUserPayload {
     full_name_ar: string;
     username: string;
@@ -567,6 +642,35 @@ export const memoryApi = {
         api.post<ProjectMemoryEvent>(`/memory/items/${itemId}/use`, { note }),
     events: (itemId: number, limit = 50) =>
         api.get<ProjectMemoryEvent[]>(`/memory/items/${itemId}/events`, { params: { limit } }),
+};
+
+export const msiApi = {
+    profiles: () => api.get<MsiProfileInfo[]>('/msi/profiles'),
+    run: (payload: {
+        profile_id: string;
+        entity: string;
+        mode: 'daily' | 'weekly';
+        start?: string;
+        end?: string;
+    }) => api.post<MsiRunResponse>('/msi/run', payload),
+    runStatus: (runId: string) => api.get<MsiRunStatusResponse>(`/msi/runs/${runId}`),
+    report: (runId: string) => api.get<MsiReport>('/msi/report', { params: { run_id: runId } }),
+    timeseries: (params: { profile_id: string; entity: string; mode: 'daily' | 'weekly'; limit?: number }) =>
+        api.get<MsiTimeseriesResponse>('/msi/timeseries', { params }),
+    top: (params?: { mode?: 'daily' | 'weekly'; limit?: number }) =>
+        api.get<{ mode: string; items: MsiTopEntityItem[] }>('/msi/top', { params }),
+    watchlist: (enabled_only?: boolean) =>
+        api.get<MsiWatchlistItem[]>('/msi/watchlist', { params: { enabled_only } }),
+    addWatchlist: (payload: {
+        profile_id: string;
+        entity: string;
+        run_daily?: boolean;
+        run_weekly?: boolean;
+        enabled?: boolean;
+    }) => api.post<MsiWatchlistItem>('/msi/watchlist', payload),
+    updateWatchlist: (itemId: number, payload: { run_daily?: boolean; run_weekly?: boolean; enabled?: boolean }) =>
+        api.patch<MsiWatchlistItem>(`/msi/watchlist/${itemId}`, payload),
+    deleteWatchlist: (itemId: number) => api.delete(`/msi/watchlist/${itemId}`),
 };
 
 // ── Axios Interceptor: auto-redirect on 401 ──

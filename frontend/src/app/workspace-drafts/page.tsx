@@ -23,12 +23,12 @@ import {
     Sparkles,
 } from 'lucide-react';
 
-import { editorialApi } from '@/lib/api';
+import { editorialApi, msiApi } from '@/lib/api';
 import { constitutionApi } from '@/lib/constitution-api';
 import { cn, formatRelativeTime, truncate } from '@/lib/utils';
 
 type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
-type RightTab = 'evidence' | 'quality' | 'seo' | 'social' | 'context';
+type RightTab = 'evidence' | 'quality' | 'seo' | 'social' | 'context' | 'msi';
 type GuideType = 'welcome' | 'action';
 type ActionId = 'quick_check' | 'verify' | 'improve' | 'headlines' | 'seo' | 'social' | 'quality' | 'publish_gate' | 'apply' | 'save' | 'manual_draft';
 
@@ -38,6 +38,7 @@ const TABS: Array<{ id: RightTab; label: string }> = [
     { id: 'seo', label: 'أدوات SEO' },
     { id: 'social', label: 'نسخ السوشيال' },
     { id: 'context', label: 'السياق والنسخ' },
+    { id: 'msi', label: 'MSI السياقي' },
 ];
 
 const HELP_KEY = 'smart_editor_help_seen_v1';
@@ -100,6 +101,23 @@ function normalizeDiffOutput(value: string): string {
     if (!value) return '';
     const hasHtml = /<[^>]+>/.test(value);
     return hasHtml ? htmlToReadableText(value) : cleanText(value);
+}
+
+function normalizeForMatch(value: string): string {
+    return cleanText(value || '')
+        .replace(/[^\u0600-\u06FFa-zA-Z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+}
+
+function entityMatchesContext(entity: string, contextText: string): boolean {
+    const entityNorm = normalizeForMatch(entity);
+    const contextNorm = normalizeForMatch(contextText);
+    if (!entityNorm || !contextNorm) return false;
+    const tokens = entityNorm.split(' ').filter((t) => t.length >= 3);
+    if (!tokens.length) return false;
+    return tokens.every((t) => contextNorm.includes(t));
 }
 
 function actionKey(action: ActionId): string {
@@ -190,6 +208,25 @@ function WorkspaceDraftsPageContent() {
     const context = contextData?.data;
     const versions = versionsData?.data || [];
     const constitutionTips = constitutionTipsData?.data?.tips || [];
+    const { data: msiTopDailyData } = useQuery({
+        queryKey: ['smart-editor-msi-top-daily'],
+        queryFn: () => msiApi.top({ mode: 'daily', limit: 10 }),
+    });
+    const { data: msiTopWeeklyData } = useQuery({
+        queryKey: ['smart-editor-msi-top-weekly'],
+        queryFn: () => msiApi.top({ mode: 'weekly', limit: 10 }),
+    });
+    const msiTopDaily = msiTopDailyData?.data?.items || [];
+    const msiTopWeekly = msiTopWeeklyData?.data?.items || [];
+    const msiContextText = useMemo(
+        () =>
+            `${context?.draft?.title || ''} ${context?.article?.title_ar || ''} ${context?.article?.original_title || ''}`,
+        [context?.draft?.title, context?.article?.title_ar, context?.article?.original_title]
+    );
+    const msiContextHit = useMemo(() => {
+        const all = [...msiTopDaily, ...msiTopWeekly];
+        return all.find((item: any) => entityMatchesContext(item?.entity || '', msiContextText)) || null;
+    }, [msiTopDaily, msiTopWeekly, msiContextText]);
 
     const editor = useEditor({
         extensions: [StarterKit, Highlight, Link.configure({ openOnClick: false }), Placeholder.configure({ placeholder: 'ابدأ كتابة الخبر هنا...' })],
@@ -680,6 +717,39 @@ function WorkspaceDraftsPageContent() {
                                     <InfoBlock label="تنبيه عاجل" value={social.breaking_alert} />
                                 </div>
                             ) : <Empty text="اضغط زر «سوشيال» لإنشاء النسخ." />}
+                        </Panel>
+                    )}
+
+                    {activeTab === 'msi' && (
+                        <Panel title="MSI السياقي">
+                            {msiContextHit ? (
+                                <div className={cn('rounded-xl border p-2 text-xs', Number(msiContextHit.msi || 100) < 60 ? 'border-red-500/30 bg-red-500/10 text-red-100' : 'border-amber-500/30 bg-amber-500/10 text-amber-100')}>
+                                    <p className="font-semibold mb-1">تنبيه سياقي مرتبط بالكيان: {cleanText(msiContextHit.entity || '')}</p>
+                                    <p>المؤشر الحالي: {Number(msiContextHit.msi || 0).toFixed(1)} / 100</p>
+                                    <p>التصنيف: {cleanText(msiContextHit.level || '-')}</p>
+                                    <p className="mt-1 text-[11px] opacity-90">عند انخفاض المؤشر، شدّد على التحقق من الادعاءات والمصادر قبل الإرسال النهائي.</p>
+                                </div>
+                            ) : (
+                                <Empty text="لا يوجد تطابق MSI مباشر مع موضوع المسودة الحالية." />
+                            )}
+                            <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-xs text-gray-300 mt-2 space-y-1">
+                                <p className="text-gray-400 mb-1">الأكثر اضطراباً اليوم</p>
+                                {(msiTopDaily || []).slice(0, 5).map((item: any) => (
+                                    <div key={`msi-d-${item.profile_id}-${item.entity}-${item.period_end}`} className="flex items-center justify-between">
+                                        <span className="line-clamp-1">{cleanText(item.entity || '-')}</span>
+                                        <span className="text-red-300">{Number(item.msi || 0).toFixed(1)}</span>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-xs text-gray-300 space-y-1">
+                                <p className="text-gray-400 mb-1">الأكثر اضطراباً أسبوعياً</p>
+                                {(msiTopWeekly || []).slice(0, 5).map((item: any) => (
+                                    <div key={`msi-w-${item.profile_id}-${item.entity}-${item.period_end}`} className="flex items-center justify-between">
+                                        <span className="line-clamp-1">{cleanText(item.entity || '-')}</span>
+                                        <span className="text-orange-300">{Number(item.msi || 0).toFixed(1)}</span>
+                                    </div>
+                                ))}
+                            </div>
                         </Panel>
                     )}
 

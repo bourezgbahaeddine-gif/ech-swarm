@@ -8,6 +8,7 @@ import StatsCards from '@/components/dashboard/StatsCards';
 import NewsFeed from '@/components/dashboard/NewsFeed';
 import PipelineMonitor from '@/components/dashboard/PipelineMonitor';
 import AgentControl from '@/components/dashboard/AgentControl';
+import MsiWidget from '@/components/dashboard/MsiWidget';
 import { useAuth } from '@/lib/auth';
 
 export default function DashboardPage() {
@@ -97,7 +98,11 @@ export default function DashboardPage() {
             <AgentControl agents={agentsData?.data} />
           </div>
 
-          <div className="animate-fade-in-up" style={{ animationDelay: '350ms' }}>
+          <div className="animate-fade-in-up" style={{ animationDelay: '300ms' }}>
+            <MsiWidget />
+          </div>
+
+          <div className="animate-fade-in-up" style={{ animationDelay: '380ms' }}>
             <PipelineMonitor runs={pipelineData?.data} isLoading={pipelineLoading} />
           </div>
         </div>
