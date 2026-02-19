@@ -59,3 +59,33 @@ ORDER BY e.enumsortorder;
   - التعليق يكون `REM`.
   - سطر متعدد الأوامر يكون بـ `^`.
 - لا تستخدم backtick `` ` `` في CMD.
+
+## 7) ????? ??????? - ?????? ???? ??? ?????
+```bash
+TOKEN=$(curl -sS -X POST http://127.0.0.1:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"bourezgb","password":"password123"}' \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
+
+RUN=$(curl -sS -X POST http://127.0.0.1:8000/api/v1/sim/run \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"headline":"????? ??????","excerpt":"?? ????? ???????","platform":"facebook","mode":"fast"}')
+
+echo "$RUN"
+RUN_ID=$(echo "$RUN" | python3 -c 'import sys,json; print(json.load(sys.stdin)["run_id"])')
+
+curl -sS "http://127.0.0.1:8000/api/v1/sim/runs/$RUN_ID" -H "Authorization: Bearer $TOKEN"
+curl -sS "http://127.0.0.1:8000/api/v1/sim/result?run_id=$RUN_ID" -H "Authorization: Bearer $TOKEN"
+```
+
+## 8) ?? ????? ????? ??????? (??? ???????)
+```bash
+docker exec -i ech-postgres psql -U echorouk -d echorouk_db -c "
+INSERT INTO constitution_meta(version, file_url, is_active, updated_at)
+SELECT 'v1.0', '/constitution/guide', true, now()
+WHERE NOT EXISTS (
+  SELECT 1 FROM constitution_meta WHERE version='v1.0'
+);
+"
+```

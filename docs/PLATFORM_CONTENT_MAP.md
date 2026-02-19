@@ -113,3 +113,32 @@
 - Slack (تنبيهات الفريق).
 - Redis (كاش + نتائج trends).
 - FreshRSS/RSSBridge (تغذية المصادر).
+
+## 8) M7 Additions - ????? ???????
+### Frontend
+- `/simulator`
+- Smart Editor action: `????? ???????`
+
+### API
+- `POST /api/v1/sim/run`
+- `GET /api/v1/sim/runs/{run_id}`
+- `GET /api/v1/sim/result?run_id=...`
+- `GET /api/v1/sim/history`
+- `GET /api/v1/sim/live?run_id=...` (SSE)
+
+### Core backend files
+- `backend/app/models/simulator.py`
+- `backend/app/simulator/state.py`
+- `backend/app/simulator/nodes.py`
+- `backend/app/simulator/graph.py`
+- `backend/app/simulator/service.py`
+- `backend/app/api/routes/simulator.py`
+- `backend/app/schemas/simulator.py`
+- `backend/app/simulator/profiles/personas_dz_v1.json`
+
+### DB tables
+- `sim_runs`
+- `sim_results`
+- `sim_feedback`
+- `sim_calibration`
+- `sim_job_events`

@@ -151,3 +151,70 @@ curl -sS "http://127.0.0.1:8000/api/v1/dashboard/stats" -H "Authorization: Beare
 curl -sS "http://127.0.0.1:8000/api/v1/dashboard/notifications?limit=20" -H "Authorization: Bearer $TOKEN"
 curl -sS "http://127.0.0.1:8000/api/v1/news/?page=1&per_page=10" -H "Authorization: Bearer $TOKEN"
 ```
+
+---
+
+## 9) UI stuck on constitution confirmation modal
+### Symptoms
+- User can log in but cannot navigate.
+- Overlay `????? ????? ???????` remains blocking.
+
+### Cause
+- No active row in `constitution_meta`, so ack flow cannot complete reliably.
+
+### Immediate Unblock
+```bash
+docker exec -i ech-postgres psql -U echorouk -d echorouk_db -c "
+INSERT INTO constitution_meta(version, file_url, is_active, updated_at)
+SELECT 'v1.0', '/constitution/guide', true, now()
+WHERE NOT EXISTS (
+  SELECT 1 FROM constitution_meta WHERE version='v1.0'
+);
+"
+```
+
+### Verify
+```bash
+docker exec -i ech-postgres psql -U echorouk -d echorouk_db -c "
+SELECT id, version, file_url, is_active, updated_at
+FROM constitution_meta
+ORDER BY updated_at DESC
+LIMIT 5;
+"
+```
+
+---
+
+## 10) `POST /api/v1/sim/run` returns 500
+### Symptoms
+- API returns generic 500 from simulator run endpoint.
+- Frontend simulator panel shows no result.
+
+### Most common cause
+- Simulator migrations not applied (`sim_runs` table missing).
+
+### Fix
+```bash
+docker compose run --rm backend alembic upgrade head
+docker exec -i ech-postgres psql -U echorouk -d echorouk_db -c "\dt sim_*"
+docker compose restart backend
+```
+
+### Health check
+```bash
+docker logs ech-backend --since 10m | egrep -i "sim_|error|traceback"
+```
+
+---
+
+## 11) Browser shows `Minified React error #418`
+### Symptoms
+- UI crashes with minified React error.
+- Often appears in news details page render.
+
+### Cause
+- Invalid HTML payload in article body (full HTML document tags inside fragment).
+
+### Fix
+- Ensure frontend normalizes article HTML before `dangerouslySetInnerHTML`.
+- Hard refresh client cache after deploy (`Ctrl+F5`).
