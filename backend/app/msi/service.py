@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -112,19 +113,35 @@ class MsiMonitorService:
                 await db.commit()
                 await self._emit_event(db, run_id, "runner", "finished", {"status": "completed"})
             except Exception as exc:  # noqa: BLE001
-                run.status = "failed"
-                run.finished_at = datetime.utcnow()
-                run.error = str(exc)[:2000]
-                await db.commit()
-                await self._emit_event(db, run_id, "runner", "failed", {"status": "failed", "error": str(exc)})
                 logger.error("msi_run_failed", run_id=run_id, error=str(exc))
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
+
+                try:
+                    failed_row = await db.execute(select(MsiRun).where(MsiRun.run_id == run_id))
+                    failed_run = failed_row.scalar_one_or_none()
+                    if failed_run:
+                        failed_run.status = "failed"
+                        failed_run.finished_at = datetime.utcnow()
+                        failed_run.error = str(exc)[:2000]
+                        await db.commit()
+                except Exception as mark_exc:  # noqa: BLE001
+                    logger.error("msi_run_mark_failed_error", run_id=run_id, error=str(mark_exc))
+
+                try:
+                    async with async_session() as db2:
+                        await self._emit_event(db2, run_id, "runner", "failed", {"status": "failed", "error": str(exc)})
+                except Exception as emit_exc:  # noqa: BLE001
+                    logger.error("msi_run_failed_event_error", run_id=run_id, error=str(emit_exc))
 
     async def _persist_result(self, db: AsyncSession, run: MsiRun, result: MSIState) -> None:
-        report = MsiReport(run_id=run.run_id, report_json=result.report)
+        report = MsiReport(run_id=run.run_id, report_json=self._json_safe(result.report))
         artifact = MsiArtifact(
             run_id=run.run_id,
-            items_json=[item.model_dump() for item in result.analyzed_items],
-            aggregates_json=result.aggregates.model_dump(),
+            items_json=[item.model_dump(mode="json") for item in result.analyzed_items],
+            aggregates_json=result.aggregates.model_dump(mode="json"),
         )
         db.add(report)
         db.add(artifact)
@@ -152,7 +169,7 @@ class MsiMonitorService:
                     period_end=run.period_end,
                     msi=result.computed.msi,
                     level=result.computed.level,
-                    components_json=result.computed.components,
+                    components_json=self._json_safe(result.computed.components),
                 )
             )
 
@@ -175,12 +192,17 @@ class MsiMonitorService:
                 MsiBaseline(
                     profile_id=run.profile_id,
                     entity=run.entity,
-                    pressure_history=baseline_data.get("pressure_history", []),
-                    last_topic_dist=baseline_data.get("last_topic_dist", {}),
+                    pressure_history=self._json_safe(baseline_data.get("pressure_history", [])),
+                    last_topic_dist=self._json_safe(baseline_data.get("last_topic_dist", {})),
                     baseline_window_days=int(baseline_data.get("baseline_window_days", settings.msi_default_baseline_days)),
                     last_updated=datetime.utcnow(),
                 )
             )
+
+    @staticmethod
+    def _json_safe(value):
+        """Ensure JSON payloads are serializable before writing to JSON columns."""
+        return json.loads(json.dumps(value, ensure_ascii=False, default=str))
 
     async def _emit_event(self, db: AsyncSession, run_id: str, node: str, event_type: str, payload: dict) -> None:
         db.add(
