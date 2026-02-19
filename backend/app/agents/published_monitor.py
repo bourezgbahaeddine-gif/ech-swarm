@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import aiohttp
 import feedparser
@@ -103,17 +104,60 @@ STRONG_KEYWORDS = {
 class PublishedContentMonitorAgent:
     CACHE_KEY = "published_monitor:last"
 
+    @staticmethod
+    def _normalize_title_for_dedup(title: str) -> str:
+        return re.sub(r"\s+", " ", (title or "").strip().lower())
+
+    @staticmethod
+    def _normalize_url_for_dedup(url: str) -> str:
+        raw = (url or "").strip()
+        if not raw:
+            return ""
+        try:
+            parsed = urlparse(raw)
+            filtered_query = [
+                (k, v)
+                for k, v in parse_qsl(parsed.query, keep_blank_values=False)
+                if not k.lower().startswith("utm_")
+                and k.lower() not in {"fbclid", "gclid", "igshid", "oc", "hl", "gl", "ceid"}
+            ]
+            normalized = parsed._replace(
+                scheme=(parsed.scheme or "https").lower(),
+                netloc=parsed.netloc.lower(),
+                query=urlencode(filtered_query, doseq=True),
+                fragment="",
+            )
+            return urlunparse(normalized).rstrip("/")
+        except Exception:
+            return raw.lower().rstrip("/")
+
+    def _deduplicate_feed_entries(self, entries: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+        seen: set[str] = set()
+        unique_entries: list[dict[str, Any]] = []
+        for entry in entries:
+            normalized_url = self._normalize_url_for_dedup(entry.get("link", ""))
+            normalized_title = self._normalize_title_for_dedup(entry.get("title", ""))
+            signature = f"{normalized_url}|{normalized_title}"
+            if signature in seen:
+                continue
+            seen.add(signature)
+            unique_entries.append(entry)
+            if len(unique_entries) >= limit:
+                break
+        return unique_entries
+
     async def scan(self, feed_url: str | None = None, limit: int | None = None) -> dict[str, Any]:
         feed_url = (feed_url or settings.published_monitor_feed_url).strip()
         limit = max(1, min(limit or settings.published_monitor_limit, 30))
         timeout_total = max(6, settings.published_monitor_fetch_timeout)
 
         entries = await self._fetch_feed_entries(feed_url=feed_url, timeout_total=timeout_total)
+        unique_entries = self._deduplicate_feed_entries(entries, limit)
         audits: list[dict[str, Any]] = []
 
         connector = aiohttp.TCPConnector(ssl=False)
         async with aiohttp.ClientSession(connector=connector, headers={"User-Agent": "EchoroukSwarm/1.0"}) as session:
-            for entry in entries[:limit]:
+            for entry in unique_entries:
                 title = (entry.get("title") or "").strip()
                 summary = self._strip_html(entry.get("summary") or entry.get("description") or "")
                 url = (entry.get("link") or "").strip()
@@ -138,6 +182,8 @@ class PublishedContentMonitorAgent:
             "executed_at": datetime.utcnow().isoformat(),
             "interval_minutes": settings.published_monitor_interval_minutes,
             "total_items": len(audits),
+            "total_feed_entries": len(entries),
+            "duplicates_filtered": max(0, len(entries) - len(unique_entries)),
             "average_score": avg_score,
             "weak_items_count": len(weak_items),
             "issues_count": issues_count,

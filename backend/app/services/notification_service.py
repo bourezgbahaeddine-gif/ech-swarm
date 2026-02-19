@@ -1,16 +1,19 @@
-"""
+﻿"""
 Echorouk AI Swarm - Notification Service.
 Multi-channel notifications (Telegram/Slack) with newsroom rules.
 """
 
+import hashlib
 import html
 import re
+from datetime import timedelta
 from typing import Optional
 
 import httpx
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.services.cache_service import cache_service
 from app.services.settings_service import settings_service
 
 logger = get_logger("notification_service")
@@ -26,6 +29,10 @@ class NotificationService:
             return "-"
         normalized = re.sub(r"\s+", " ", text).strip()
         return html.escape(normalized[:max_len])
+
+    @staticmethod
+    def _normalize_for_signature(value: str) -> str:
+        return re.sub(r"\s+", " ", (value or "").strip().lower())
 
     @staticmethod
     def _category_label(category: str) -> str:
@@ -210,6 +217,25 @@ class NotificationService:
         if not weak_items:
             return
 
+        # Prevent alert spam by suppressing repeated alerts for the same topic.
+        dedup_ttl = timedelta(hours=12)
+        new_weak_items: list[dict] = []
+        for item in weak_items:
+            normalized_url = self._normalize_for_signature(item.get("url", ""))
+            normalized_title = self._normalize_for_signature(item.get("title", ""))
+            signature_raw = f"{normalized_url}|{normalized_title}"
+            signature_hash = hashlib.sha1(signature_raw.encode("utf-8")).hexdigest()
+            dedup_key = f"published_quality_alert:item:{signature_hash}"
+            already_sent = await cache_service.get(dedup_key)
+            if already_sent:
+                continue
+            await cache_service.set(dedup_key, "1", ttl=dedup_ttl)
+            new_weak_items.append(item)
+
+        if not new_weak_items:
+            logger.info("published_quality_alert_suppressed_all_duplicates")
+            return
+
         avg_score = report.get("average_score", 0)
         executed_at = report.get("executed_at", "-")
         threshold = settings.published_monitor_alert_threshold
@@ -218,11 +244,11 @@ class NotificationService:
             "🚨 <b>إنذار جودة المحتوى المنشور</b>",
             f"🕒 وقت الفحص: {self._clean_text(str(executed_at), 60)}",
             f"📉 المعدل العام: <b>{avg_score}</b> / 100",
-            f"⚠️ عناصر تحت العتبة ({threshold}): <b>{len(weak_items)}</b>",
+            f"⚠️ عناصر جديدة تحت العتبة ({threshold}): <b>{len(new_weak_items)}</b>",
             "",
         ]
 
-        for item in weak_items[:5]:
+        for item in new_weak_items[:5]:
             title = self._clean_text(item.get("title", "بدون عنوان"), 120)
             score = item.get("score", 0)
             grade = self._clean_text(item.get("grade", "-"), 20)

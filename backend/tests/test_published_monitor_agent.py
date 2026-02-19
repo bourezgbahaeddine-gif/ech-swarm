@@ -1,4 +1,4 @@
-from app.agents.published_monitor import PublishedContentMonitorAgent
+﻿from app.agents.published_monitor import PublishedContentMonitorAgent
 
 
 def test_audit_entry_flags_clickbait_and_spelling():
@@ -22,3 +22,16 @@ def test_grade_thresholds():
     assert agent._grade(80) == "جيد"
     assert agent._grade(65) == "مقبول"
     assert agent._grade(40) == "ضعيف"
+
+
+def test_feed_dedup_removes_same_topic_variants():
+    agent = PublishedContentMonitorAgent()
+    entries = [
+        {"title": "عنوان 1", "link": "https://example.com/a?utm_source=rss"},
+        {"title": "عنوان 1", "link": "https://example.com/a"},
+        {"title": "عنوان 2", "link": "https://example.com/b?oc=5"},
+        {"title": "عنوان 2", "link": "https://example.com/b"},
+    ]
+
+    unique = agent._deduplicate_feed_entries(entries, limit=10)
+    assert len(unique) == 2
