@@ -54,8 +54,9 @@ class MsiGraphRunner:
             await self.emit_event(node_name, "started", {"node": node_name})
             try:
                 update = await handler(state)
-                await self.emit_event(node_name, "finished", {"keys": list(update.keys())})
-                return update
+                merged_state = {**state, **(update or {})}
+                await self.emit_event(node_name, "finished", {"keys": list((update or {}).keys())})
+                return merged_state
             except Exception as exc:  # noqa: BLE001
                 await self.emit_event(node_name, "failed", {"error": str(exc)})
                 logger.error("msi_node_failed", node=node_name, error=str(exc))
