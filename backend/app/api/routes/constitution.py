@@ -1,4 +1,4 @@
-"""
+﻿"""
 Echorouk AI Swarm - Constitution Routes.
 Expose latest constitution and user acknowledgements.
 """
@@ -6,14 +6,14 @@ Expose latest constitution and user acknowledgements.
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, desc
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
-from app.models.constitution import ConstitutionMeta, ConstitutionAck
-from app.models.user import User
 from app.api.routes.auth import get_current_user
-from app.schemas import ConstitutionMetaResponse, ConstitutionAckResponse, ConstitutionAckRequest
+from app.core.database import get_db
+from app.models.constitution import ConstitutionAck, ConstitutionMeta
+from app.models.user import User
+from app.schemas import ConstitutionAckRequest, ConstitutionAckResponse, ConstitutionMetaResponse
 
 router = APIRouter(prefix="/constitution", tags=["Constitution"])
 
@@ -65,7 +65,11 @@ async def get_latest_constitution(db: AsyncSession = Depends(get_db)):
     )
     latest = result.scalar_one_or_none()
     if not latest:
-        raise HTTPException(status_code=404, detail="لم يتم العثور على نسخة دستور نشطة.")
+        return ConstitutionMetaResponse(
+            version="v1.0",
+            file_url="/constitution/guide",
+            updated_at=None,
+        )
     return ConstitutionMetaResponse(
         version=latest.version,
         file_url=latest.file_url,
@@ -86,7 +90,7 @@ async def get_ack_status(
     )
     latest = result.scalar_one_or_none()
     if not latest:
-        raise HTTPException(status_code=404, detail="لم يتم العثور على نسخة دستور نشطة.")
+        return ConstitutionAckResponse(acknowledged=False, version=None)
 
     ack = await db.execute(
         select(ConstitutionAck)
@@ -105,9 +109,7 @@ async def acknowledge(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(
-        select(ConstitutionMeta).where(ConstitutionMeta.version == data.version)
-    )
+    result = await db.execute(select(ConstitutionMeta).where(ConstitutionMeta.version == data.version))
     meta = result.scalar_one_or_none()
     if not meta:
         raise HTTPException(status_code=404, detail="نسخة الدستور المطلوبة غير موجودة.")

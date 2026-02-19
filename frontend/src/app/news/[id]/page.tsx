@@ -46,6 +46,19 @@ function sanitizeToolText(text: string): string {
         .trim();
 }
 
+
+function normalizeArticleHtml(input: string): string {
+    let html = String(input || '').trim();
+    if (!html) return '';
+    const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    if (bodyMatch?.[1]) html = bodyMatch[1];
+    html = html
+        .replace(/<script[\s\S]*?<\/script>/gi, '')
+        .replace(/<style[\s\S]*?<\/style>/gi, '')
+        .replace(/<\/?(html|head|body|meta|title|link|doctype)[^>]*>/gi, '');
+    return html.trim();
+}
+
 function actionKey(action: NewsActionId): string {
     return `${NEWS_ACTION_HELP_PREFIX}${action}`;
 }
@@ -229,7 +242,7 @@ export default function NewsDetailsPage() {
                         {article.body_html ? (
                             <div
                                 className="prose prose-invert max-w-none prose-p:leading-8 prose-p:text-gray-200"
-                                dangerouslySetInnerHTML={{ __html: article.body_html }}
+                                dangerouslySetInnerHTML={{ __html: normalizeArticleHtml(article.body_html) }}
                             />
                         ) : (
                             <p className="text-sm text-gray-400 leading-7 whitespace-pre-wrap">

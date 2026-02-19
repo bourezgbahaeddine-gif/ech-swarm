@@ -232,7 +232,12 @@ function WorkspaceDraftsPageContent() {
     }, [msiTopDaily, msiTopWeekly, msiContextText]);
 
     const editor = useEditor({
-        extensions: [StarterKit, Highlight, Link.configure({ openOnClick: false }), Placeholder.configure({ placeholder: 'ابدأ كتابة الخبر هنا...' })],
+        extensions: [
+            StarterKit.configure({ link: false }),
+            Highlight,
+            Link.configure({ openOnClick: false }),
+            Placeholder.configure({ placeholder: 'ابدأ كتابة الخبر هنا...' }),
+        ],
         content: '',
         immediatelyRender: false,
         editorProps: {

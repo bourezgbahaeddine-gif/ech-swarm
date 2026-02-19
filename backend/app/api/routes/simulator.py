@@ -8,6 +8,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routes.auth import get_current_user
@@ -52,17 +53,26 @@ async def run_simulation(
     current_user: User = Depends(get_current_user),
 ):
     _require_run(current_user)
-    run = await audience_simulation_service.create_run(
-        db,
-        headline=payload.headline,
-        body_excerpt=payload.excerpt,
-        platform=payload.platform,
-        mode=payload.mode,
-        actor=current_user,
-        article_id=payload.article_id,
-        draft_id=payload.draft_id,
-        idempotency_key=payload.idempotency_key,
-    )
+    try:
+        run = await audience_simulation_service.create_run(
+            db,
+            headline=payload.headline,
+            body_excerpt=payload.excerpt,
+            platform=payload.platform,
+            mode=payload.mode,
+            actor=current_user,
+            article_id=payload.article_id,
+            draft_id=payload.draft_id,
+            idempotency_key=payload.idempotency_key,
+        )
+    except SQLAlchemyError as exc:
+        text = str(exc).lower()
+        if "sim_runs" in text and ("does not exist" in text or "undefinedtable" in text):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="جداول محاكي الجمهور غير موجودة. نفّذ migration: alembic upgrade head",
+            ) from exc
+        raise
     if run.status in {"queued", "running"}:
         await audience_simulation_service.start_run_task(run.run_id)
     return SimRunResponse(
