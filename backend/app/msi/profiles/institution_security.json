@@ -1,17 +1,33 @@
-﻿{
+{
   "id": "institution_security",
   "display_name": "المؤسسات الأمنية والدفاعية",
   "description": "قياس الاستقرار الإعلامي في القضايا الأمنية",
-  "languages": ["ar", "fr", "en"],
-  "geo_focus": ["DZ", "MENA", "AFR"],
+  "languages": [
+    "ar",
+    "fr",
+    "en"
+  ],
+  "geo_focus": [
+    "DZ",
+    "MENA",
+    "AFR"
+  ],
   "source_weights": {
     "tier_1": 1.0,
     "tier_2": 0.9,
     "tier_3": 0.7
   },
   "source_tiers": {
-    "tier_1_domains": ["mdn.dz", "aps.dz", "echoroukonline.com"],
-    "tier_2_domains": ["reuters.com", "afp.com", "apnews.com"],
+    "tier_1_domains": [
+      "mdn.dz",
+      "aps.dz",
+      "echoroukonline.com"
+    ],
+    "tier_2_domains": [
+      "reuters.com",
+      "afp.com",
+      "apnews.com"
+    ],
     "tier_3_domains": []
   },
   "weights": {
@@ -20,12 +36,22 @@
     "gamma": 0.2,
     "delta": 0.1
   },
-  "risk_dictionary": ["هجوم", "اشتباك", "تهديد", "إنذار", "اختراق", "إرهاب", "تسليح"],
+  "risk_dictionary": [
+    "هجوم",
+    "اشتباك",
+    "تهديد",
+    "إنذار",
+    "اختراق",
+    "إرهاب",
+    "تسليح"
+  ],
   "baseline": {
     "window_days": 90
   },
   "default_sources": {
-    "rss_feeds": ["https://www.echoroukonline.com/feed"],
+    "rss_feeds": [
+      "https://www.echoroukonline.com/feed"
+    ],
     "gdelt": true
   }
 }

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.routes.auth import get_current_user
 from app.core.database import async_session, get_db
 from app.models.user import User, UserRole
+from app.msi.profiles import load_profile
 from app.msi.service import msi_monitor_service
 from app.schemas.msi import (
     MsiProfileInfo,
@@ -66,6 +67,11 @@ async def run_msi(
     current_user: User = Depends(get_current_user),
 ):
     _require_run(current_user)
+    try:
+        load_profile(payload.profile_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ملف Profile غير موجود") from exc
+
     run = await msi_monitor_service.create_run(
         db,
         profile_id=payload.profile_id,

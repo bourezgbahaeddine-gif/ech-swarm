@@ -25,7 +25,7 @@ export default function MsiWidget() {
             <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-semibold text-white flex items-center gap-2">
                     <Activity className="w-4 h-4 text-cyan-300" />
-                    MSI Monitor
+                    مراقب MSI
                 </h3>
                 <a href="/msi" className="text-xs text-emerald-300 hover:text-emerald-200">فتح</a>
             </div>

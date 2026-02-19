@@ -1,17 +1,28 @@
-﻿{
+{
   "id": "institution_ministry",
   "display_name": "الوزارات والمؤسسات الحكومية",
   "description": "متابعة استقرار التغطية الإعلامية لوزارات الدولة",
-  "languages": ["ar", "fr"],
-  "geo_focus": ["DZ"],
+  "languages": [
+    "ar",
+    "fr"
+  ],
+  "geo_focus": [
+    "DZ"
+  ],
   "source_weights": {
     "tier_1": 1.0,
     "tier_2": 0.85,
     "tier_3": 0.65
   },
   "source_tiers": {
-    "tier_1_domains": ["aps.dz", "echoroukonline.com"],
-    "tier_2_domains": ["reuters.com", "afp.com"],
+    "tier_1_domains": [
+      "aps.dz",
+      "echoroukonline.com"
+    ],
+    "tier_2_domains": [
+      "reuters.com",
+      "afp.com"
+    ],
     "tier_3_domains": []
   },
   "weights": {
@@ -20,12 +31,21 @@
     "gamma": 0.2,
     "delta": 0.15
   },
-  "risk_dictionary": ["إضراب", "تعليق", "احتجاج", "غضب", "تسريب", "تحقيق"],
+  "risk_dictionary": [
+    "إضراب",
+    "تعليق",
+    "احتجاج",
+    "غضب",
+    "تسريب",
+    "تحقيق"
+  ],
   "baseline": {
     "window_days": 90
   },
   "default_sources": {
-    "rss_feeds": ["https://www.echoroukonline.com/feed"],
+    "rss_feeds": [
+      "https://www.echoroukonline.com/feed"
+    ],
     "gdelt": true
   }
 }

@@ -1,17 +1,30 @@
-﻿{
+{
   "id": "institution_economy",
   "display_name": "الاقتصاد والمؤسسات المالية",
   "description": "مراقبة استقرار التغطية لملفات الاقتصاد والطاقة",
-  "languages": ["ar", "fr", "en"],
-  "geo_focus": ["DZ", "MENA"],
+  "languages": [
+    "ar",
+    "fr",
+    "en"
+  ],
+  "geo_focus": [
+    "DZ",
+    "MENA"
+  ],
   "source_weights": {
     "tier_1": 1.0,
     "tier_2": 0.85,
     "tier_3": 0.65
   },
   "source_tiers": {
-    "tier_1_domains": ["aps.dz", "echoroukonline.com"],
-    "tier_2_domains": ["bloomberg.com", "reuters.com"],
+    "tier_1_domains": [
+      "aps.dz",
+      "echoroukonline.com"
+    ],
+    "tier_2_domains": [
+      "bloomberg.com",
+      "reuters.com"
+    ],
     "tier_3_domains": []
   },
   "weights": {
@@ -20,12 +33,21 @@
     "gamma": 0.2,
     "delta": 0.2
   },
-  "risk_dictionary": ["تضخم", "انهيار", "تراجع", "عجز", "ديون", "اضطراب"],
+  "risk_dictionary": [
+    "تضخم",
+    "انهيار",
+    "تراجع",
+    "عجز",
+    "ديون",
+    "اضطراب"
+  ],
   "baseline": {
     "window_days": 90
   },
   "default_sources": {
-    "rss_feeds": ["https://www.echoroukonline.com/feed"],
+    "rss_feeds": [
+      "https://www.echoroukonline.com/feed"
+    ],
     "gdelt": true
   }
 }

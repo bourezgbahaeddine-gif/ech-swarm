@@ -203,7 +203,7 @@ export default function MsiPage() {
                     className="lg:col-span-2 h-11 rounded-xl border border-emerald-500/30 bg-emerald-500/20 text-emerald-200 text-sm disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                     {runMutation.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                    Run Now
+                    تشغيل الآن
                 </button>
             </div>
 
