@@ -593,19 +593,31 @@ async def handoff_to_scribe(
     article = result.scalar_one_or_none()
     if not article:
         raise HTTPException(404, "Article not found")
-    if article.status not in [NewsStatus.CANDIDATE, NewsStatus.CLASSIFIED, NewsStatus.APPROVED, NewsStatus.APPROVED_HANDOFF, NewsStatus.DRAFT_GENERATED]:
-        raise HTTPException(400, f"Article cannot be handed off in state: {article.status}")
+    allowed_statuses = {
+        NewsStatus.CANDIDATE,
+        NewsStatus.CLASSIFIED,
+        NewsStatus.APPROVED,
+        NewsStatus.APPROVED_HANDOFF,
+        NewsStatus.DRAFT_GENERATED,
+        NewsStatus.REJECTED,
+    }
+    if article.status not in allowed_statuses:
+        current_status = article.status.value if article.status else "unknown"
+        raise HTTPException(400, f"لا يمكن إنشاء مسودة لهذا الخبر في الحالة الحالية: {current_status}")
 
-    if article.status in [NewsStatus.CANDIDATE, NewsStatus.CLASSIFIED]:
+    if article.status in [NewsStatus.CANDIDATE, NewsStatus.CLASSIFIED, NewsStatus.REJECTED]:
+        was_rejected = article.status == NewsStatus.REJECTED
         article.status = NewsStatus.APPROVED_HANDOFF
         article.reviewed_by = current_user.full_name_ar
         article.reviewed_at = datetime.utcnow()
+        if was_rejected:
+            article.rejection_reason = None
         db.add(
             EditorDecision(
                 article_id=article_id,
                 editor_name=current_user.full_name_ar,
                 decision="approve",
-                reason="handoff_to_scribe_v2",
+                reason="handoff_reopen_from_rejected" if was_rejected else "handoff_to_scribe_v2",
                 original_ai_title=article.title_ar,
                 original_ai_body=article.body_html,
             )
