@@ -25,6 +25,7 @@ import {
 
 import { editorialApi, msiApi, simApi } from '@/lib/api';
 import { constitutionApi } from '@/lib/constitution-api';
+import { useAuth } from '@/lib/auth';
 import { cn, formatRelativeTime, truncate } from '@/lib/utils';
 
 type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
@@ -128,6 +129,8 @@ function actionKey(action: ActionId): string {
 
 function WorkspaceDraftsPageContent() {
     const queryClient = useQueryClient();
+    const { user } = useAuth();
+    const isDirector = (user?.role || '').toLowerCase() === 'director';
     const search = useSearchParams();
     const articleId = search.get('article_id');
     const initialWork = search.get('work_id');
@@ -169,6 +172,7 @@ function WorkspaceDraftsPageContent() {
     const [guideType, setGuideType] = useState<GuideType>('welcome');
     const [guideAction, setGuideAction] = useState<ActionId | null>(null);
     const pendingActionRef = useRef<null | (() => void)>(null);
+    const visibleTabs = useMemo(() => TABS.filter((tab) => (tab.id === 'msi' ? isDirector : true)), [isDirector]);
 
     const { data: listData, isLoading: listLoading } = useQuery({
         queryKey: ['smart-editor-list', articleId],
@@ -183,6 +187,10 @@ function WorkspaceDraftsPageContent() {
         setGuideAction(null);
         setGuideOpen(true);
     }, []);
+
+    useEffect(() => {
+        if (!isDirector && activeTab === 'msi') setActiveTab('evidence');
+    }, [isDirector, activeTab]);
 
     useEffect(() => {
         autoCreateAttemptRef.current = false;
@@ -214,10 +222,12 @@ function WorkspaceDraftsPageContent() {
     const { data: msiTopDailyData } = useQuery({
         queryKey: ['smart-editor-msi-top-daily'],
         queryFn: () => msiApi.top({ mode: 'daily', limit: 10 }),
+        enabled: isDirector,
     });
     const { data: msiTopWeeklyData } = useQuery({
         queryKey: ['smart-editor-msi-top-weekly'],
         queryFn: () => msiApi.top({ mode: 'weekly', limit: 10 }),
+        enabled: isDirector,
     });
     const msiTopDaily = msiTopDailyData?.data?.items || [];
     const msiTopWeekly = msiTopWeeklyData?.data?.items || [];
@@ -703,7 +713,7 @@ function WorkspaceDraftsPageContent() {
                 <aside className="xl:col-span-3 space-y-4">
                     <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4">
                         <div className="flex flex-wrap gap-2">
-                            {TABS.map((t) => (
+                            {visibleTabs.map((t) => (
                                 <button key={t.id} onClick={() => setActiveTab(t.id)} className={cn('px-2 py-1 rounded-lg text-[11px]', activeTab === t.id ? 'bg-emerald-500/20 text-emerald-200' : 'bg-white/10 text-gray-300')}>{t.label}</button>
                             ))}
                         </div>
@@ -999,4 +1009,3 @@ export default function WorkspaceDraftsPage() {
         </Suspense>
     );
 }
-

@@ -58,7 +58,7 @@ const navItems = [
     { href: '/workspace-drafts', label: 'المحرر الذكي', icon: FolderGit2, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
     { href: '/trends', label: 'رادار التراند', icon: TrendingUp, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
     { href: '/constitution', label: 'الدستور', icon: FileText, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor', 'fact_checker'] as Role[] },
-    { href: '/msi', label: 'مؤشر MSI', icon: Gauge, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
+    { href: '/msi', label: 'مؤشر MSI', icon: Gauge, roles: ['director'] as Role[] },
     { href: '/simulator', label: 'محاكي الجمهور', icon: MessagesSquare, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
     { href: '/memory', label: 'ذاكرة المشروع', icon: BookOpen, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
     { href: '/services/multimedia', label: 'الوسائط', icon: Film, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },

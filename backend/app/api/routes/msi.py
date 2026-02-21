@@ -33,24 +33,24 @@ from app.schemas.msi import (
 router = APIRouter(prefix="/msi", tags=["MSI"])
 
 
-RUN_ALLOWED = {UserRole.journalist, UserRole.editor_chief, UserRole.director}
-VIEW_ALLOWED = {UserRole.journalist, UserRole.editor_chief, UserRole.director, UserRole.social_media, UserRole.print_editor}
-WATCHLIST_ALLOWED = {UserRole.director, UserRole.editor_chief}
+RUN_ALLOWED = {UserRole.director}
+VIEW_ALLOWED = {UserRole.director}
+WATCHLIST_ALLOWED = {UserRole.director}
 
 
 def _require_view(user: User) -> None:
     if user.role not in VIEW_ALLOWED:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="غير مصرح")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="MSI is available for director only")
 
 
 def _require_run(user: User) -> None:
     if user.role not in RUN_ALLOWED:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="تشغيل MSI متاح للمحرر/رئيس التحرير/المدير فقط")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="MSI run is available for director only")
 
 
 def _require_watchlist_manage(user: User) -> None:
     if user.role not in WATCHLIST_ALLOWED:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="إدارة قائمة المراقبة متاحة للمدير/رئيس التحرير فقط")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="MSI watchlist management is available for director only")
 
 
 def _map_watchlist_item(item) -> MsiWatchlistItem:

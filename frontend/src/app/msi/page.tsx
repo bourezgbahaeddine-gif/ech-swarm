@@ -30,8 +30,9 @@ export default function MsiPage() {
     const queryClient = useQueryClient();
     const { user } = useAuth();
     const role = (user?.role || '').toLowerCase();
-    const canRun = ['director', 'editor_chief', 'journalist'].includes(role);
-    const canManageWatchlist = ['director', 'editor_chief'].includes(role);
+    const isDirector = role === 'director';
+    const canRun = isDirector;
+    const canManageWatchlist = isDirector;
     const apiBase = (process.env.NEXT_PUBLIC_API_URL || '/api/v1').replace(/\/$/, '');
 
     const [profileId, setProfileId] = useState('institution_presidency');
@@ -45,6 +46,7 @@ export default function MsiPage() {
     const { data: profilesData } = useQuery({
         queryKey: ['msi-profiles'],
         queryFn: () => msiApi.profiles(),
+        enabled: isDirector,
     });
     const profiles = profilesData?.data || [];
 
@@ -64,7 +66,7 @@ export default function MsiPage() {
     const { data: runStatusData } = useQuery({
         queryKey: ['msi-run-status', runId],
         queryFn: () => msiApi.runStatus(runId),
-        enabled: !!runId,
+        enabled: isDirector && !!runId,
         refetchInterval: (q) => {
             const status = q.state.data?.data?.status;
             if (status === 'completed' || status === 'failed') return false;
@@ -75,7 +77,7 @@ export default function MsiPage() {
     const status = runStatusData?.data?.status || '';
 
     useEffect(() => {
-        if (!runId) return;
+        if (!isDirector || !runId) return;
         const source = new EventSource(`${apiBase}/msi/live?run_id=${encodeURIComponent(runId)}`);
         source.onmessage = (event) => {
             try {
@@ -88,12 +90,12 @@ export default function MsiPage() {
         };
         source.onerror = () => source.close();
         return () => source.close();
-    }, [runId, apiBase]);
+    }, [isDirector, runId, apiBase]);
 
     const { data: reportData, isFetching: reportLoading } = useQuery({
         queryKey: ['msi-report', runId],
         queryFn: () => msiApi.report(runId),
-        enabled: !!runId && status === 'completed',
+        enabled: isDirector && !!runId && status === 'completed',
     });
 
     const report: MsiReport | undefined = reportData?.data;
@@ -107,17 +109,19 @@ export default function MsiPage() {
                 mode,
                 limit: 30,
             }),
-        enabled: !!profileId && !!entity.trim(),
+        enabled: isDirector && !!profileId && !!entity.trim(),
     });
     const points = useMemo(() => timeseriesData?.data?.points || [], [timeseriesData?.data?.points]);
 
     const { data: topDailyData } = useQuery({
         queryKey: ['msi-top-daily'],
         queryFn: () => msiApi.top({ mode: 'daily', limit: 5 }),
+        enabled: isDirector,
     });
     const { data: topWeeklyData } = useQuery({
         queryKey: ['msi-top-weekly'],
         queryFn: () => msiApi.top({ mode: 'weekly', limit: 5 }),
+        enabled: isDirector,
     });
 
     const { data: watchlistData } = useQuery({
@@ -166,6 +170,15 @@ export default function MsiPage() {
             })),
         [points]
     );
+
+    if (!isDirector) {
+        return (
+            <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" />
+                مؤشر MSI متاح للمدير فقط.
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-6">
