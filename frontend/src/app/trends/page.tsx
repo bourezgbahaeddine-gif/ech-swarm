@@ -331,20 +331,20 @@ export default function TrendsPage() {
                         {scoredTrends.map((trend, index) => (
                             <div
                                 key={`${trend.keyword}-${index}`}
-                                className="rounded-2xl bg-gradient-to-br from-gray-800/40 to-gray-900/70 border border-white/10 hover:border-emerald-500/30 transition-all p-3 md:p-5"
+                                className="rounded-2xl app-surface border border-[var(--border-primary)] hover:border-blue-300 transition-all p-3 md:p-5"
                             >
                                 <div className="flex flex-col md:flex-row md:items-start md:justify-between mb-3 gap-3">
                                     <div className="flex items-center gap-3 min-w-0">
-                                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center shadow-lg">
-                                            <Flame className="w-5 h-5 text-white" />
+                                        <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center">
+                                            <Flame className="w-5 h-5 text-[#2563EB]" />
                                         </div>
                                         <div className="min-w-0">
-                                            <h3 className="text-base font-bold text-white break-words">{trend.keyword}</h3>
+                                            <h3 className="text-base font-bold text-[var(--text-primary)] break-words">{trend.keyword}</h3>
                                             <div className="flex items-center gap-2 mt-1 flex-wrap">
-                                                <span className="px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-[10px] text-emerald-300">
+                                                <span className="px-2 py-0.5 rounded bg-blue-50 border border-blue-200 text-[10px] text-[#1E40AF]">
                                                     {CATEGORY_LABEL[trend.category] || trend.category}
                                                 </span>
-                                                <span className="px-2 py-0.5 rounded bg-cyan-500/10 border border-cyan-500/30 text-[10px] text-cyan-300">
+                                                <span className="px-2 py-0.5 rounded bg-slate-50 border border-slate-200 text-[10px] text-slate-600">
                                                     {GEO_LABEL[trend.geography] || trend.geography}
                                                 </span>
                                                 {trend.source_signals.map((signal, i) => (
@@ -363,18 +363,12 @@ export default function TrendsPage() {
                                                     key={i}
                                                     className={cn(
                                                         'w-2 h-5 rounded-sm transition-all',
-                                                        i < trend.strength
-                                                            ? i < 4
-                                                                ? 'bg-yellow-500'
-                                                                : i < 7
-                                                                  ? 'bg-orange-500'
-                                                                  : 'bg-red-500'
-                                                            : 'bg-gray-700',
+                                                        i < trend.strength ? 'bg-[#2563EB]' : 'bg-gray-300',
                                                     )}
                                                 />
                                             ))}
                                         </div>
-                                        <span className="text-xs font-bold text-white">{trend.strength}/10</span>
+                                        <span className="text-xs font-bold text-[var(--text-primary)]">{trend.strength}/10</span>
                                     </div>
                                 </div>
 

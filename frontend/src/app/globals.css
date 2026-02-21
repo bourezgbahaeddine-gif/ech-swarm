@@ -3,11 +3,11 @@
 @import "tailwindcss";
 
 :root {
-  --bg-primary: #fff8f2;
+  --bg-primary: #f8fafc;
   --bg-secondary: #ffffff;
   --bg-tertiary: #f9fafb;
   --text-primary: #111827;
-  --text-muted: #6b7280;
+  --text-muted: #4b5563;
   --border-primary: #e5e7eb;
   --accent-primary: #0f172a;
   --accent-soft: #eef2f7;
@@ -208,14 +208,26 @@ html[data-theme='light'] .app-theme-shell .text-white {
 html[data-theme='light'] .app-theme-shell .text-gray-500,
 html[data-theme='light'] .app-theme-shell .text-gray-400,
 html[data-theme='light'] .app-theme-shell .text-gray-300,
+html[data-theme='light'] .app-theme-shell .text-gray-200,
+html[data-theme='light'] .app-theme-shell .text-gray-100,
 html[data-theme='light'] .app-theme-shell .text-slate-100 {
   color: var(--text-muted) !important;
 }
 
 html[data-theme='light'] .app-theme-shell .bg-emerald-500\/10,
+html[data-theme='light'] .app-theme-shell .bg-emerald-500\/20,
 html[data-theme='light'] .app-theme-shell .bg-cyan-500\/10,
+html[data-theme='light'] .app-theme-shell .bg-cyan-500\/15,
+html[data-theme='light'] .app-theme-shell .bg-cyan-500\/20,
+html[data-theme='light'] .app-theme-shell .bg-amber-500\/10,
+html[data-theme='light'] .app-theme-shell .bg-amber-500\/20,
+html[data-theme='light'] .app-theme-shell .bg-blue-500\/20,
+html[data-theme='light'] .app-theme-shell .bg-indigo-500\/10,
 html[data-theme='light'] .app-theme-shell .bg-purple-500\/10,
 html[data-theme='light'] .app-theme-shell .bg-violet-500\/10,
+html[data-theme='light'] .app-theme-shell .bg-violet-500\/20,
+html[data-theme='light'] .app-theme-shell .bg-fuchsia-500\/20,
+html[data-theme='light'] .app-theme-shell .bg-red-500\/10,
 html[data-theme='light'] .app-theme-shell .bg-slate-900 {
   background-color: var(--bg-tertiary) !important;
 }
@@ -291,6 +303,41 @@ html[data-theme='light'] .app-theme-shell .shadow-xl,
 html[data-theme='light'] .app-theme-shell .shadow-lg,
 html[data-theme='light'] .app-theme-shell .shadow-2xl {
   box-shadow: 0 6px 20px rgba(15, 23, 42, 0.08) !important;
+}
+
+html[data-theme='light'] .app-theme-shell .rounded-2xl {
+  border-radius: 0.5rem !important;
+}
+
+html[data-theme='light'] .app-theme-shell .rounded-xl {
+  border-radius: 0.4rem !important;
+}
+
+html[data-theme='light'] .app-theme-shell .app-surface,
+html[data-theme='light'] .app-theme-shell [class*='bg-gray-900/50'],
+html[data-theme='light'] .app-theme-shell [class*='bg-gray-900/40'],
+html[data-theme='light'] .app-theme-shell [class*='bg-gray-900/30'] {
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06) !important;
+}
+
+.semantic-note {
+  border-right: 3px solid var(--semantic-info);
+  background: var(--bg-secondary);
+}
+
+.semantic-success {
+  border-right: 3px solid var(--semantic-success);
+  background: var(--bg-secondary);
+}
+
+.semantic-danger {
+  border-right: 3px solid var(--semantic-danger);
+  background: var(--bg-secondary);
+}
+
+.semantic-warning {
+  border-right: 3px solid var(--semantic-warning);
+  background: var(--bg-secondary);
 }
 
 /* Line clamp utility */

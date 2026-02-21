@@ -133,8 +133,8 @@ export default function AgentControl({ agents }: AgentControlProps) {
                                 }}
                                 disabled={isRunning}
                                 className={cn(
-                                    'w-full py-2 rounded-lg text-xs font-medium transition-all duration-200',
-                                    'flex items-center justify-center gap-2',
+                                    'w-full py-2 rounded-lg text-xs font-medium transition-all duration-200 border',
+                                    'flex items-center justify-between px-3',
                                     isRunning
                                         ? 'bg-amber-50 text-amber-700 border border-amber-200 cursor-wait'
                                         : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-100 hover:text-gray-900',
@@ -151,6 +151,16 @@ export default function AgentControl({ agents }: AgentControlProps) {
                                         تشغيل
                                     </>
                                 )}
+                            
+                                <span className={cn(
+                                    'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
+                                    isRunning ? 'bg-amber-400' : 'bg-[#2563EB]'
+                                )}>
+                                    <span className={cn(
+                                        'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+                                        isRunning ? 'translate-x-1' : '-translate-x-4'
+                                    )} />
+                                </span>
                             </button>
 
                             {result && (

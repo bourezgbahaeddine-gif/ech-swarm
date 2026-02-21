@@ -72,7 +72,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
     return (
         <div className="flex app-theme-shell">
-            <Sidebar theme={theme} />
+            <Sidebar />
             <main className="flex-1 mr-[260px] min-h-screen transition-all duration-300">
                 <TopBar theme={theme} onToggleTheme={toggleTheme} />
                 <div className="p-6 mesh-gradient min-h-[calc(100vh-64px)]">{children}</div>
