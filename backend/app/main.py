@@ -37,6 +37,7 @@ from app.api.routes.journalist_services import router as journalist_services_rou
 from app.api.routes.memory import router as memory_router
 from app.api.routes.msi import router as msi_router
 from app.api.routes.simulator import router as simulator_router
+from app.api.routes.media_logger import router as media_logger_router
 from app.msi.scheduler import start_msi_scheduler, stop_msi_scheduler
 
 settings = get_settings()
@@ -272,6 +273,7 @@ app.include_router(journalist_services_router, prefix="/api/v1")
 app.include_router(memory_router, prefix="/api/v1")
 app.include_router(msi_router, prefix="/api/v1")
 app.include_router(simulator_router, prefix="/api/v1")
+app.include_router(media_logger_router, prefix="/api/v1")
 
 
 # ── Health Check ──

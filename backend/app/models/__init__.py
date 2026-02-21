@@ -37,6 +37,12 @@ from app.models.simulator import (
     SimCalibration,
     SimJobEvent,
 )
+from app.models.media_logger import (
+    MediaLoggerRun,
+    MediaLoggerSegment,
+    MediaLoggerHighlight,
+    MediaLoggerJobEvent,
+)
 
 __all__ = [
     "Source", "Article", "EditorDecision", "EditorialDraft", "FeedbackLog",
@@ -73,4 +79,8 @@ __all__ = [
     "SimFeedback",
     "SimCalibration",
     "SimJobEvent",
+    "MediaLoggerRun",
+    "MediaLoggerSegment",
+    "MediaLoggerHighlight",
+    "MediaLoggerJobEvent",
 ]

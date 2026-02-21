@@ -637,6 +637,84 @@ export interface SimHistoryItem {
     policy_level?: string | null;
 }
 
+export interface MediaLoggerRunResponse {
+    run_id: string;
+    status: string;
+    source_type: 'url' | 'upload' | string;
+    source_label?: string | null;
+    language_hint: string;
+    created_at: string;
+}
+
+export interface MediaLoggerRunStatusResponse {
+    run_id: string;
+    status: string;
+    transcript_language?: string | null;
+    segments_count: number;
+    highlights_count: number;
+    duration_seconds?: number | null;
+    error?: string | null;
+    created_at: string;
+    finished_at?: string | null;
+}
+
+export interface MediaLoggerRecentRun {
+    run_id: string;
+    status: string;
+    source_type: string;
+    source_label?: string | null;
+    language_hint: string;
+    segments_count: number;
+    highlights_count: number;
+    created_at: string;
+    finished_at?: string | null;
+}
+
+export interface MediaLoggerSegment {
+    segment_index: number;
+    start_sec: number;
+    end_sec: number;
+    text: string;
+    confidence?: number | null;
+    speaker?: string | null;
+}
+
+export interface MediaLoggerHighlight {
+    rank: number;
+    quote: string;
+    reason?: string | null;
+    start_sec: number;
+    end_sec: number;
+    confidence?: number | null;
+}
+
+export interface MediaLoggerResult {
+    run_id: string;
+    status: string;
+    source_type: string;
+    source_label?: string | null;
+    language_hint: string;
+    transcript_language?: string | null;
+    transcript_text: string;
+    duration_seconds?: number | null;
+    segments_count: number;
+    highlights_count: number;
+    highlights: MediaLoggerHighlight[];
+    segments: MediaLoggerSegment[];
+    created_at: string;
+    finished_at?: string | null;
+}
+
+export interface MediaLoggerAskResponse {
+    run_id: string;
+    answer: string;
+    quote: string;
+    start_sec: number;
+    end_sec: number;
+    confidence: number;
+    context: MediaLoggerSegment[];
+}
+
 export interface CreateUserPayload {
     full_name_ar: string;
     username: string;
@@ -752,6 +830,26 @@ export const simApi = {
     result: (runId: string) => api.get<SimResult>('/sim/result', { params: { run_id: runId } }),
     history: (params?: { article_id?: number; draft_id?: number; limit?: number }) =>
         api.get<{ items: SimHistoryItem[]; total: number }>('/sim/history', { params }),
+};
+
+export const mediaLoggerApi = {
+    runFromUrl: (payload: { media_url: string; language_hint?: 'ar' | 'fr' | 'en' | 'auto'; idempotency_key?: string }) =>
+        api.post<MediaLoggerRunResponse>('/media-logger/run/url', payload),
+    runFromUpload: (payload: { file: File; language_hint?: 'ar' | 'fr' | 'en' | 'auto'; idempotency_key?: string }) => {
+        const form = new FormData();
+        form.append('file', payload.file);
+        form.append('language_hint', payload.language_hint || 'ar');
+        if (payload.idempotency_key) form.append('idempotency_key', payload.idempotency_key);
+        return api.post<MediaLoggerRunResponse>('/media-logger/run/upload', form, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+            timeout: 120000,
+        });
+    },
+    runStatus: (runId: string) => api.get<MediaLoggerRunStatusResponse>(`/media-logger/runs/${runId}`),
+    result: (runId: string) => api.get<MediaLoggerResult>('/media-logger/result', { params: { run_id: runId } }),
+    ask: (payload: { run_id: string; question: string }) => api.post<MediaLoggerAskResponse>('/media-logger/ask', payload),
+    recentRuns: (params?: { limit?: number; status_filter?: string }) =>
+        api.get<{ items: MediaLoggerRecentRun[]; total: number }>('/media-logger/runs', { params }),
 };
 
 // ── Axios Interceptor: auto-redirect on 401 ──
