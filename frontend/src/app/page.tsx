@@ -9,6 +9,7 @@ import NewsFeed from '@/components/dashboard/NewsFeed';
 import PipelineMonitor from '@/components/dashboard/PipelineMonitor';
 import AgentControl from '@/components/dashboard/AgentControl';
 import MsiWidget from '@/components/dashboard/MsiWidget';
+import CompetitorXrayWidget from '@/components/dashboard/CompetitorXrayWidget';
 import { useAuth } from '@/lib/auth';
 
 export default function DashboardPage() {
@@ -104,6 +105,10 @@ export default function DashboardPage() {
 
           <div className="animate-fade-in-up" style={{ animationDelay: '380ms' }}>
             <PipelineMonitor runs={pipelineData?.data} isLoading={pipelineLoading} />
+          </div>
+
+          <div className="animate-fade-in-up" style={{ animationDelay: '420ms' }}>
+            <CompetitorXrayWidget />
           </div>
         </div>
       </div>

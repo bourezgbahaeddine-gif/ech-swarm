@@ -23,13 +23,13 @@ import {
     Sparkles,
 } from 'lucide-react';
 
-import { editorialApi, msiApi, simApi } from '@/lib/api';
+import { competitorXrayApi, editorialApi, msiApi, simApi } from '@/lib/api';
 import { constitutionApi } from '@/lib/constitution-api';
 import { useAuth } from '@/lib/auth';
 import { cn, formatRelativeTime, truncate } from '@/lib/utils';
 
 type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
-type RightTab = 'evidence' | 'quality' | 'seo' | 'social' | 'context' | 'msi' | 'simulator';
+type RightTab = 'evidence' | 'quality' | 'seo' | 'social' | 'context' | 'msi' | 'simulator' | 'xray';
 type GuideType = 'welcome' | 'action';
 type ActionId = 'quick_check' | 'verify' | 'improve' | 'headlines' | 'seo' | 'social' | 'quality' | 'publish_gate' | 'apply' | 'save' | 'manual_draft' | 'audience_test';
 
@@ -41,6 +41,7 @@ const TABS: Array<{ id: RightTab; label: string }> = [
     { id: 'context', label: 'السياق والنسخ' },
     { id: 'msi', label: 'MSI السياقي' },
     { id: 'simulator', label: 'محاكي الجمهور' },
+    { id: 'xray', label: 'زوايا المنافسين' },
 ];
 
 const HELP_KEY = 'smart_editor_help_seen_v1';
@@ -240,6 +241,22 @@ function WorkspaceDraftsPageContent() {
         const all = [...msiTopDaily, ...msiTopWeekly];
         return all.find((item: any) => entityMatchesContext(item?.entity || '', msiContextText)) || null;
     }, [msiTopDaily, msiTopWeekly, msiContextText]);
+    const xrayQueryText = useMemo(() => cleanText(context?.draft?.title || context?.article?.title_ar || context?.article?.original_title || ''), [context?.draft?.title, context?.article?.title_ar, context?.article?.original_title]);
+    const { data: xrayItemsData } = useQuery({
+        queryKey: ['smart-editor-xray-latest', xrayQueryText],
+        queryFn: () => competitorXrayApi.latest({ limit: 8, q: xrayQueryText || undefined, status_filter: 'new' }),
+        enabled: !!xrayQueryText,
+    });
+    const xrayItems = xrayItemsData?.data || [];
+    const [xrayBrief, setXrayBrief] = useState<any | null>(null);
+    const xrayBriefMutation = useMutation({
+        mutationFn: (itemId: number) => competitorXrayApi.brief({ item_id: itemId, tone: 'newsroom' }),
+        onSuccess: (r) => setXrayBrief(r.data),
+    });
+    const xrayMarkUsed = useMutation({
+        mutationFn: (itemId: number) => competitorXrayApi.markUsed(itemId, 'used'),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['smart-editor-xray-latest'] }),
+    });
 
     const editor = useEditor({
         extensions: [
@@ -858,6 +875,54 @@ function WorkspaceDraftsPageContent() {
                                 </div>
                             ) : (
                                 <Empty text="اضغط زر «محاكي الجمهور» لتقييم العنوان قبل الاعتماد." />
+                            )}
+                        </Panel>
+                    )}
+
+                    {activeTab === 'xray' && (
+                        <Panel title="زوايا المنافسين">
+                            {xrayItems.length ? (
+                                <div className="space-y-2 text-xs text-gray-200">
+                                    {xrayItems.slice(0, 6).map((item: any) => (
+                                        <div key={`xray-${item.id}`} className="rounded-xl border border-white/10 bg-black/20 p-2">
+                                            <a href={item.competitor_url} target="_blank" rel="noreferrer" className="text-cyan-300 hover:underline line-clamp-1">
+                                                {cleanText(item.competitor_title || '')}
+                                            </a>
+                                            <p className="text-[11px] text-amber-200 mt-1">أولوية {Number(item.priority_score || 0).toFixed(1)}</p>
+                                            {item.angle_title ? <p className="text-emerald-200 mt-1">{cleanText(item.angle_title)}</p> : null}
+                                            {item.angle_rationale ? <p className="text-gray-300 mt-1 line-clamp-3">{cleanText(item.angle_rationale)}</p> : null}
+                                            {(item.angle_questions_json || []).slice(0, 3).map((qText: string, idx: number) => (
+                                                <p key={`${item.id}-q-${idx}`} className="text-gray-200">- {cleanText(qText)}</p>
+                                            ))}
+                                            <div className="flex flex-wrap gap-2 mt-2">
+                                                <button
+                                                    onClick={() => xrayBriefMutation.mutate(item.id)}
+                                                    className="px-2 py-1 rounded bg-cyan-500/20 border border-cyan-500/30 text-cyan-200"
+                                                >
+                                                    توليد Brief
+                                                </button>
+                                                <button
+                                                    onClick={() => xrayMarkUsed.mutate(item.id)}
+                                                    className="px-2 py-1 rounded bg-emerald-500/20 border border-emerald-500/30 text-emerald-200"
+                                                >
+                                                    تم الاستخدام
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {xrayBrief ? (
+                                        <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-2 text-cyan-100 space-y-1">
+                                            <p className="font-semibold">{cleanText(xrayBrief.title || 'Brief')}</p>
+                                            <p>{cleanText(xrayBrief.counter_angle || '')}</p>
+                                            <p className="text-cyan-200">{cleanText(xrayBrief.why_it_wins || '')}</p>
+                                            {(xrayBrief.newsroom_plan || []).slice(0, 4).map((step: string, idx: number) => (
+                                                <p key={`${step}-${idx}`}>- {cleanText(step)}</p>
+                                            ))}
+                                        </div>
+                                    ) : null}
+                                </div>
+                            ) : (
+                                <Empty text="لا توجد فجوات منافسين مرتبطة مباشرة بموضوع المسودة الحالية." />
                             )}
                         </Panel>
                     )}

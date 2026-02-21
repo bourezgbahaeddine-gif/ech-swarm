@@ -715,6 +715,62 @@ export interface MediaLoggerAskResponse {
     context: MediaLoggerSegment[];
 }
 
+export interface CompetitorXraySource {
+    id: number;
+    name: string;
+    feed_url: string;
+    domain: string;
+    language: string;
+    weight: number;
+    enabled: boolean;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface CompetitorXrayRunResponse {
+    run_id: string;
+    status: string;
+    created_at: string;
+}
+
+export interface CompetitorXrayRunStatus {
+    run_id: string;
+    status: string;
+    total_scanned: number;
+    total_gaps: number;
+    created_at: string;
+    finished_at?: string | null;
+    error?: string | null;
+}
+
+export interface CompetitorXrayItem {
+    id: number;
+    run_id: string;
+    source_id?: number | null;
+    competitor_title: string;
+    competitor_url: string;
+    competitor_summary?: string | null;
+    published_at?: string | null;
+    priority_score: number;
+    status: 'new' | 'used' | 'ignored' | string;
+    angle_title?: string | null;
+    angle_rationale?: string | null;
+    angle_questions_json: string[];
+    starter_sources_json: string[];
+    matched_article_id?: number | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface CompetitorXrayBrief {
+    item_id: number;
+    title: string;
+    counter_angle: string;
+    why_it_wins: string;
+    newsroom_plan: string[];
+    starter_sources: string[];
+}
+
 export interface CreateUserPayload {
     full_name_ar: string;
     username: string;
@@ -850,6 +906,24 @@ export const mediaLoggerApi = {
     ask: (payload: { run_id: string; question: string }) => api.post<MediaLoggerAskResponse>('/media-logger/ask', payload),
     recentRuns: (params?: { limit?: number; status_filter?: string }) =>
         api.get<{ items: MediaLoggerRecentRun[]; total: number }>('/media-logger/runs', { params }),
+};
+
+export const competitorXrayApi = {
+    seedSources: () => api.post<{ created: number; updated: number; total_defaults: number }>('/competitor-xray/sources/seed'),
+    sources: (enabled_only?: boolean) => api.get<CompetitorXraySource[]>('/competitor-xray/sources', { params: { enabled_only } }),
+    createSource: (payload: { name: string; feed_url: string; domain: string; language?: string; weight?: number; enabled?: boolean }) =>
+        api.post<CompetitorXraySource>('/competitor-xray/sources', payload),
+    updateSource: (sourceId: number, payload: { name?: string; language?: string; weight?: number; enabled?: boolean }) =>
+        api.patch<CompetitorXraySource>(`/competitor-xray/sources/${sourceId}`, payload),
+    run: (payload?: { limit_per_source?: number; hours_window?: number; idempotency_key?: string }) =>
+        api.post<CompetitorXrayRunResponse>('/competitor-xray/run', payload || {}),
+    runStatus: (runId: string) => api.get<CompetitorXrayRunStatus>(`/competitor-xray/runs/${runId}`),
+    latest: (params?: { limit?: number; status_filter?: string; q?: string }) =>
+        api.get<CompetitorXrayItem[]>('/competitor-xray/items/latest', { params }),
+    markUsed: (itemId: number, status_value: 'used' | 'ignored' | 'new' = 'used') =>
+        api.post<{ id: number; status: string }>(`/competitor-xray/items/${itemId}/mark-used`, null, { params: { status_value } }),
+    brief: (payload: { item_id: number; tone?: string }) =>
+        api.post<CompetitorXrayBrief>('/competitor-xray/brief', payload),
 };
 
 // ── Axios Interceptor: auto-redirect on 401 ──

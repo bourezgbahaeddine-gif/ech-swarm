@@ -38,7 +38,9 @@ from app.api.routes.memory import router as memory_router
 from app.api.routes.msi import router as msi_router
 from app.api.routes.simulator import router as simulator_router
 from app.api.routes.media_logger import router as media_logger_router
+from app.api.routes.competitor_xray import router as competitor_xray_router
 from app.msi.scheduler import start_msi_scheduler, stop_msi_scheduler
+from app.services.competitor_xray_service import competitor_xray_service
 
 settings = get_settings()
 logger = get_logger("main")
@@ -49,6 +51,7 @@ _shutdown_event = asyncio.Event()
 _pipeline_task: asyncio.Task | None = None
 _trends_task: asyncio.Task | None = None
 _published_monitor_task: asyncio.Task | None = None
+_competitor_xray_task: asyncio.Task | None = None
 
 
 async def _run_pipeline_once():
@@ -80,6 +83,14 @@ async def _run_published_monitor_once():
         weak_items=report.get("weak_items_count", 0),
         average_score=report.get("average_score", 0),
     )
+
+
+async def _run_competitor_xray_once():
+    run_id = await competitor_xray_service.trigger_scheduled_run(
+        limit_per_source=max(1, settings.competitor_xray_limit_per_source),
+        hours_window=max(6, settings.competitor_xray_hours_window),
+    )
+    logger.info("auto_competitor_xray_tick_done", run_id=run_id)
 
 
 async def _periodic_loop(name: str, interval_seconds: int, job):
@@ -116,7 +127,7 @@ async def lifespan(app: FastAPI):
     await cache_service.connect()
 
     # Start periodic pipeline loops (optional)
-    global _pipeline_task, _trends_task, _published_monitor_task
+    global _pipeline_task, _trends_task, _published_monitor_task, _competitor_xray_task
     _shutdown_event.clear()
     if settings.auto_pipeline_enabled:
         newsroom_interval_seconds = 20 * 60
@@ -157,6 +168,21 @@ async def lifespan(app: FastAPI):
             feed_url=settings.published_monitor_feed_url,
         )
 
+    if settings.competitor_xray_enabled:
+        _competitor_xray_task = asyncio.create_task(
+            _periodic_loop(
+                "competitor_xray",
+                max(600, settings.competitor_xray_interval_minutes * 60),
+                _run_competitor_xray_once,
+            )
+        )
+        logger.info(
+            "competitor_xray_enabled",
+            interval_minutes=settings.competitor_xray_interval_minutes,
+            limit_per_source=settings.competitor_xray_limit_per_source,
+            hours_window=settings.competitor_xray_hours_window,
+        )
+
     if settings.msi_enabled and settings.msi_scheduler_enabled:
         start_msi_scheduler()
 
@@ -170,11 +196,11 @@ async def lifespan(app: FastAPI):
 
     # ── Shutdown ──
     _shutdown_event.set()
-    for task in (_pipeline_task, _trends_task, _published_monitor_task):
+    for task in (_pipeline_task, _trends_task, _published_monitor_task, _competitor_xray_task):
         if task:
             task.cancel()
     await asyncio.gather(
-        *[t for t in (_pipeline_task, _trends_task, _published_monitor_task) if t],
+        *[t for t in (_pipeline_task, _trends_task, _published_monitor_task, _competitor_xray_task) if t],
         return_exceptions=True,
     )
     if settings.msi_enabled and settings.msi_scheduler_enabled:
@@ -274,6 +300,7 @@ app.include_router(memory_router, prefix="/api/v1")
 app.include_router(msi_router, prefix="/api/v1")
 app.include_router(simulator_router, prefix="/api/v1")
 app.include_router(media_logger_router, prefix="/api/v1")
+app.include_router(competitor_xray_router, prefix="/api/v1")
 
 
 # ── Health Check ──

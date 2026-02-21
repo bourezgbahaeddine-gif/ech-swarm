@@ -43,6 +43,12 @@ from app.models.media_logger import (
     MediaLoggerHighlight,
     MediaLoggerJobEvent,
 )
+from app.models.competitor_xray import (
+    CompetitorXraySource,
+    CompetitorXrayRun,
+    CompetitorXrayItem,
+    CompetitorXrayEvent,
+)
 
 __all__ = [
     "Source", "Article", "EditorDecision", "EditorialDraft", "FeedbackLog",
@@ -83,4 +89,8 @@ __all__ = [
     "MediaLoggerSegment",
     "MediaLoggerHighlight",
     "MediaLoggerJobEvent",
+    "CompetitorXraySource",
+    "CompetitorXrayRun",
+    "CompetitorXrayItem",
+    "CompetitorXrayEvent",
 ]

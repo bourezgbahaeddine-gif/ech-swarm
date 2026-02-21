@@ -86,6 +86,10 @@ class Settings(BaseSettings):
     published_monitor_limit: int = 12
     published_monitor_fetch_timeout: int = 12
     published_monitor_alert_threshold: int = 75
+    competitor_xray_enabled: bool = True
+    competitor_xray_interval_minutes: int = 30
+    competitor_xray_limit_per_source: int = 6
+    competitor_xray_hours_window: int = 48
     msi_enabled: bool = True
     msi_scheduler_enabled: bool = True
     msi_timezone: str = "Africa/Algiers"
