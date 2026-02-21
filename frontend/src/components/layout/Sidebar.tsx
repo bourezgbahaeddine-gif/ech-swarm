@@ -34,6 +34,23 @@ type Role =
     | 'fact_checker'
     | 'observer';
 
+function normalizeRole(role: string): Role | null {
+    const value = (role || '').trim().toLowerCase();
+    if (value === 'chief_editor' || value === 'editor_in_chief' || value === 'editor-chief') {
+        return 'editor_chief';
+    }
+    const allowed: Role[] = [
+        'director',
+        'editor_chief',
+        'journalist',
+        'social_media',
+        'print_editor',
+        'fact_checker',
+        'observer',
+    ];
+    return allowed.includes(value as Role) ? (value as Role) : null;
+}
+
 const navItems = [
     { href: '/', label: 'لوحة القيادة', icon: LayoutDashboard, roles: ['director', 'editor_chief'] as Role[] },
     { href: '/news', label: 'الأخبار', icon: Newspaper, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor', 'fact_checker'] as Role[] },
@@ -45,7 +62,7 @@ const navItems = [
     { href: '/simulator', label: 'محاكي الجمهور', icon: MessagesSquare, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
     { href: '/memory', label: 'ذاكرة المشروع', icon: BookOpen, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
     { href: '/services/multimedia', label: 'الوسائط', icon: Film, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
-    { href: '/team', label: 'فريق التحرير', icon: Users, roles: ['director', 'editor_chief'] as Role[] },
+    { href: '/team', label: 'فريق التحرير', icon: Users, roles: ['director'] as Role[] },
     { href: '/sources', label: 'المصادر', icon: Rss, roles: ['director'] as Role[] },
     { href: '/agents', label: 'مراقبة النظام', icon: Activity, roles: ['director'] as Role[] },
     { href: '/services/fact-check', label: 'التحقق والاستقصاء', icon: ShieldCheck, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'fact_checker', 'print_editor'] as Role[] },
@@ -56,8 +73,8 @@ export default function Sidebar() {
     const pathname = usePathname();
     const { user } = useAuth();
     const [collapsed, setCollapsed] = useState(false);
-    const role = ((user?.role || '') as Role);
-    const visibleNav = navItems.filter((item) => item.roles.includes(role));
+    const role = normalizeRole(user?.role || '');
+    const visibleNav = role ? navItems.filter((item) => item.roles.includes(role)) : [];
 
     return (
         <aside

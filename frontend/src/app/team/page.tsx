@@ -81,11 +81,20 @@ function parseDetails(details: string | null): string {
     }
 }
 
+function normalizeRole(role: string | undefined): string {
+    const value = (role || '').trim().toLowerCase();
+    if (value === 'chief_editor' || value === 'editor_in_chief' || value === 'editor-chief') {
+        return 'editor_chief';
+    }
+    return value;
+}
+
 export default function TeamPage() {
     const { user: currentUser } = useAuth();
     const queryClient = useQueryClient();
-    const isDirector = currentUser?.role === 'director';
-    const canView = currentUser?.role === 'director' || currentUser?.role === 'editor_chief';
+    const role = normalizeRole(currentUser?.role);
+    const isDirector = role === 'director';
+    const canView = role === 'director';
 
     const [createForm, setCreateForm] = useState<UserFormState>(defaultCreateForm());
     const [editTarget, setEditTarget] = useState<TeamMember | null>(null);
@@ -152,7 +161,7 @@ export default function TeamPage() {
             <div className="text-center py-20">
                 <Shield className="w-16 h-16 text-gray-700 mx-auto mb-4" />
                 <h2 className="text-lg font-semibold text-white">صلاحية محدودة</h2>
-                <p className="text-sm text-gray-500 mt-1">هذه الصفحة متاحة للمدير ورئيس التحرير فقط</p>
+                <p className="text-sm text-gray-500 mt-1">هذه الصفحة متاحة للمدير فقط</p>
             </div>
         );
     }

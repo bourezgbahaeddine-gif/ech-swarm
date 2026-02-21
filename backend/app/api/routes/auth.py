@@ -49,10 +49,10 @@ def _require_director(user: User) -> None:
 
 
 def _require_manager_view(user: User) -> None:
-    if user.role not in {UserRole.director, UserRole.editor_chief}:
+    if user.role != UserRole.director:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="غير مصرح. المتاح للمدير ورئيس التحرير فقط",
+            detail="غير مصرح. المتاح للمدير فقط",
         )
 
 
