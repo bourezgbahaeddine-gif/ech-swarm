@@ -80,7 +80,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
             {shouldShowConstitutionGate && (
                 <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-                    <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-gray-900/90 p-6">
+                    <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-gray-900/90 p-6 app-surface">
                         <div className="flex items-center gap-2 text-white mb-3">
                             <FileText className="w-5 h-5 text-emerald-400" />
                             <h2 className="text-lg font-semibold">تأكيد قراءة الدستور</h2>

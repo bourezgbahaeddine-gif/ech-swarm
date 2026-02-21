@@ -205,12 +205,19 @@ html[data-theme='light'] .app-theme-shell .text-white {
   color: var(--text-primary) !important;
 }
 
+html[data-theme='light'] .app-theme-shell [class*='text-white/'] {
+  color: var(--text-primary) !important;
+}
+
 html[data-theme='light'] .app-theme-shell .text-gray-500,
 html[data-theme='light'] .app-theme-shell .text-gray-400,
 html[data-theme='light'] .app-theme-shell .text-gray-300,
 html[data-theme='light'] .app-theme-shell .text-gray-200,
 html[data-theme='light'] .app-theme-shell .text-gray-100,
-html[data-theme='light'] .app-theme-shell .text-slate-100 {
+html[data-theme='light'] .app-theme-shell .text-slate-100,
+html[data-theme='light'] .app-theme-shell .text-slate-200,
+html[data-theme='light'] .app-theme-shell .text-slate-300,
+html[data-theme='light'] .app-theme-shell .text-slate-400 {
   color: var(--text-muted) !important;
 }
 
@@ -271,6 +278,135 @@ html[data-theme='light'] .app-theme-shell .text-green-400 {
   color: #047857 !important;
 }
 
+html[data-theme='light'] .app-theme-shell [class*='text-emerald-100'],
+html[data-theme='light'] .app-theme-shell [class*='text-emerald-200'],
+html[data-theme='light'] .app-theme-shell [class*='text-emerald-300'],
+html[data-theme='light'] .app-theme-shell [class*='text-emerald-400'],
+html[data-theme='light'] .app-theme-shell [class*='text-green-100'],
+html[data-theme='light'] .app-theme-shell [class*='text-green-200'],
+html[data-theme='light'] .app-theme-shell [class*='text-green-300'],
+html[data-theme='light'] .app-theme-shell [class*='text-green-400'] {
+  color: #047857 !important;
+}
+
+html[data-theme='light'] .app-theme-shell [class*='text-cyan-100'],
+html[data-theme='light'] .app-theme-shell [class*='text-cyan-200'],
+html[data-theme='light'] .app-theme-shell [class*='text-cyan-300'],
+html[data-theme='light'] .app-theme-shell [class*='text-cyan-400'],
+html[data-theme='light'] .app-theme-shell [class*='text-blue-100'],
+html[data-theme='light'] .app-theme-shell [class*='text-blue-200'],
+html[data-theme='light'] .app-theme-shell [class*='text-blue-300'],
+html[data-theme='light'] .app-theme-shell [class*='text-blue-400'],
+html[data-theme='light'] .app-theme-shell [class*='text-sky-100'],
+html[data-theme='light'] .app-theme-shell [class*='text-sky-200'],
+html[data-theme='light'] .app-theme-shell [class*='text-sky-300'],
+html[data-theme='light'] .app-theme-shell [class*='text-sky-400'],
+html[data-theme='light'] .app-theme-shell [class*='text-indigo-100'],
+html[data-theme='light'] .app-theme-shell [class*='text-indigo-200'],
+html[data-theme='light'] .app-theme-shell [class*='text-indigo-300'],
+html[data-theme='light'] .app-theme-shell [class*='text-indigo-400'] {
+  color: #1d4ed8 !important;
+}
+
+html[data-theme='light'] .app-theme-shell [class*='text-violet-100'],
+html[data-theme='light'] .app-theme-shell [class*='text-violet-200'],
+html[data-theme='light'] .app-theme-shell [class*='text-violet-300'],
+html[data-theme='light'] .app-theme-shell [class*='text-violet-400'],
+html[data-theme='light'] .app-theme-shell [class*='text-purple-100'],
+html[data-theme='light'] .app-theme-shell [class*='text-purple-200'],
+html[data-theme='light'] .app-theme-shell [class*='text-purple-300'],
+html[data-theme='light'] .app-theme-shell [class*='text-purple-400'],
+html[data-theme='light'] .app-theme-shell [class*='text-fuchsia-100'],
+html[data-theme='light'] .app-theme-shell [class*='text-fuchsia-200'],
+html[data-theme='light'] .app-theme-shell [class*='text-fuchsia-300'],
+html[data-theme='light'] .app-theme-shell [class*='text-fuchsia-400'] {
+  color: #6d28d9 !important;
+}
+
+html[data-theme='light'] .app-theme-shell [class*='text-amber-100'],
+html[data-theme='light'] .app-theme-shell [class*='text-amber-200'],
+html[data-theme='light'] .app-theme-shell [class*='text-amber-300'],
+html[data-theme='light'] .app-theme-shell [class*='text-amber-400'],
+html[data-theme='light'] .app-theme-shell [class*='text-yellow-100'],
+html[data-theme='light'] .app-theme-shell [class*='text-yellow-200'],
+html[data-theme='light'] .app-theme-shell [class*='text-yellow-300'],
+html[data-theme='light'] .app-theme-shell [class*='text-yellow-400'],
+html[data-theme='light'] .app-theme-shell [class*='text-orange-100'],
+html[data-theme='light'] .app-theme-shell [class*='text-orange-200'],
+html[data-theme='light'] .app-theme-shell [class*='text-orange-300'],
+html[data-theme='light'] .app-theme-shell [class*='text-orange-400'] {
+  color: #b45309 !important;
+}
+
+html[data-theme='light'] .app-theme-shell [class*='text-red-100'],
+html[data-theme='light'] .app-theme-shell [class*='text-red-200'],
+html[data-theme='light'] .app-theme-shell [class*='text-red-300'],
+html[data-theme='light'] .app-theme-shell [class*='text-red-400'],
+html[data-theme='light'] .app-theme-shell [class*='text-rose-100'],
+html[data-theme='light'] .app-theme-shell [class*='text-rose-200'],
+html[data-theme='light'] .app-theme-shell [class*='text-rose-300'],
+html[data-theme='light'] .app-theme-shell [class*='text-rose-400'] {
+  color: #b91c1c !important;
+}
+
+html[data-theme='light'] .app-theme-shell [class*='bg-emerald-'],
+html[data-theme='light'] .app-theme-shell [class*='bg-green-'] {
+  background-color: #ecfdf5 !important;
+}
+
+html[data-theme='light'] .app-theme-shell [class*='bg-cyan-'],
+html[data-theme='light'] .app-theme-shell [class*='bg-blue-'],
+html[data-theme='light'] .app-theme-shell [class*='bg-sky-'],
+html[data-theme='light'] .app-theme-shell [class*='bg-indigo-'] {
+  background-color: #eff6ff !important;
+}
+
+html[data-theme='light'] .app-theme-shell [class*='bg-violet-'],
+html[data-theme='light'] .app-theme-shell [class*='bg-purple-'],
+html[data-theme='light'] .app-theme-shell [class*='bg-fuchsia-'] {
+  background-color: #f5f3ff !important;
+}
+
+html[data-theme='light'] .app-theme-shell [class*='bg-amber-'],
+html[data-theme='light'] .app-theme-shell [class*='bg-yellow-'],
+html[data-theme='light'] .app-theme-shell [class*='bg-orange-'] {
+  background-color: #fffbeb !important;
+}
+
+html[data-theme='light'] .app-theme-shell [class*='bg-red-'],
+html[data-theme='light'] .app-theme-shell [class*='bg-rose-'] {
+  background-color: #fef2f2 !important;
+}
+
+html[data-theme='light'] .app-theme-shell [class*='border-emerald-'],
+html[data-theme='light'] .app-theme-shell [class*='border-green-'] {
+  border-color: #a7f3d0 !important;
+}
+
+html[data-theme='light'] .app-theme-shell [class*='border-cyan-'],
+html[data-theme='light'] .app-theme-shell [class*='border-blue-'],
+html[data-theme='light'] .app-theme-shell [class*='border-sky-'],
+html[data-theme='light'] .app-theme-shell [class*='border-indigo-'] {
+  border-color: #bfdbfe !important;
+}
+
+html[data-theme='light'] .app-theme-shell [class*='border-violet-'],
+html[data-theme='light'] .app-theme-shell [class*='border-purple-'],
+html[data-theme='light'] .app-theme-shell [class*='border-fuchsia-'] {
+  border-color: #ddd6fe !important;
+}
+
+html[data-theme='light'] .app-theme-shell [class*='border-amber-'],
+html[data-theme='light'] .app-theme-shell [class*='border-yellow-'],
+html[data-theme='light'] .app-theme-shell [class*='border-orange-'] {
+  border-color: #fde68a !important;
+}
+
+html[data-theme='light'] .app-theme-shell [class*='border-red-'],
+html[data-theme='light'] .app-theme-shell [class*='border-rose-'] {
+  border-color: #fecaca !important;
+}
+
 html[data-theme='light'] .app-theme-shell [class*='bg-gradient-to-br'][class*='from-gray-800'][class*='to-gray-900'],
 html[data-theme='light'] .app-theme-shell [class*='bg-gradient-to-b'][class*='from-gray-900'][class*='to-gray-950'] {
   background-image: none !important;
@@ -303,6 +439,24 @@ html[data-theme='light'] .app-theme-shell .shadow-xl,
 html[data-theme='light'] .app-theme-shell .shadow-lg,
 html[data-theme='light'] .app-theme-shell .shadow-2xl {
   box-shadow: 0 6px 20px rgba(15, 23, 42, 0.08) !important;
+}
+
+html[data-theme='light'] .app-theme-shell input,
+html[data-theme='light'] .app-theme-shell textarea,
+html[data-theme='light'] .app-theme-shell select {
+  color: var(--text-primary) !important;
+  background-color: var(--bg-secondary) !important;
+  border-color: var(--border-primary) !important;
+}
+
+html[data-theme='light'] .app-theme-shell input::placeholder,
+html[data-theme='light'] .app-theme-shell textarea::placeholder {
+  color: var(--text-muted) !important;
+  opacity: 0.75;
+}
+
+html[data-theme='light'] .app-theme-shell button:disabled {
+  color: #94a3b8 !important;
 }
 
 html[data-theme='light'] .app-theme-shell .rounded-2xl {
