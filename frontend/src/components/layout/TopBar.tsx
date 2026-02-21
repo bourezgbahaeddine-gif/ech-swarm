@@ -287,7 +287,7 @@ function QuickTasksDrawer({ theme, onClose }: { theme: 'light' | 'dark'; onClose
     if (!mounted) return null;
 
     return createPortal(
-        <div className="fixed inset-0 z-[120] bg-black/70 flex justify-end">
+        <div className="fixed inset-0 z-[120] bg-black/70 flex justify-end app-theme-shell">
             <div
                 className={`w-full max-w-2xl h-full border-l shadow-2xl p-4 space-y-3 overflow-y-auto ${
                     theme === 'dark'
@@ -405,7 +405,7 @@ function PublishedMonitorDrawer({
     const items = report?.items || [];
 
     return createPortal(
-        <div className="fixed inset-0 z-[130] bg-black/70 flex justify-end">
+        <div className="fixed inset-0 z-[130] bg-black/70 flex justify-end app-theme-shell">
             <div
                 className={`w-full max-w-3xl h-full border-l shadow-2xl p-4 space-y-4 overflow-y-auto ${
                     theme === 'dark'
