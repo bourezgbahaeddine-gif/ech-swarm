@@ -30,10 +30,10 @@ const agentConfig: Array<{
     color: string;
     trigger: TriggerMethod;
 }> = [
-    { key: 'scout', label: 'الكشاف', labelEn: 'Scout', icon: Search, color: 'from-blue-500 to-cyan-500', trigger: 'triggerScout' },
-    { key: 'router', label: 'الموجه', labelEn: 'Router', icon: Navigation, color: 'from-purple-500 to-pink-500', trigger: 'triggerRouter' },
-    { key: 'scribe', label: 'الكاتب', labelEn: 'Scribe', icon: PenTool, color: 'from-amber-500 to-orange-500', trigger: 'triggerScribe' },
-    { key: 'trend_radar', label: 'رادار التراند', labelEn: 'Trends', icon: Radio, color: 'from-emerald-500 to-teal-500', trigger: 'triggerTrends' },
+    { key: 'scout', label: 'الكشاف', labelEn: 'Scout', icon: Search, color: 'text-[var(--semantic-info)] bg-[var(--semantic-info-bg)] border-sky-200/70', trigger: 'triggerScout' },
+    { key: 'router', label: 'الموجه', labelEn: 'Router', icon: Navigation, color: 'text-[var(--accent-blue)] bg-blue-50 border-blue-200/80', trigger: 'triggerRouter' },
+    { key: 'scribe', label: 'الكاتب', labelEn: 'Scribe', icon: PenTool, color: 'text-[var(--semantic-warning)] bg-amber-50 border-amber-200/90', trigger: 'triggerScribe' },
+    { key: 'trend_radar', label: 'رادار التراند', labelEn: 'Trends', icon: Radio, color: 'text-[var(--semantic-success)] bg-emerald-50 border-emerald-200/90', trigger: 'triggerTrends' },
 ];
 
 export default function AgentControl({ agents }: AgentControlProps) {
@@ -79,11 +79,11 @@ export default function AgentControl({ agents }: AgentControlProps) {
     };
 
     return (
-        <div className="rounded-2xl bg-gray-800/20 border border-white/5 overflow-hidden">
-            <div className="flex items-center gap-2 px-5 py-3 border-b border-white/5">
-                <Play className="w-4 h-4 text-emerald-400" />
-                <h2 className="text-sm font-semibold text-white">التحكم بالوكلاء</h2>
-                <span className="text-[10px] text-gray-500">Agent Controls</span>
+        <div className="rounded-2xl app-surface border overflow-hidden">
+            <div className="flex items-center gap-2 px-5 py-3 border-b border-[var(--border-primary)]">
+                <Play className="w-4 h-4 text-[var(--accent-blue)]" />
+                <h2 className="text-sm font-semibold text-[var(--text-primary)]">التحكم بالوكلاء</h2>
+                <span className="text-[10px] app-text-muted">Agent Controls</span>
             </div>
 
             <div className="p-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -106,22 +106,22 @@ export default function AgentControl({ agents }: AgentControlProps) {
                             }}
                             className={cn(
                                 'relative rounded-xl p-4 border transition-all duration-300 cursor-pointer',
-                                'bg-gradient-to-br from-gray-800/40 to-gray-900/60',
-                                isRunning ? 'border-amber-500/30 shadow-lg shadow-amber-500/5' : 'border-white/5 hover:border-white/10',
+                                'app-surface',
+                                isRunning ? 'border-amber-300 shadow-sm' : 'border-[var(--border-primary)] hover:border-gray-300',
                             )}
                         >
                             <div className="flex items-center gap-3 mb-3">
-                                <div className={cn('w-10 h-10 rounded-xl bg-gradient-to-br flex items-center justify-center shadow-lg', color)}>
-                                    <Icon className="w-5 h-5 text-white" />
+                                <div className={cn('w-10 h-10 rounded-xl border flex items-center justify-center', color)}>
+                                    <Icon className="w-5 h-5" />
                                 </div>
                                 <div>
-                                    <h3 className="text-sm font-semibold text-white">{label}</h3>
+                                    <h3 className="text-sm font-semibold text-[var(--text-primary)]">{label}</h3>
                                     <p className="text-[10px] text-gray-500">{labelEn}</p>
                                 </div>
                                 <span
                                     className={cn(
                                         'mr-auto w-2 h-2 rounded-full',
-                                        hasAgent ? 'bg-emerald-400 animate-pulse' : 'bg-gray-500/60',
+                                        hasAgent ? 'bg-[var(--semantic-success)] animate-pulse' : 'bg-gray-400',
                                     )}
                                 />
                             </div>
@@ -136,8 +136,8 @@ export default function AgentControl({ agents }: AgentControlProps) {
                                     'w-full py-2 rounded-lg text-xs font-medium transition-all duration-200',
                                     'flex items-center justify-center gap-2',
                                     isRunning
-                                        ? 'bg-amber-500/20 text-amber-400 cursor-wait'
-                                        : 'bg-white/5 text-gray-300 hover:bg-emerald-500/20 hover:text-emerald-400',
+                                        ? 'bg-amber-50 text-amber-700 border border-amber-200 cursor-wait'
+                                        : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-100 hover:text-gray-900',
                                 )}
                             >
                                 {isRunning ? (
@@ -157,7 +157,7 @@ export default function AgentControl({ agents }: AgentControlProps) {
                                 <div
                                     className={cn(
                                         'mt-2 px-3 py-1.5 rounded-lg text-[10px] flex items-center gap-1.5',
-                                        result.success ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400',
+                                        result.success ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200',
                                     )}
                                 >
                                     {result.success ? <CheckCircle className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}

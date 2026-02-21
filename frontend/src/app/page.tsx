@@ -65,7 +65,7 @@ export default function DashboardPage() {
 
   if (user && !isManagerView) {
     return (
-      <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-8 text-center text-gray-300">
+      <div className="rounded-2xl border app-surface p-8 text-center app-text-muted">
         جاري تحويلك إلى واجهة الأخبار...
       </div>
     );
@@ -74,8 +74,8 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <div className="animate-fade-in-up">
-        <h1 className="text-2xl font-bold text-white">لوحة القيادة</h1>
-        <p className="text-sm text-gray-500 mt-1">متابعة تشغيل المنصة لمدير التحرير</p>
+        <h1 className="text-2xl font-bold text-[var(--text-primary)]">لوحة القيادة</h1>
+        <p className="text-sm app-text-muted mt-1">متابعة تشغيل المنصة لمدير التحرير</p>
       </div>
 
       <div className="animate-fade-in-up" style={{ animationDelay: '100ms' }}>
