@@ -48,7 +48,7 @@ export default function TopBar({ theme, onToggleTheme }: { theme: 'light' | 'dar
     const notifications: DashboardNotification[] = notificationsData?.data?.items || [];
 
     return (
-        <header className="sticky top-0 z-30 bg-gray-900/80 backdrop-blur-xl border-b border-white/5">
+        <header className={`sticky top-0 z-30 backdrop-blur-xl border-b ${theme === 'dark' ? 'bg-gray-900/80 border-white/5' : 'app-surface border-[var(--border-primary)]'}`}>
             <div className="h-16">
                 <div className="flex items-center justify-between h-full px-6">
                     <div className="relative w-full max-w-md">
@@ -58,7 +58,11 @@ export default function TopBar({ theme, onToggleTheme }: { theme: 'light' | 'dar
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             placeholder="ابحث عن خبر أو كلمة مفتاحية..."
-                            className="w-full h-10 pr-10 pl-4 rounded-xl bg-white/5 border border-white/5 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-emerald-500/40 focus:ring-1 focus:ring-emerald-500/20 transition-all duration-200"
+                            className={`w-full h-10 pr-10 pl-4 rounded-xl border text-sm focus:outline-none transition-all duration-200 ${
+                                theme === 'dark'
+                                    ? 'bg-white/5 border-white/5 text-white placeholder:text-gray-500 focus:border-emerald-500/40 focus:ring-1 focus:ring-emerald-500/20'
+                                    : 'bg-white border-gray-300 text-[var(--text-primary)] placeholder:text-gray-400 focus:border-[var(--accent-blue)] focus:ring-1 focus:ring-blue-100'
+                            }`}
                             dir="rtl"
                         />
                     </div>
@@ -66,7 +70,11 @@ export default function TopBar({ theme, onToggleTheme }: { theme: 'light' | 'dar
                     <div className="flex items-center gap-2 mr-4">
                         <button
                             onClick={onToggleTheme}
-                            className="h-10 w-10 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white flex items-center justify-center"
+                            className={`h-10 w-10 rounded-xl border flex items-center justify-center ${
+                                theme === 'dark'
+                                    ? 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-300 hover:text-white'
+                                    : 'bg-white hover:bg-gray-100 border-gray-300 text-gray-600 hover:text-gray-900'
+                            }`}
                             title={theme === 'dark' ? 'تفعيل الوضع الفاتح' : 'تفعيل الوضع الداكن'}
                         >
                             {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
@@ -74,7 +82,11 @@ export default function TopBar({ theme, onToggleTheme }: { theme: 'light' | 'dar
                         {canUseQuickTasks && (
                             <button
                                 onClick={() => setShowQuickTools(true)}
-                                className="h-10 px-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20 text-xs flex items-center gap-1.5"
+                                className={`h-10 px-3 rounded-xl border text-xs flex items-center gap-1.5 ${
+                                    theme === 'dark'
+                                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20'
+                                        : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100'
+                                }`}
                             >
                                 <Sparkles className="w-4 h-4" />
                                 مهام سريعة
@@ -82,7 +94,11 @@ export default function TopBar({ theme, onToggleTheme }: { theme: 'light' | 'dar
                         )}
                         <button
                             onClick={() => setShowPublishedMonitor(true)}
-                            className="h-10 px-3 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-200 hover:bg-cyan-500/20 text-xs flex items-center gap-1.5"
+                            className={`h-10 px-3 rounded-xl border text-xs flex items-center gap-1.5 ${
+                                theme === 'dark'
+                                    ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-200 hover:bg-cyan-500/20'
+                                    : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100'
+                            }`}
                         >
                             <Radar className="w-4 h-4" />
                             جودة المنشور
@@ -181,8 +197,8 @@ export default function TopBar({ theme, onToggleTheme }: { theme: 'light' | 'dar
                 </div>
             </div>
 
-            <div className="px-6 py-2 border-t border-white/5 bg-white/[0.02]">
-                <div className="flex items-center gap-2 text-xs text-gray-300">
+            <div className={`px-6 py-2 border-t ${theme === 'dark' ? 'border-white/5 bg-white/[0.02]' : 'border-[var(--border-primary)] bg-[var(--bg-tertiary)]'}`}>
+                <div className={`flex items-center gap-2 text-xs ${theme === 'dark' ? 'text-gray-300' : 'text-[var(--text-primary)]'}`}>
                     <FileText className="w-3.5 h-3.5 text-emerald-400" />
                     <span>الدستور التحريري يعمل كحارس قبل اعتماد النسخة النهائية.</span>
                     <a href="/constitution" className="text-emerald-300 hover:text-emerald-200 underline">
@@ -191,9 +207,10 @@ export default function TopBar({ theme, onToggleTheme }: { theme: 'light' | 'dar
                 </div>
             </div>
 
-            {showQuickTools && <QuickTasksDrawer onClose={() => setShowQuickTools(false)} />}
+            {showQuickTools && <QuickTasksDrawer theme={theme} onClose={() => setShowQuickTools(false)} />}
             {showPublishedMonitor && (
                 <PublishedMonitorDrawer
+                    theme={theme}
                     onClose={() => setShowPublishedMonitor(false)}
                     onRefresh={async () => {
                         await queryClient.invalidateQueries({ queryKey: ['published-monitor-latest'] });
@@ -205,7 +222,7 @@ export default function TopBar({ theme, onToggleTheme }: { theme: 'light' | 'dar
     );
 }
 
-function QuickTasksDrawer({ onClose }: { onClose: () => void }) {
+function QuickTasksDrawer({ theme, onClose }: { theme: 'light' | 'dark'; onClose: () => void }) {
     const [text, setText] = useState('');
     const [reference, setReference] = useState('');
     const [platform, setPlatform] = useState('facebook');
@@ -270,8 +287,15 @@ function QuickTasksDrawer({ onClose }: { onClose: () => void }) {
     if (!mounted) return null;
 
     return createPortal(
-        <div className="fixed inset-0 z-[120] bg-black/85 flex justify-end">
-            <div className="w-full max-w-2xl h-full bg-[#0f172a] border-l border-white/20 shadow-2xl shadow-black/70 p-4 space-y-3 overflow-y-auto" dir="rtl">
+        <div className="fixed inset-0 z-[120] bg-black/70 flex justify-end">
+            <div
+                className={`w-full max-w-2xl h-full border-l shadow-2xl p-4 space-y-3 overflow-y-auto ${
+                    theme === 'dark'
+                        ? 'bg-[#0f172a] border-white/20 shadow-black/70'
+                        : 'app-surface border-[var(--border-primary)] shadow-[rgba(15,23,42,0.18)]'
+                }`}
+                dir="rtl"
+            >
                 <div className="flex items-center justify-between">
                     <h2 className="text-white font-semibold">الخانة الجانبية للمهام السريعة</h2>
                     <button onClick={onClose} className="px-2 py-1 rounded bg-white/15 text-gray-100 text-xs border border-white/20 hover:bg-white/20">إغلاق</button>
@@ -351,9 +375,11 @@ function scoreColor(score: number): string {
 }
 
 function PublishedMonitorDrawer({
+    theme,
     onClose,
     onRefresh,
 }: {
+    theme: 'light' | 'dark';
     onClose: () => void;
     onRefresh: () => Promise<void>;
 }) {
@@ -379,8 +405,15 @@ function PublishedMonitorDrawer({
     const items = report?.items || [];
 
     return createPortal(
-        <div className="fixed inset-0 z-[130] bg-black/80 flex justify-end">
-            <div className="w-full max-w-3xl h-full bg-[#0b1220] border-l border-white/20 shadow-2xl shadow-black/70 p-4 space-y-4 overflow-y-auto" dir="rtl">
+        <div className="fixed inset-0 z-[130] bg-black/70 flex justify-end">
+            <div
+                className={`w-full max-w-3xl h-full border-l shadow-2xl p-4 space-y-4 overflow-y-auto ${
+                    theme === 'dark'
+                        ? 'bg-[#0b1220] border-white/20 shadow-black/70'
+                        : 'app-surface border-[var(--border-primary)] shadow-[rgba(15,23,42,0.18)]'
+                }`}
+                dir="rtl"
+            >
                 <div className="flex items-center justify-between">
                     <div>
                         <h2 className="text-white font-semibold">مراقبة جودة المحتوى المنشور</h2>
