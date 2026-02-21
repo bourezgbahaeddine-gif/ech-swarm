@@ -748,8 +748,25 @@ function WorkspaceDraftsPageContent() {
                                 <div className="space-y-2 text-xs text-gray-200">
                                     <InfoBlock label="عنوان SEO" value={seoPack.seo_title} />
                                     <InfoBlock label="الوصف التعريفي" value={seoPack.meta_description} />
+                                    <InfoBlock label="العبارة المفتاحية الرئيسية" value={seoPack.focus_keyphrase} />
+                                    <InfoBlock label="عبارات مفتاحية ثانوية" value={(seoPack.secondary_keyphrases || []).join('، ')} />
                                     <InfoBlock label="الكلمات المفتاحية" value={(seoPack.keywords || []).join('، ')} />
                                     <InfoBlock label="الوسوم" value={(seoPack.tags || []).join('، ')} />
+                                    <InfoBlock label="Slug" value={seoPack.slug} />
+                                    <InfoBlock label="OG Title" value={seoPack.og_title} />
+                                    <InfoBlock label="OG Description" value={seoPack.og_description} />
+                                    <InfoBlock label="Twitter Title" value={seoPack.twitter_title} />
+                                    <InfoBlock label="Twitter Description" value={seoPack.twitter_description} />
+                                    <div className={cn(
+                                        'rounded-lg border p-2 text-[11px]',
+                                        seoPack?.yoast?.meta_ok && seoPack?.yoast?.title_ok
+                                            ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100'
+                                            : 'border-amber-500/30 bg-amber-500/10 text-amber-100'
+                                    )}>
+                                        <p>جاهزية Yoast:</p>
+                                        <p>- طول Meta: {seoPack?.yoast?.meta_length ?? 0} (المطلوب 140-155)</p>
+                                        <p>- طول SEO Title: {seoPack?.yoast?.title_length ?? 0} (الموصى به 40-60)</p>
+                                    </div>
                                 </div>
                             ) : <Empty text="اضغط زر «SEO» لاستخراج المقترحات." />}
                             {!!headlines.length && <div className="mt-2 rounded-xl border border-white/10 bg-black/20 p-2 text-xs text-gray-200"><p className="text-gray-400 mb-1">العناوين المقترحة</p>{headlines.map((h: any, i: number) => <p key={`${h?.label || 'h'}-${i}`}>- {cleanText(h?.headline || '')}</p>)}</div>}

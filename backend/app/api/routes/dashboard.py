@@ -479,13 +479,19 @@ async def dashboard_notifications(
             )
 
     trend_payload = await cache_service.get_json("trends:last:DZ:all")
-    for idx, alert in enumerate((trend_payload or {}).get("alerts", [])[:8]):
+    seen_trends: set[str] = set()
+    for idx, alert in enumerate((trend_payload or {}).get("alerts", [])[:12]):
+        keyword = (alert.get("keyword", "") or "").strip()
+        normalized_keyword = " ".join(keyword.lower().split())
+        if normalized_keyword in seen_trends:
+            continue
+        seen_trends.add(normalized_keyword)
         items.append(
             {
-                "id": f"trend-{idx}-{alert.get('keyword', '')}",
+                "id": f"trend-{idx}-{keyword}",
                 "type": "trend",
-                "title": alert.get("keyword", "تراند جديد"),
-                "message": alert.get("reason", "اتجاه ترند يحتاج متابعة تحريرية."),
+                "title": keyword or "\u062a\u0631\u0627\u0646\u062f \u062c\u062f\u064a\u062f",
+                "message": alert.get("reason", "\u0627\u062a\u062c\u0627\u0647 \u062a\u0631\u0646\u062f \u064a\u062d\u062a\u0627\u062c \u0645\u062a\u0627\u0628\u0639\u0629 \u062a\u062d\u0631\u064a\u0631\u064a\u0629."),
                 "created_at": alert.get("detected_at") or now.isoformat(),
                 "severity": "low",
             }
@@ -510,6 +516,34 @@ async def dashboard_notifications(
             }
         )
 
+    severity_rank = {"high": 3, "medium": 2, "low": 1}
+
+    def _dedupe_key(item: dict) -> str:
+        article_id = item.get("article_id")
+        if article_id:
+            return f"article:{article_id}"
+        normalized_title = " ".join(str(item.get("title", "")).lower().split())
+        return f"{item.get('type', 'generic')}:{normalized_title}"
+
+    deduped: dict[str, dict] = {}
+    for item in items:
+        key = _dedupe_key(item)
+        previous = deduped.get(key)
+        if previous is None:
+            deduped[key] = item
+            continue
+
+        prev_rank = severity_rank.get(str(previous.get("severity", "low")).lower(), 0)
+        cur_rank = severity_rank.get(str(item.get("severity", "low")).lower(), 0)
+        if cur_rank > prev_rank:
+            deduped[key] = item
+            continue
+
+        prev_created = str(previous.get("created_at") or "")
+        cur_created = str(item.get("created_at") or "")
+        if cur_created > prev_created:
+            deduped[key] = item
+
     def _dt(v: object) -> datetime:
         if isinstance(v, datetime):
             return v
@@ -520,5 +554,5 @@ async def dashboard_notifications(
                 return datetime.min
         return datetime.min
 
-    items = sorted(items, key=lambda x: _dt(x.get("created_at")), reverse=True)[:limit]
+    items = sorted(deduped.values(), key=lambda x: _dt(x.get("created_at")), reverse=True)[:limit]
     return {"items": items, "total": len(items)}

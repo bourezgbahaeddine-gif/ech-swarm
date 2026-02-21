@@ -3,8 +3,27 @@
 @import "tailwindcss";
 
 :root {
+  --bg-primary: #f3f4f6;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #eceef1;
+  --text-primary: #111827;
+  --text-muted: #4b5563;
+  --border-primary: #d1d5db;
+  --accent-primary: #111827;
+  --accent-soft: #e5e7eb;
+  --accent-emerald: #10b981;
+  --accent-cyan: #0891b2;
+}
+
+html[data-theme='dark'] {
   --bg-primary: #0a0a0f;
   --bg-secondary: #111118;
+  --bg-tertiary: #151824;
+  --text-primary: #f3f4f6;
+  --text-muted: #9ca3af;
+  --border-primary: rgba(255, 255, 255, 0.14);
+  --accent-primary: #f3f4f6;
+  --accent-soft: rgba(255, 255, 255, 0.08);
   --accent-emerald: #34d399;
   --accent-cyan: #22d3ee;
 }
@@ -31,7 +50,7 @@
 body {
   font-family: 'IBM Plex Sans Arabic', 'Segoe UI', sans-serif;
   background-color: var(--bg-primary);
-  color: #e5e5e5;
+  color: var(--text-primary);
   direction: rtl;
 }
 
@@ -77,9 +96,9 @@ code, pre, .font-mono {
 
 /* Glassmorphism */
 .glass {
-  background: rgba(17, 17, 24, 0.7);
+  background: color-mix(in srgb, var(--bg-secondary) 85%, transparent);
   backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-primary);
 }
 
 /* Glow Effects */
@@ -104,10 +123,69 @@ code, pre, .font-mono {
 /* Background Mesh Gradient */
 .mesh-gradient {
   background:
-    radial-gradient(at 40% 20%, rgba(52, 211, 153, 0.08) 0px, transparent 50%),
-    radial-gradient(at 80% 0%, rgba(34, 211, 238, 0.05) 0px, transparent 50%),
-    radial-gradient(at 0% 50%, rgba(139, 92, 246, 0.05) 0px, transparent 50%),
-    radial-gradient(at 80% 50%, rgba(236, 72, 153, 0.03) 0px, transparent 50%);
+    radial-gradient(at 40% 20%, color-mix(in srgb, var(--accent-emerald) 14%, transparent) 0px, transparent 50%),
+    radial-gradient(at 80% 0%, color-mix(in srgb, var(--accent-cyan) 10%, transparent) 0px, transparent 50%),
+    radial-gradient(at 0% 50%, color-mix(in srgb, var(--accent-primary) 8%, transparent) 0px, transparent 55%);
+}
+
+.app-surface {
+  background: var(--bg-secondary);
+  border-color: var(--border-primary);
+}
+
+.app-surface-soft {
+  background: var(--bg-tertiary);
+  border-color: var(--border-primary);
+}
+
+.app-text-muted {
+  color: var(--text-muted);
+}
+
+.app-main-shell {
+  background: var(--bg-primary);
+}
+
+.app-focus-ring:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent-primary) 35%, transparent);
+  outline-offset: 2px;
+}
+
+html[data-theme='light'] .app-theme-shell .bg-gray-900\/80,
+html[data-theme='light'] .app-theme-shell .bg-gray-900\/50,
+html[data-theme='light'] .app-theme-shell .bg-gray-900\/45,
+html[data-theme='light'] .app-theme-shell .bg-gray-900\/40,
+html[data-theme='light'] .app-theme-shell .bg-gray-900\/30,
+html[data-theme='light'] .app-theme-shell .bg-gray-800\/30,
+html[data-theme='light'] .app-theme-shell .bg-gray-800\/20 {
+  background-color: #ffffff !important;
+}
+
+html[data-theme='light'] .app-theme-shell .bg-white\/5,
+html[data-theme='light'] .app-theme-shell .bg-white\/10,
+html[data-theme='light'] .app-theme-shell .bg-white\/15,
+html[data-theme='light'] .app-theme-shell .bg-white\/20,
+html[data-theme='light'] .app-theme-shell .bg-white\/\[0\.02\],
+html[data-theme='light'] .app-theme-shell .bg-white\/\[0\.03\],
+html[data-theme='light'] .app-theme-shell .bg-white\/\[0\.04\] {
+  background-color: #f3f4f6 !important;
+}
+
+html[data-theme='light'] .app-theme-shell .border-white\/5,
+html[data-theme='light'] .app-theme-shell .border-white\/10,
+html[data-theme='light'] .app-theme-shell .border-white\/15,
+html[data-theme='light'] .app-theme-shell .border-white\/20 {
+  border-color: #d1d5db !important;
+}
+
+html[data-theme='light'] .app-theme-shell .text-white {
+  color: #111827 !important;
+}
+
+html[data-theme='light'] .app-theme-shell .text-gray-500,
+html[data-theme='light'] .app-theme-shell .text-gray-400,
+html[data-theme='light'] .app-theme-shell .text-gray-300 {
+  color: #4b5563 !important;
 }
 
 /* Line clamp utility */

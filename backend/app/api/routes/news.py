@@ -12,7 +12,7 @@ import unicodedata
 from urllib.parse import urlparse, urlunparse
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func, desc, and_, update
+from sqlalchemy import case, select, func, desc, and_, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -50,6 +50,30 @@ SYNONYMS = {
     "الجزائر": {"جزائر", "algerie", "algérie", "algeria", "algérien", "algerien"},
     "جزائر": {"الجزائر", "algerie", "algérie", "algeria", "algérien", "algerien"},
 }
+
+LOCAL_PRIORITY_TERMS = [
+    "الجزائر",
+    "جزائري",
+    "جزائرية",
+    "algeria",
+    "algerie",
+    "algérie",
+    "dz",
+    "رئاسة الجمهورية",
+    "الوزير الأول",
+    "سوناطراك",
+    "وزارة",
+]
+
+LOCAL_PRIORITY_SOURCES = [
+    "echorouk",
+    "الشروق",
+    "aps",
+    "tsa",
+    "el khabar",
+    "الخبر",
+    "النهار",
+]
 
 
 def _query_embedding(text: str, dim: int = 256) -> list[float]:
@@ -138,6 +162,22 @@ def _is_aggregator_source(source_name: str | None) -> bool:
     return "news.google.com" in s or "google news" in s or "aggregator" in s
 
 
+def _local_priority_expression():
+    title_match = or_(*[Article.original_title.ilike(f"%{term}%") for term in LOCAL_PRIORITY_TERMS])
+    arabic_title_match = or_(*[Article.title_ar.ilike(f"%{term}%") for term in LOCAL_PRIORITY_TERMS])
+    summary_match = or_(*[Article.summary.ilike(f"%{term}%") for term in LOCAL_PRIORITY_TERMS])
+    source_match = or_(*[Article.source_name.ilike(f"%{term}%") for term in LOCAL_PRIORITY_SOURCES])
+    category_local = Article.category == NewsCategory.LOCAL_ALGERIA
+    return case(
+        (category_local, 4),
+        (source_match, 3),
+        (title_match, 2),
+        (arabic_title_match, 2),
+        (summary_match, 1),
+        else_=0,
+    )
+
+
 async def _expire_stale_breaking_flags(db: AsyncSession) -> None:
     cutoff = datetime.utcnow() - timedelta(minutes=settings.breaking_news_ttl_minutes)
     await db.execute(
@@ -166,6 +206,7 @@ async def list_articles(
     is_breaking: Optional[bool] = None,
     search: Optional[str] = None,
     sort_by: str = Query("created_at", regex="^(created_at|crawled_at|importance_score|published_at)$"),
+    local_first: bool = Query(True),
     db: AsyncSession = Depends(get_db),
 ):
     """List articles with filtering and pagination."""
@@ -214,7 +255,11 @@ async def list_articles(
 
     # Sort and paginate
     sort_column = getattr(Article, sort_by)
-    query = query.order_by(desc(sort_column))
+    if local_first and not status:
+        local_priority = _local_priority_expression()
+        query = query.order_by(desc(local_priority), desc(sort_column))
+    else:
+        query = query.order_by(desc(sort_column))
     query = query.offset((page - 1) * per_page).limit(per_page)
 
     result = await db.execute(query)

@@ -281,6 +281,7 @@ export const newsApi = {
         status?: string; category?: string;
         is_breaking?: boolean; search?: string;
         sort_by?: string;
+        local_first?: boolean;
     }) => api.get<PaginatedResponse<ArticleBrief>>('/news/', { params }),
 
     get: (id: number) => api.get<Article>(`/news/${id}`),

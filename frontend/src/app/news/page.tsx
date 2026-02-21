@@ -67,6 +67,7 @@ function NewsPageContent() {
             search: debouncedSearch || undefined,
             sort_by: 'created_at',
             is_breaking: isBreaking === null ? undefined : isBreaking,
+            local_first: true,
         }),
         refetchInterval: () => (Date.now() < liveRefreshUntil ? 2000 : false),
         refetchOnWindowFocus: true,
@@ -535,8 +536,8 @@ function NewsPageContent() {
                             <div
                                 key={article.id}
                                 className={cn(
-                                    'rounded-2xl border border-white/5 bg-gradient-to-br from-gray-800/40 to-gray-900/70 p-5 transition-all',
-                                    'hover:border-white/10 hover:shadow-lg hover:shadow-black/30',
+                                    'rounded-2xl border app-surface p-5 transition-all',
+                                    'hover:border-gray-400/70 hover:shadow-md',
                                     freshBreaking && 'ring-1 ring-red-500/30'
                                 )}
                             >
@@ -552,7 +553,7 @@ function NewsPageContent() {
                                     </div>
 
                                     <div className="flex-1">
-                                        <h3 className="text-lg font-extrabold text-white leading-8 line-clamp-3" dir="rtl">
+                                        <h3 className="text-[1.38rem] font-extrabold leading-9 line-clamp-3 tracking-tight" style={{ color: 'var(--text-primary)' }} dir="rtl">
                                             {article.title_ar || article.original_title}
                                         </h3>
 
@@ -562,7 +563,7 @@ function NewsPageContent() {
                                                     <Zap className="w-3 h-3" /> عاجل
                                                 </span>
                                             )}
-                                            <span className="text-[10px] text-gray-400">{article.source_name || '—'}</span>
+                                            <span className="text-[10px] app-text-muted">{article.source_name || '—'}</span>
                                             <span className="text-[10px] text-gray-500 mr-auto flex items-center gap-1">
                                                 <Clock className="w-3 h-3" />
                                                 {formatRelativeTime(article.created_at || article.crawled_at)}
@@ -570,7 +571,7 @@ function NewsPageContent() {
                                         </div>
 
                                         {article.summary && (
-                                            <p className="text-sm text-gray-300 mt-2 line-clamp-2" dir="rtl">
+                                            <p className="text-sm mt-2 line-clamp-2 leading-7" style={{ color: 'var(--text-muted)' }} dir="rtl">
                                                 {truncate(article.summary, 140)}
                                             </p>
                                         )}

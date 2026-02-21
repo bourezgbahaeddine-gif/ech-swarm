@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle, FileText } from 'lucide-react';
@@ -18,6 +18,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     const isPublic = PUBLIC_PATHS.includes(pathname);
     const [ack, setAck] = useState(false);
     const [ackDismissed, setAckDismissed] = useState(false);
+    const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+        if (typeof window === 'undefined') return 'light';
+        return localStorage.getItem('ech_theme') === 'dark' ? 'dark' : 'light';
+    });
+
+    useEffect(() => {
+        document.documentElement.setAttribute('data-theme', theme);
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('ech_theme', theme);
+        }
+    }, [theme]);
+
+    const toggleTheme = () => {
+        setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+    };
 
     const { data: latest } = useQuery({
         queryKey: ['constitution-latest'],
@@ -56,10 +71,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     };
 
     return (
-        <div className="flex">
-            <Sidebar />
+        <div className="flex app-theme-shell">
+            <Sidebar theme={theme} />
             <main className="flex-1 mr-[260px] min-h-screen transition-all duration-300">
-                <TopBar />
+                <TopBar theme={theme} onToggleTheme={toggleTheme} />
                 <div className="p-6 mesh-gradient min-h-[calc(100vh-64px)]">{children}</div>
             </main>
 
@@ -101,4 +116,3 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </div>
     );
 }
-

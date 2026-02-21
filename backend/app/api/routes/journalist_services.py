@@ -267,28 +267,34 @@ async def multimedia_image_prompt(payload: dict, db: AsyncSession = Depends(get_
 
     prompt = f"""
 {CONSTITUTION_BASE}
-أنت مهندس برومبتات بصري في غرفة أخبار الشروق.
-النموذج المستهدف: {model}
-ابنِ 3 برومبتات احترافية لصورة خبرية باللغة {_lang_name(lang)} جاهزة لنموذج NanoBanana 2.
+You are a senior newsroom visual prompt engineer.
+Target model: {model} (NanoBanana 2 compatible).
+Language for final prompts: {_lang_name(lang)}.
 
-إخراج إلزامي:
-- أعِد فقط 3 برومبتات مرقمة (1، 2، 3).
-- ممنوع الشرح أو التعليقات الجانبية.
-- كل برومبت يجب أن يتضمن:
-  [SCENE] الموضوع بصياغة تصويرية دقيقة،
-  [STYLE] النمط البصري الصحفي،
-  [CAMERA] العدسة/زاوية التصوير،
-  [LIGHTING] الإضاءة،
-  [COMPOSITION] التكوين،
-  [BRAND COLORS] (برتقالي الشروق #F37021 + أسود #0A0A0A + أبيض #FFFFFF)،
-  [NEGATIVE] ما يجب منعه (لا شعارات مشوهة، لا نص داخل الصورة، لا تشويه وجوه، لا تهويل، لا دماء صادمة)،
-  [ASPECT] نسبة الأبعاد.
-- الصورة يجب أن تكون صحفية واقعية بدون تهويل أو تضليل.
+Return exactly 3 prompts only (numbered 1/2/3), no commentary.
+Each prompt must be production-ready and include sections in this exact order:
+[SUBJECT]
+[EDITORIAL_ANGLE]
+[SCENE_DETAILS]
+[CAMERA]
+[LIGHTING]
+[COMPOSITION]
+[COLOR_GRADE]
+[NEGATIVE_PROMPT]
+[OUTPUT_SPEC]
 
-نص الخبر:
+Quality requirements:
+- Photorealistic editorial style, no fantasy/cartoon look.
+- Include concrete details: place, actors, action, mood, depth cues.
+- Keep visual truthfulness and avoid exaggeration or manipulation.
+- No text overlays, no watermark, no logos, no deformed anatomy.
+- Respect cultural sensitivity and avoid shocking/gory visuals.
+- Reserve clean safe-space for headline placement.
+
+News content:
 {text}
 
-النمط المطلوب:
+Requested style:
 {style}
 """
     result = _sanitize_ai_text(await ai_service.generate_text(prompt))
@@ -354,20 +360,29 @@ async def infographic_prompt(payload: dict, db: AsyncSession = Depends(get_db)):
         raise HTTPException(400, "Missing data")
     prompt = f"""
 {CONSTITUTION_BASE}
-أنت مهندس برومبت بصري في غرفة أخبار الشروق.
-النموذج المستهدف: {model}
-ابنِ برومبت إنفوغرافيا نهائي باللغة {_lang_name(lang)} اعتمادًا على البيانات التالية:
+You are a senior infographic prompt engineer for newsroom publishing.
+Target model: {model} (NanoBanana 2 compatible).
+Create one final infographic prompt in {_lang_name(lang)} from this structured data:
 {data}
 
-متطلبات البرومبت:
-- أسلوب بصري صحفي واضح.
-- تخطيط منظم سهل القراءة.
-- خطوط عربية مناسبة.
-- تحديد لوحة الألوان ونسبة الأبعاد.
-- وصف العناصر الأساسية بدقة (عناوين، أرقام، ترتيب بصري).
-- صياغة متوافقة مع NanoBanana 2 عبر أقسام:
-  [LAYOUT], [HIERARCHY], [ICONOGRAPHY], [TEXT-SAFE-ZONE], [NEGATIVE], [ASPECT].
-- بدون أي شرح جانبي؛ أعِد البرومبت النهائي فقط.
+Return the final prompt only (no notes), with these sections:
+[NARRATIVE_OBJECTIVE]
+[LAYOUT_GRID]
+[VISUAL_HIERARCHY]
+[DATA_BINDING]
+[TYPOGRAPHY]
+[ICONOGRAPHY]
+[COLOR_SYSTEM]
+[NEGATIVE_PROMPT]
+[ASPECT_RATIO]
+[EXPORT_NOTES]
+
+Rules:
+- Journalistic clarity over decoration.
+- High readability in Arabic (clear labels and number formatting).
+- Strong contrast and spacing discipline.
+- Prioritize key numbers and comparisons.
+- No clutter, no tiny illegible text, no random decorative icons.
 """
     result = _sanitize_ai_text(await ai_service.generate_text(prompt))
     if result:

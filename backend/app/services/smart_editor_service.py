@@ -99,6 +99,48 @@ class SmartEditorService:
         return any(re.search(pattern, sample) for pattern in TEMPLATE_NOISE_PATTERNS)
 
     @staticmethod
+    def _normalize_slug(value: str) -> str:
+        text = re.sub(r"[^\w\u0600-\u06FF\s-]", " ", (value or "").lower())
+        text = re.sub(r"\s+", "-", text.strip())
+        text = re.sub(r"-{2,}", "-", text)
+        return text.strip("-")[:90]
+
+    @staticmethod
+    def _ensure_meta_length(value: str, fallback: str, min_len: int = 140, max_len: int = 155) -> str:
+        text = re.sub(r"\s+", " ", (value or "").strip())
+        backup = re.sub(r"\s+", " ", (fallback or "").strip())
+        if not text:
+            text = backup
+        if len(text) > max_len:
+            return text[: max_len - 3].rstrip() + "..."
+        if len(text) >= min_len:
+            return text
+        combined = f"{text} {backup}".strip()
+        combined = re.sub(r"\s+", " ", combined)
+        if len(combined) < min_len:
+            pad = " تفاصيل إضافية وخلفيات الخبر في التغطية الكاملة."
+            while len(combined) < min_len:
+                combined = f"{combined} {pad}".strip()
+                combined = re.sub(r"\s+", " ", combined)
+        if len(combined) > max_len:
+            combined = combined[: max_len - 3].rstrip() + "..."
+        return combined
+
+    @staticmethod
+    def _uniq(values: list[str], limit: int) -> list[str]:
+        out: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            key = re.sub(r"\s+", " ", value.strip().lower())
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            out.append(value.strip())
+            if len(out) >= limit:
+                break
+        return out
+
+    @staticmethod
     def _text_to_html(title: str, text: str) -> str:
         lines = [line.strip() for line in re.split(r"\n+", text or "") if line.strip()]
         if not lines:
@@ -256,52 +298,100 @@ official, breaking, seo, engaging, mobile_short
 
     async def seo_suggestions(self, *, source_text: str, draft_title: str, draft_html: str) -> dict[str, Any]:
         prompt = f"""
-أنت مختص SEO إخباري.
-أعد JSON فقط بالمفاتيح:
-seo_title, meta_description, keywords, tags
+You are a newsroom SEO editor. Return production-ready Yoast SEO fields.
+Return JSON only with keys:
+seo_title, meta_description, focus_keyphrase, secondary_keyphrases, keywords, tags, slug, og_title, og_description, twitter_title, twitter_description
 
-الشروط:
-- seo_title حتى 60 حرفًا.
-- meta_description حتى 155 حرفًا.
-- keywords: 5 عناصر.
-- tags: 5 عناصر.
-- بدون أي شروحات.
+Mandatory rules:
+- seo_title must be clear, journalistic, 50-60 chars.
+- meta_description must be between 140 and 155 chars.
+- focus_keyphrase must be one concise phrase.
+- secondary_keyphrases must contain 3 items.
+- keywords must contain 6 items.
+- tags must contain 6 items.
+- slug must be kebab-case.
+- og/twitter fields should be publish-ready and non-clickbait.
+- no explanations outside JSON.
 
-العنوان:
+Headline:
 {draft_title}
 
-المتن:
+Body:
 {draft_html[:9000]}
 
-السياق:
+Context:
 {source_text[:4000]}
 """
         ai = self._get_ai_service()
         data = await ai.generate_json(prompt) if ai else {}
 
-        seo_title = self._strip_side_comments(str(data.get("seo_title") or draft_title or "").strip())[:60]
-        meta = self._strip_side_comments(str(data.get("meta_description") or "").strip())[:155]
+        plain_text = self.html_to_text(draft_html)
+        fallback_meta = f"{draft_title}. {plain_text[:260]}".strip()
 
+        seo_title = self._strip_side_comments(str(data.get("seo_title") or draft_title or "").strip())[:60]
+        meta = self._strip_side_comments(str(data.get("meta_description") or "").strip())
+        meta = self._ensure_meta_length(meta, fallback_meta, min_len=140, max_len=155)
+
+        focus_keyphrase = self._strip_side_comments(str(data.get("focus_keyphrase") or "").strip())
+        if not focus_keyphrase:
+            focus_keyphrase = self._strip_side_comments((draft_title or "").split(" - ")[0].strip())
+
+        secondary = data.get("secondary_keyphrases") or []
         keywords = data.get("keywords") or []
         tags = data.get("tags") or []
+        if not isinstance(secondary, list):
+            secondary = []
         if not isinstance(keywords, list):
             keywords = []
         if not isinstance(tags, list):
             tags = []
-        keywords = [self._strip_side_comments(str(x).strip()) for x in keywords if str(x).strip()][:5]
-        tags = [self._strip_side_comments(str(x).strip()) for x in tags if str(x).strip()][:5]
+
+        secondary = self._uniq([self._strip_side_comments(str(x)) for x in secondary], 3)
+        keywords = self._uniq([self._strip_side_comments(str(x)) for x in keywords], 6)
+        tags = self._uniq([self._strip_side_comments(str(x)) for x in tags], 6)
 
         if not keywords:
-            tokens = re.findall(r"[\u0600-\u06FFA-Za-z]{4,}", self.html_to_text(draft_html))
-            keywords = list(dict.fromkeys(tokens))[:5]
+            tokens = re.findall(r"[؀-ۿA-Za-z]{4,}", plain_text)
+            keywords = self._uniq(tokens, 6)
         if not tags:
-            tags = keywords[:5]
+            tags = keywords[:6]
+
+        slug_raw = self._strip_side_comments(str(data.get("slug") or "").strip())
+        slug = self._normalize_slug(slug_raw or draft_title or focus_keyphrase)
+
+        og_title = self._strip_side_comments(str(data.get("og_title") or seo_title).strip())[:65]
+        og_description = self._ensure_meta_length(
+            self._strip_side_comments(str(data.get("og_description") or meta).strip()),
+            meta,
+            min_len=140,
+            max_len=155,
+        )
+        twitter_title = self._strip_side_comments(str(data.get("twitter_title") or og_title).strip())[:65]
+        twitter_description = self._ensure_meta_length(
+            self._strip_side_comments(str(data.get("twitter_description") or og_description).strip()),
+            og_description,
+            min_len=140,
+            max_len=155,
+        )
 
         return {
             "seo_title": seo_title,
             "meta_description": meta,
+            "focus_keyphrase": focus_keyphrase,
+            "secondary_keyphrases": secondary,
             "keywords": keywords,
             "tags": tags,
+            "slug": slug,
+            "og_title": og_title,
+            "og_description": og_description,
+            "twitter_title": twitter_title,
+            "twitter_description": twitter_description,
+            "yoast": {
+                "meta_length": len(meta),
+                "meta_ok": 140 <= len(meta) <= 155,
+                "title_length": len(seo_title),
+                "title_ok": 40 <= len(seo_title) <= 60,
+            },
         }
 
     async def social_variants(self, *, source_text: str, draft_title: str, draft_html: str) -> dict[str, str]:

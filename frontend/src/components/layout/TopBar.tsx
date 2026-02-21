@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bell, Search, LogOut, User, Shield, FileText, Sparkles, Loader2, Clipboard, X, Radar, AlertTriangle } from 'lucide-react';
+import { Bell, Search, LogOut, User, Shield, FileText, Sparkles, Loader2, Clipboard, X, Radar, AlertTriangle, Moon, Sun } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { dashboardApi, type DashboardNotification, type PublishedMonitorReport } from '@/lib/api';
 import { journalistServicesApi } from '@/lib/journalist-services-api';
@@ -29,7 +29,7 @@ function cleanServiceOutput(value: string): string {
         .trim();
 }
 
-export default function TopBar() {
+export default function TopBar({ theme, onToggleTheme }: { theme: 'light' | 'dark'; onToggleTheme: () => void }) {
     const { user, logout } = useAuth();
     const queryClient = useQueryClient();
     const [searchQuery, setSearchQuery] = useState('');
@@ -64,6 +64,13 @@ export default function TopBar() {
                     </div>
 
                     <div className="flex items-center gap-2 mr-4">
+                        <button
+                            onClick={onToggleTheme}
+                            className="h-10 w-10 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white flex items-center justify-center"
+                            title={theme === 'dark' ? 'تفعيل الوضع الفاتح' : 'تفعيل الوضع الداكن'}
+                        >
+                            {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                        </button>
                         {canUseQuickTasks && (
                             <button
                                 onClick={() => setShowQuickTools(true)}
@@ -263,8 +270,8 @@ function QuickTasksDrawer({ onClose }: { onClose: () => void }) {
     if (!mounted) return null;
 
     return createPortal(
-        <div className="fixed inset-0 z-[120] bg-black/80 flex justify-end">
-            <div className="w-full max-w-2xl h-full bg-[#0b1220] border-l border-white/20 shadow-2xl shadow-black/70 p-4 space-y-3 overflow-y-auto" dir="rtl">
+        <div className="fixed inset-0 z-[120] bg-black/85 flex justify-end">
+            <div className="w-full max-w-2xl h-full bg-[#0f172a] border-l border-white/20 shadow-2xl shadow-black/70 p-4 space-y-3 overflow-y-auto" dir="rtl">
                 <div className="flex items-center justify-between">
                     <h2 className="text-white font-semibold">الخانة الجانبية للمهام السريعة</h2>
                     <button onClick={onClose} className="px-2 py-1 rounded bg-white/15 text-gray-100 text-xs border border-white/20 hover:bg-white/20">إغلاق</button>
@@ -284,14 +291,14 @@ function QuickTasksDrawer({ onClose }: { onClose: () => void }) {
                 <textarea
                     value={text}
                     onChange={(e) => setText(e.target.value)}
-                    className="w-full min-h-[180px] p-3 rounded-xl bg-[#111a2b] border border-white/20 text-white text-sm placeholder:text-gray-400"
+                    className="w-full min-h-[180px] p-3 rounded-xl bg-[#111827] border border-white/20 text-white text-sm placeholder:text-gray-400"
                     placeholder="ألصق النص هنا..."
                 />
 
                 <textarea
                     value={reference}
                     onChange={(e) => setReference(e.target.value)}
-                    className="w-full min-h-[90px] p-3 rounded-xl bg-[#111a2b] border border-white/20 text-white text-sm placeholder:text-gray-400"
+                    className="w-full min-h-[90px] p-3 rounded-xl bg-[#111827] border border-white/20 text-white text-sm placeholder:text-gray-400"
                     placeholder="مرجع التحقق (اختياري)"
                 />
 
@@ -304,7 +311,7 @@ function QuickTasksDrawer({ onClose }: { onClose: () => void }) {
                     <select
                         value={platform}
                         onChange={(e) => setPlatform(e.target.value)}
-                        className="px-2 py-2 rounded-xl bg-[#111a2b] border border-white/20 text-xs text-gray-100"
+                        className="px-2 py-2 rounded-xl bg-[#111827] border border-white/20 text-xs text-gray-100"
                     >
                         <option value="facebook">Facebook</option>
                         <option value="twitter">X</option>
@@ -313,7 +320,7 @@ function QuickTasksDrawer({ onClose }: { onClose: () => void }) {
                     <button onClick={() => run('social')} className="px-3 py-2 rounded-xl bg-cyan-500/20 border border-cyan-500/30 text-cyan-200 text-xs">نسخ سوشيال</button>
                 </div>
 
-                <div className="rounded-xl border border-white/20 bg-[#0a1424] p-3 min-h-[220px]">
+                <div className="rounded-xl border border-white/20 bg-[#0b1324] p-3 min-h-[220px]">
                     <div className="flex items-center justify-between mb-1">
                         <p className="text-xs text-gray-400">النتيجة</p>
                         <button

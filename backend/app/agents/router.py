@@ -246,6 +246,26 @@ LOCAL_SOURCE_KEYWORDS = [
     "الجزائر", "الجزائرية", "الشروق", "الخبر", "النهار", "وكالة الأنباء الجزائرية",
 ]
 
+NON_LOCAL_SIGNAL_KEYWORDS = [
+    "usa",
+    "united states",
+    "washington",
+    "europe",
+    "uk",
+    "france",
+    "germany",
+    "india",
+    "china",
+    "russia",
+    "nigeria",
+    "pakistan",
+    "south korea",
+    "democrats",
+    "associated press",
+    "ap news",
+    "reuters",
+]
+
 ARABIC_CHAR_RE = re.compile(r"[ء-ي]")
 ROUTER_SOURCE_QUOTA = 6
 ROUTER_CANDIDATE_SOURCE_QUOTA = 3
@@ -378,6 +398,12 @@ class RouterAgent:
                     article.urgency = UrgencyLevel.BREAKING
                     stats["breaking"] += 1
 
+                # Guardrail: avoid classifying clearly non-local stories as local_algeria.
+                source_name = source.name if source and source.name else (article.source_name or "")
+                local_text = f"{article.original_title or ''} {article.original_content or ''}".lower()
+                if article.category == NewsCategory.LOCAL_ALGERIA and self._looks_non_local(local_text, source_name):
+                    article.category = NewsCategory.INTERNATIONAL
+
             except Exception as e:
                 logger.warning("ai_classification_failed", error=str(e))
                 article.category = NewsCategory.LOCAL_ALGERIA
@@ -391,6 +417,11 @@ class RouterAgent:
                 article.title_ar = article.original_title
             if not article.summary:
                 article.summary = (article.original_content or article.original_title)[:300]
+
+            source_name = source.name if source and source.name else (article.source_name or "")
+            local_text = f"{article.original_title or ''} {article.original_content or ''}".lower()
+            if article.category == NewsCategory.LOCAL_ALGERIA and self._looks_non_local(local_text, source_name):
+                article.category = NewsCategory.INTERNATIONAL
 
         # ── Step 4: Determine if Candidate ──
         has_local_signal = self._has_local_signal(text_lower, article.source_name or "")
@@ -614,6 +645,14 @@ class RouterAgent:
         if any(k in src for k in ["aps", "tsa", "echorouk", "el khabar", "elwatan", "dz", "algerie", "algérie"]):
             return True
         return False
+
+    def _looks_non_local(self, text_lower: str, source_name: str) -> bool:
+        if self._has_local_signal(text_lower, source_name):
+            return False
+        src = (source_name or "").lower()
+        if self._is_google_aggregator(src):
+            return True
+        return any(k in text_lower for k in NON_LOCAL_SIGNAL_KEYWORDS)
 
     def _noise_gate(self, article: Article, text_lower: str) -> tuple[bool, str]:
         title = (article.original_title or "").strip()

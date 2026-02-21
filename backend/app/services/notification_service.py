@@ -35,6 +35,27 @@ class NotificationService:
         return re.sub(r"\s+", " ", (value or "").strip().lower())
 
     @staticmethod
+    def _topic_signature(title: str) -> str:
+        normalized = NotificationService._normalize_for_signature(title)
+        tokens = re.findall(r"[\u0600-\u06FFa-z0-9]{3,}", normalized)
+        stop_words = {
+            "هذا",
+            "هذه",
+            "ذلك",
+            "اليوم",
+            "عاجل",
+            "هام",
+            "latest",
+            "breaking",
+            "news",
+            "update",
+        }
+        filtered = [token for token in tokens if token not in stop_words][:6]
+        if not filtered:
+            return hashlib.sha1(normalized.encode("utf-8")).hexdigest()
+        return hashlib.sha1("|".join(filtered).encode("utf-8")).hexdigest()
+
+    @staticmethod
     def _category_label(category: str) -> str:
         labels = {
             "local_algeria": "محلي - الجزائر",
@@ -218,7 +239,8 @@ class NotificationService:
             return
 
         # Prevent alert spam by suppressing repeated alerts for the same topic.
-        dedup_ttl = timedelta(hours=12)
+        dedup_ttl = timedelta(hours=18)
+        topic_ttl = timedelta(hours=8)
         new_weak_items: list[dict] = []
         for item in weak_items:
             normalized_url = self._normalize_for_signature(item.get("url", ""))
@@ -229,7 +251,15 @@ class NotificationService:
             already_sent = await cache_service.get(dedup_key)
             if already_sent:
                 continue
+
+            topic_hash = self._topic_signature(item.get("title", ""))
+            topic_key = f"published_quality_alert:topic:{topic_hash}"
+            topic_sent = await cache_service.get(topic_key)
+            if topic_sent:
+                continue
+
             await cache_service.set(dedup_key, "1", ttl=dedup_ttl)
+            await cache_service.set(topic_key, "1", ttl=topic_ttl)
             new_weak_items.append(item)
 
         if not new_weak_items:
