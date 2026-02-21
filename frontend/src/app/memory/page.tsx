@@ -17,7 +17,7 @@ function apiErrorMessage(error: unknown, fallback: string): string {
     return fallback;
 }
 
-const WRITE_ROLES = new Set(['director', 'editor_chief', 'journalist', 'print_editor']);
+const WRITE_ROLES = new Set(['director', 'editor_chief', 'journalist', 'social_media', 'print_editor']);
 const MANAGE_ROLES = new Set(['director', 'editor_chief']);
 
 export default function MemoryPage() {

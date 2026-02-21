@@ -153,6 +153,7 @@ class StoryClusterMember(Base):
 
     __table_args__ = (
         UniqueConstraint("cluster_id", "article_id", name="uq_story_cluster_member"),
+        UniqueConstraint("article_id", name="uq_story_cluster_member_article"),
     )
 
 

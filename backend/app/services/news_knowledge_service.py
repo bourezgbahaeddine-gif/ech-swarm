@@ -15,7 +15,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Iterable
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -328,12 +328,9 @@ class NewsKnowledgeService:
         anchor_article: Article,
         score: float,
     ) -> None:
-        existing = await db.execute(
-            select(StoryClusterMember).where(StoryClusterMember.article_id == anchor_article.id).limit(1)
-        )
-        anchor_member = existing.scalar_one_or_none()
-        if anchor_member:
-            cluster_id = anchor_member.cluster_id
+        cluster_id = await self._best_cluster_id_for_article(db, anchor_article.id)
+        if cluster_id is not None:
+            await self._upsert_cluster_member(db, cluster_id, anchor_article.id, score=1.0)
         else:
             cluster_key = self._cluster_key(anchor_article, seed=anchor_article.title_ar or anchor_article.original_title or str(anchor_article.id))
             cluster = await self._get_or_create_cluster(
@@ -346,6 +343,25 @@ class NewsKnowledgeService:
             await self._upsert_cluster_member(db, cluster_id, anchor_article.id, score=1.0)
 
         await self._upsert_cluster_member(db, cluster_id, article.id, score=score)
+
+    async def _best_cluster_id_for_article(self, db: AsyncSession, article_id: int) -> int | None:
+        sizes = (
+            select(
+                StoryClusterMember.cluster_id.label("cluster_id"),
+                func.count(StoryClusterMember.article_id).label("members"),
+            )
+            .group_by(StoryClusterMember.cluster_id)
+            .subquery()
+        )
+        row = await db.execute(
+            select(StoryClusterMember.cluster_id)
+            .join(sizes, sizes.c.cluster_id == StoryClusterMember.cluster_id)
+            .where(StoryClusterMember.article_id == article_id)
+            .order_by(desc(sizes.c.members), desc(StoryClusterMember.score), StoryClusterMember.id.asc())
+            .limit(1)
+        )
+        cluster_id = row.scalar_one_or_none()
+        return int(cluster_id) if cluster_id is not None else None
 
     async def _get_or_create_cluster(
         self,
@@ -369,19 +385,21 @@ class NewsKnowledgeService:
         return cluster
 
     async def _upsert_cluster_member(self, db: AsyncSession, cluster_id: int, article_id: int, score: float) -> None:
-        res = await db.execute(
-            select(StoryClusterMember).where(
-                and_(
-                    StoryClusterMember.cluster_id == cluster_id,
-                    StoryClusterMember.article_id == article_id,
-                )
-            )
-        )
-        member = res.scalar_one_or_none()
-        if member is None:
-            db.add(StoryClusterMember(cluster_id=cluster_id, article_id=article_id, score=score))
+        res = await db.execute(select(StoryClusterMember).where(StoryClusterMember.article_id == article_id))
+        memberships = list(res.scalars().all())
+
+        keep = next((m for m in memberships if m.cluster_id == cluster_id), None)
+        if keep is None:
+            keep = StoryClusterMember(cluster_id=cluster_id, article_id=article_id, score=score)
+            db.add(keep)
         else:
-            member.score = max(member.score, score)
+            keep.score = max(keep.score, score)
+
+        # Enforce one canonical cluster membership per article.
+        for m in memberships:
+            if keep.id is not None and m.id == keep.id:
+                continue
+            await db.delete(m)
 
     async def _infer_relations(self, db: AsyncSession, article: Article, candidates: list[tuple[Article, float]]) -> None:
         if not candidates:
