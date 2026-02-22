@@ -49,6 +49,7 @@ ARABIC_STOPWORDS = {
     "في",
     "على",
     "الى",
+    "الي",
     "إلى",
     "عن",
     "مع",
@@ -80,9 +81,14 @@ ARABIC_STOPWORDS = {
     "لكن",
     "وقد",
     "قد",
+    "ضمن",
+    "عند",
+    "لدى",
+    "هكذا",
+    "جدا",
 }
 LATIN_STOPWORDS = {"the", "and", "for", "with", "from", "that", "this", "into", "over", "after", "before"}
-GENERIC_QUERY_TERMS = {"الجزائر", "خبر", "اخبار", "تفاصيل", "موضوع", "جديد", "اليوم", "رمضان"}
+GENERIC_QUERY_TERMS = {"الجزائر", "خبر", "اخبار", "تفاصيل", "موضوع", "جديد", "اليوم", "رمضان", "الي", "الى", "خلال"}
 
 DEFAULT_TRUSTED_EXTERNALS: dict[str, tuple[str, float, str]] = {
     "aps.dz": ("وكالة الأنباء الجزائرية", 0.95, "official"),
@@ -172,7 +178,8 @@ class LinkIntelligenceService:
         value = re.sub(r"<[^>]+>", " ", value)
         value = re.sub(r"[\u064b-\u065f\u0670\u0640]", "", value)
         value = value.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا").replace("ى", "ي").replace("ة", "ه")
-        value = re.sub(r"[^\w\u0600-\u06ff]+", " ", value)
+        # Keep letters/digits only; avoid Arabic punctuation (e.g. ، ؟) being treated as tokens.
+        value = re.sub(r"[^a-z0-9\u0621-\u063a\u0641-\u064a]+", " ", value)
         parts = [p.strip("_") for p in value.split() if p.strip("_")]
         return {
             p
@@ -732,7 +739,7 @@ class LinkIntelligenceService:
         clean_title = re.sub(r"\s+", " ", clean_title).strip()
         title_tokens = self._tokens(clean_title)
         for tok in sorted(query_tokens, key=len, reverse=True):
-            if tok and tok in title_tokens and tok not in GENERIC_QUERY_TERMS:
+            if tok and len(tok) >= 4 and tok in title_tokens and tok not in GENERIC_QUERY_TERMS:
                 return tok[:80]
         words = [w for w in clean_title.split() if self._tokens(w)]
         if not words:
@@ -827,10 +834,10 @@ class LinkIntelligenceService:
             selected = self._dedupe_by_domain(scored_external, target_count)
         else:
             top_external = self._dedupe_by_domain(scored_external, min(2, target_count))
-            allow_external = bool(top_external and top_external[0].score >= 0.30)
+            allow_external = bool(top_external and top_external[0].score >= 0.27)
             external_take = 0
             if allow_external:
-                external_take = 2 if len(top_external) > 1 and top_external[1].score >= 0.27 else 1
+                external_take = 2 if len(top_external) > 1 and top_external[1].score >= 0.24 else 1
             internal_target = target_count - external_take
             selected.extend(scored_internal[: max(0, internal_target)])
             if allow_external:
@@ -869,21 +876,23 @@ class LinkIntelligenceService:
                 key=lambda x: (self._safe_float(x.authority_score, 0.0), x.published_at or datetime.min),
                 reverse=True,
             )
-            max_ext = target_count if mode == "external" else min(2, target_count)
+            max_ext = target_count if mode == "external" else 1
             for fb in fallback_ext:
                 if self._safe_float(fb.authority_score, 0.0) < TRUSTED_EXTERNAL_MIN:
                     continue
-                selected.append(
-                    _ScoredItem(
-                        item=fb,
-                        score=0.2301,
-                        confidence=0.39,
-                        anchor_text=self._build_anchor(query_tokens, fb.title or ""),
-                        reason="مرجع خارجي موثوق احتياطي من مصدر عالي الثقة",
-                        placement_hint="بعد الجملة التي تحتاج توثيقا أو رقما رسميا",
-                        rel_attrs="noopener noreferrer",
-                    )
+                fallback_scored = _ScoredItem(
+                    item=fb,
+                    score=0.2301,
+                    confidence=0.39,
+                    anchor_text=self._build_anchor(query_tokens, fb.title or ""),
+                    reason="مرجع خارجي موثوق احتياطي من مصدر عالي الثقة",
+                    placement_hint="بعد الجملة التي تحتاج توثيقا أو رقما رسميا",
+                    rel_attrs="noopener noreferrer",
                 )
+                if mode == "mixed" and len(selected) >= target_count:
+                    selected = selected[: max(0, target_count - 1)] + [fallback_scored]
+                else:
+                    selected.append(fallback_scored)
                 if len([x for x in selected if x.item.link_type == "external"]) >= max_ext:
                     break
 
