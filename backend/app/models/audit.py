@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm — Settings Audit Log
+Echorouk Editorial OS — Settings Audit Log
 ======================================
 Tracks changes to API settings for admin visibility.
 """

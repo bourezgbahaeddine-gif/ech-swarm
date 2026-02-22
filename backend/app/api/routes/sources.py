@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm -- Sources API Routes
+Echorouk Editorial OS -- Sources API Routes
 ======================================
 CRUD operations for RSS/news sources.
 """

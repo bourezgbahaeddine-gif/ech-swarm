@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm — Authentication Schemas
+Echorouk Editorial OS — Authentication Schemas
 ============================================
 """
 

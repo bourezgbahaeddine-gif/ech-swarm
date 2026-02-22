@@ -1,5 +1,5 @@
 /**
- * Echorouk AI Swarm — API Client
+ * Echorouk Editorial OS — API Client
  * Typed API service layer for backend communication
  */
 

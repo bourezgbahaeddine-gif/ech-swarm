@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm — API Settings Routes
+Echorouk Editorial OS — API Settings Routes
 ======================================
 Admin endpoints for managing external API credentials/config.
 """

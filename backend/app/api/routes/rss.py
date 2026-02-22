@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm — RSS Bridge Routes
+Echorouk Editorial OS — RSS Bridge Routes
 =====================================
 Expose RSS feeds for stored articles by source.
 """

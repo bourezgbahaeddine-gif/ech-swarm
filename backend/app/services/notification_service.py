@@ -1,5 +1,5 @@
 ﻿"""
-Echorouk AI Swarm - Notification Service.
+Echorouk Editorial OS - Notification Service.
 Multi-channel notifications (Telegram/Slack) with newsroom rules.
 """
 
@@ -191,7 +191,7 @@ class NotificationService:
     async def send_daily_report(self, stats: dict):
         """Daily report is Slack only; Telegram reserved for breaking."""
         message = (
-            f"📊 <b>التقرير اليومي - غرفة الشروق الذكية</b>\n\n"
+            f"📊 <b>التقرير اليومي - نظام التشغيل الذكي لسير العمل التحريري</b>\n\n"
             f"📰 إجمالي الأخبار: {stats.get('total', 0)}\n"
             f"🔁 المكررات: {stats.get('duplicates', 0)}\n"
             f"✅ المعتمدة: {stats.get('approved', 0)}\n"

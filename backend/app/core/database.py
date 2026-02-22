@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm — Database Engine
+Echorouk Editorial OS — Database Engine
 =====================================
 Async SQLAlchemy engine with connection pooling.
 """

@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm — Tests
+Echorouk Editorial OS — Tests
 """
 
 import pytest

@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm — User Model
+Echorouk Editorial OS — User Model
 ================================
 Journalist and editor accounts with role-based access.
 """

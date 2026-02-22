@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm — Text Processing Utilities
+Echorouk Editorial OS — Text Processing Utilities
 ================================================
 Input sanitization and text cleaning (Rule #2: Zero Trust).
 """

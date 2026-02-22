@@ -1,4 +1,4 @@
-# EXPERIMENT PACKAGE — Echorouk AI Swarm
+# EXPERIMENT PACKAGE — Echorouk Editorial OS
 
 هذا الملف هو نقطة الدخول لوضع المشروع في **مرحلة التجربة** مع مرجع سريع للتشغيل والمتابعة وحل الأعطال.
 

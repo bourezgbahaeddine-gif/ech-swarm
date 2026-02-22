@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm — Pydantic Schemas
+Echorouk Editorial OS — Pydantic Schemas
 ======================================
 Request/Response schemas for the API layer.
 """

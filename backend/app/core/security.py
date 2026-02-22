@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm — Security Module
+Echorouk Editorial OS — Security Module
 =====================================
 Password hashing (bcrypt) and JWT token management.
 Zero Trust: Never store plain-text passwords.

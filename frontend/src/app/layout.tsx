@@ -5,10 +5,11 @@ import { AuthProvider } from "@/lib/auth";
 import AppShell from "@/components/layout/AppShell";
 
 export const metadata: Metadata = {
-  title: "غرفة الشروق الذكية | Echorouk AI Swarm",
-  description: "منصة ذكاء اصطناعي لأتمتة غرفة الأخبار — AI-powered newsroom automation platform",
-  keywords: ["echorouk", "ai", "newsroom", "algeria", "automation", "gemini"],
-  authors: [{ name: "Echorouk AI Team" }],
+  title: "Echorouk Editorial OS | Intelligent Editorial Workflows",
+  description:
+    "Echorouk Editorial OS - The Operating System for Intelligent Editorial Workflows.",
+  keywords: ["echorouk", "editorial", "newsroom", "algeria", "workflows", "governance"],
+  authors: [{ name: "Echorouk Editorial OS Team" }],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

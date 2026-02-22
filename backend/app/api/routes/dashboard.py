@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm - Dashboard & Agent Control API.
+Echorouk Editorial OS - Dashboard & Agent Control API.
 """
 
 from datetime import datetime, timedelta

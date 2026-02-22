@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm — Router Agent (الموجّه)
+Echorouk Editorial OS — Router Agent (الموجّه)
 =============================================
 Triage Layer: Rule-based routing + AI classification.
 Cost Optimization: Rules first, AI only when uncertain.

@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm - User Activity Log Model
+Echorouk Editorial OS - User Activity Log Model
 ==========================================
 Tracks membership and authentication activity for admin audit.
 """

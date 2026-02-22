@@ -1,1 +1,1 @@
-"""Echorouk AI Swarm — Backend Application."""
+"""Echorouk Editorial OS — Backend Application."""

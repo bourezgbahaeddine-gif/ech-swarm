@@ -1,5 +1,5 @@
 ﻿"""
-Echorouk AI Swarm - Constitution Routes.
+Echorouk Editorial OS - Constitution Routes.
 Expose latest constitution and user acknowledgements.
 """
 

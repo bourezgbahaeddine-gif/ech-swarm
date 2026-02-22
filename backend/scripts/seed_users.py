@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm — Seed Users Script
+Echorouk Editorial OS — Seed Users Script
 =======================================
 Seeds the database with Echorouk Online journalist accounts.
 Passwords are hashed with bcrypt before storage.

@@ -1,3 +1,5 @@
+name: echorouk_editorial_os
+
 services:
   backend:
     build:

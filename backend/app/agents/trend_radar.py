@@ -1,5 +1,5 @@
 ﻿"""
-Echorouk AI Swarm - Trend Radar Agent
+Echorouk Editorial OS - Trend Radar Agent
 =====================================
 Detects rising trends by cross-referencing Google Trends,
 RSS burst detection, and competitor feeds.

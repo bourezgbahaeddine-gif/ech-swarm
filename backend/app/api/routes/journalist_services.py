@@ -1,5 +1,5 @@
 ﻿"""
-Echorouk AI Swarm — Journalist Services
+Echorouk Editorial OS — Journalist Services
 =======================================
 Editor/Fact-check/SEO/Multimedia tools for journalists.
 """

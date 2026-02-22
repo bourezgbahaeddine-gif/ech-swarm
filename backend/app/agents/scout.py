@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm — Scout Agent (الوكيل الكشّاف)
+Echorouk Editorial OS — Scout Agent (الوكيل الكشّاف)
 ====================================================
 Ingestion Layer: Fetches news from 300+ RSS sources,
 normalizes data, and applies deduplication.

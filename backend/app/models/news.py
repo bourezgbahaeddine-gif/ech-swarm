@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm — Database Models
+Echorouk Editorial OS — Database Models
 =====================================
 SQLAlchemy ORM models for the news pipeline.
 Status Pipeline: NEW → CLEANED → DEDUPED → CLASSIFIED → CANDIDATE → APPROVED/REJECTED → PUBLISHED → ARCHIVED

@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm — Hashing & Deduplication Utilities
+Echorouk Editorial OS — Hashing & Deduplication Utilities
 =======================================================
 Idempotency Principle: Processing the same input twice
 must result in a single record. (Rule #3)

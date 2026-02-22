@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm — AI Service
+Echorouk Editorial OS — AI Service
 ================================
 Unified interface for AI model calls (Gemini Flash/Pro, Groq).
 Tiered Processing: Python → Flash → Groq → Pro (cost optimization).

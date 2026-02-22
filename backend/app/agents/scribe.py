@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm - Scribe Agent (الوكيل الكاتب)
+Echorouk Editorial OS - Scribe Agent (الوكيل الكاتب)
 =================================================
 Transforms approved source content into polished editorial drafts.
 Single responsibility: writing and formatting only.

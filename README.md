@@ -1,17 +1,17 @@
 <div align="center">
 
-# 🚀 Echorouk AI Swarm — غرفة الشروق الذكية
+# 🚀 Echorouk Editorial OS — نظام التشغيل الذكي لسير العمل التحريري
 
-### AI-Powered Newsroom Automation Platform
+### The Operating System for Intelligent Editorial Workflows
 
-**Automate news ingestion, analysis, writing, and trend detection — powered by Gemini, Groq, and a swarm of specialized AI agents.**
+**Echorouk Editorial OS is an enterprise operating system for managing editorial content lifecycle from capture to manual-publish readiness, with strict governance and mandatory Human-in-the-Loop.**
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?logo=postgresql&logoColor=white)](https://postgresql.org)
 [![Next.js](https://img.shields.io/badge/Next.js-16-000000?logo=next.js&logoColor=white)](https://nextjs.org)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://docker.com)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-All%20Rights%20Reserved-red.svg)](LICENSE)
 
 </div>
 
@@ -19,7 +19,7 @@
 
 ## 📖 Overview
 
-**Echorouk AI Swarm** is a production-grade AI newsroom system designed for [Echorouk Online](https://www.echoroukonline.com), one of Algeria's leading digital news platforms. It automates the entire news lifecycle — from RSS ingestion through AI analysis to editorial-ready articles — while maintaining human editorial oversight at every critical decision point.
+**Echorouk Editorial OS** is an enterprise operating system for intelligent editorial workflows at [Echorouk Online](https://www.echoroukonline.com). It manages the editorial lifecycle from capture to manual-publish readiness with strict governance and mandatory Human-in-the-Loop control.
 
 ### 🎯 Key Principles
 
@@ -32,9 +32,26 @@
 | **Graceful Degradation** | Retry with exponential backoff, DLQ for failures, no silent crashes |
 | **RLHF Feedback** | Tracks diffs between AI output and editor corrections |
 
+### 🏷️ Official Versioning
+
+| Version | Name | Scope |
+|---------|------|-------|
+| `v1.0` | Operational Core | Core editorial lifecycle and governance |
+| `v1.1` | Async AI Isolation | Queue-based non-blocking AI execution |
+| `v2.0` | Scalable Editorial Infrastructure | Horizontal scale and resilient orchestration |
+
+Reference: `docs/BRAND_GUIDE.md`
+Reference: `NOTICE.md`
+
+### 👤 Attribution & Rights
+
+- Designer/Developer: `Bourezg Baha eddine` (بهاء الدين بورزق).
+- All rights are reserved by the rights holder.
+- Reuse, copying, distribution, or derivative work is prohibited without prior legal authorization.
+
 ---
 
-## 🤖 The Agent Swarm
+## 🤖 Editorial Workflow Engine
 
 ```
 RSS Sources (300+)
@@ -320,7 +337,10 @@ pytest tests/test_utils.py -v
 
 ## 📄 License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+All rights reserved.  
+No reuse, copying, distribution, publication, sublicensing, reverse engineering, or derivative work is permitted without prior legal authorization from the rights holder.
+
+Rights holder: **Bourezg Baha eddine** (بهاء الدين بورزق).
 
 ---
 

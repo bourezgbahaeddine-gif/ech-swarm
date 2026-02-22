@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm - Authentication and Membership Routes
+Echorouk Editorial OS - Authentication and Membership Routes
 =======================================================
 Login, current user, logout, and director membership management.
 """

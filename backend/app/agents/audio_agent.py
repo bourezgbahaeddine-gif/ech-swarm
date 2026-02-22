@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm — Audio Agent (المذيع الآلي)
+Echorouk Editorial OS — Audio Agent (المذيع الآلي)
 ==================================================
 Produces automated audio news briefings using edge-tts.
 Zero cost: Uses Microsoft's free TTS via edge-tts library.

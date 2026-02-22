@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm — Structured Logging
+Echorouk Editorial OS — Structured Logging
 ========================================
 Centralized structured logging with structlog.
 """

@@ -1,10 +1,11 @@
 """
 ╔══════════════════════════════════════════════════╗
-║      Echorouk AI Swarm — غرفة الشروق الذكية       ║
-║    AI-Powered Newsroom for Echorouk Online        ║
+║      Echorouk Editorial OS                         ║
+║ The Operating System for Intelligent Editorial     ║
+║ Workflows                                          ║
 ║                                                   ║
 ║    Built with: FastAPI + Gemini + PostgreSQL       ║
-║    Version: 1.0.0                                 ║
+║    Version: 1.1.0 (Async AI Isolation)            ║
 ╚══════════════════════════════════════════════════╝
 """
 
@@ -264,7 +265,7 @@ async def lifespan(app: FastAPI):
 
     logger.info(
         "app_ready",
-        msg="🚀 غرفة الشروق الذكية جاهزة للعمل",
+        msg="🚀 Echorouk Editorial OS is operational",
         port=settings.app_port,
     )
 
@@ -289,10 +290,11 @@ async def lifespan(app: FastAPI):
 # ── Create FastAPI App ──
 
 app = FastAPI(
-    title="Echorouk AI Swarm — غرفة الشروق الذكية",
+    title="Echorouk Editorial OS",
     description=(
-        "منصة ذكاء اصطناعي لأتمتة غرفة الأخبار.\n\n"
-        "AI-powered newsroom automation platform for Echorouk Online.\n\n"
+        "The Operating System for Intelligent Editorial Workflows.\n\n"
+        "Enterprise platform to manage editorial lifecycle from capture "
+        "to manual-publish readiness, with strict governance and mandatory Human-in-the-Loop.\n\n"
         "**Agents:**\n"
         "- 🔍 Scout (الكشّاف): RSS ingestion from 300+ sources\n"
         "- 🧭 Router (الموجّه): AI classification & priority routing\n"
@@ -300,7 +302,7 @@ app = FastAPI(
         "- 📡 Trend Radar (رادار التراند): Real-time trend detection\n"
         "- 🎙️ Audio (المذيع): Automated audio news briefings\n"
     ),
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -413,9 +415,10 @@ async def health_check():
 async def root():
     """Welcome endpoint."""
     return {
-        "name": "Echorouk AI Swarm",
-        "name_ar": "غرفة الشروق الذكية",
-        "version": "1.0.0",
+        "name": "Echorouk Editorial OS",
+        "name_ar": "نظام التشغيل الذكي لسير العمل التحريري",
+        "version": "1.1.0",
+        "release_name": "Async AI Isolation",
         "status": "operational",
         "docs": "/docs",
         "agents": [

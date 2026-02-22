@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm — Settings Service
+Echorouk Editorial OS — Settings Service
 ====================================
 Centralized access to API settings stored in DB with cache.
 """

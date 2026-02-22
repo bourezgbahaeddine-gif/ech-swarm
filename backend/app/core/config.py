@@ -1,20 +1,23 @@
 """
-Echorouk AI Swarm — Configuration Module
-==========================================
+Echorouk Editorial OS - Configuration Module
+============================================
 All configuration is loaded from environment variables.
 Zero hardcoded secrets (Rule #2: Zero Trust Security).
 """
 
+import os
 from functools import lru_cache
-from pydantic_settings import BaseSettings
+from pathlib import Path
+
 from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from .env file."""
+    """Application settings loaded from environment variables and .env."""
 
-    # ── App ──
-    app_name: str = "Echorouk AI Swarm"
+    # App
+    app_name: str = "Echorouk Editorial OS"
     app_env: str = "development"
     app_debug: bool = True
     app_secret_key: str = Field(..., min_length=32)
@@ -24,7 +27,7 @@ class Settings(BaseSettings):
     def secret_key(self) -> str:
         return self.app_secret_key
 
-    # ── Database ──
+    # Database
     postgres_host: str = "localhost"
     postgres_port: int = 5432
     postgres_db: str = "echorouk_db"
@@ -45,7 +48,7 @@ class Settings(BaseSettings):
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
 
-    # ── Redis ──
+    # Redis
     redis_host: str = "localhost"
     redis_port: int = 6379
     redis_password: str = ""
@@ -62,26 +65,26 @@ class Settings(BaseSettings):
         auth = f":{self.redis_password}@" if self.redis_password else ""
         return f"redis://{auth}{self.redis_host}:{self.redis_port}/{self.redis_queue_db}"
 
-    # ── AI Services ──
+    # AI Services
     gemini_api_key: str = ""
     gemini_model_flash: str = "gemini-2.5-flash"
     gemini_model_pro: str = "gemini-2.5-pro"
     groq_api_key: str = ""
 
-    # ── Telegram Notifications ──
+    # Notifications
     telegram_bot_token: str = ""
     telegram_channel_editors: str = ""
     telegram_channel_alerts: str = ""
     slack_webhook_url: str = ""
 
-    # ── MinIO ──
+    # MinIO
     minio_endpoint: str = "localhost:9000"
     minio_access_key: str = "minioadmin"
     minio_secret_key: str = "minioadmin"
     minio_bucket: str = "echorouk-media"
     minio_use_ssl: bool = False
 
-    # ── Scheduling ──
+    # Scheduling
     scout_interval_minutes: int = 20
     trend_radar_interval_minutes: int = 10
     auto_pipeline_enabled: bool = False
@@ -128,13 +131,13 @@ class Settings(BaseSettings):
     provider_weight_gemini: float = 0.7
     provider_weight_groq: float = 0.3
 
-    # ── FreshRSS / RSS-Bridge ──
+    # FreshRSS / RSS-Bridge
     scout_use_freshrss: bool = False
     freshrss_feed_url: str = "http://freshrss:80/p/i/?a=rss&state=all"
     rssbridge_base_url: str = "http://rssbridge:80"
     rssbridge_enabled: bool = True
 
-    # ── Processing Thresholds ──
+    # Processing Thresholds
     dedup_similarity_threshold: float = 0.70
     breaking_news_urgency_threshold: int = 8
     breaking_news_ttl_minutes: int = 60
@@ -149,12 +152,12 @@ class Settings(BaseSettings):
     scout_max_new_per_run: int = 250
     scout_max_article_age_hours: int = 72
 
-    # ── TTS ──
+    # TTS
     tts_voice: str = "ar-DZ-IsmaelNeural"
     tts_rate: str = "+0%"
     tts_pitch: str = "+0Hz"
 
-    # ── CORS ──
+    # CORS
     cors_origins: str = "http://localhost:3000,http://localhost:8000"
 
     @property
@@ -165,6 +168,49 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
+        env_prefix = "ECHOROUK_OS_"
+
+
+def _load_dotenv_pairs(dotenv_path: str = ".env") -> dict[str, str]:
+    path = Path(dotenv_path)
+    if not path.exists():
+        return {}
+
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            values[key] = value
+    return values
+
+
+def _bootstrap_prefixed_env() -> None:
+    """Populate ECHOROUK_OS_ vars from legacy keys for backward compatibility."""
+    legacy_pairs = _load_dotenv_pairs(".env")
+    prefix = "ECHOROUK_OS_"
+
+    for field_name in Settings.model_fields.keys():
+        legacy_key = field_name.upper()
+        prefixed_key = f"{prefix}{legacy_key}"
+
+        if os.getenv(prefixed_key):
+            continue
+
+        legacy_value = os.getenv(legacy_key)
+        if legacy_value is not None:
+            os.environ[prefixed_key] = legacy_value
+            continue
+
+        if legacy_key in legacy_pairs:
+            os.environ[prefixed_key] = legacy_pairs[legacy_key]
+
+
+_bootstrap_prefixed_env()
 
 
 @lru_cache()

@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm — News API Routes
+Echorouk Editorial OS — News API Routes
 =====================================
 CRUD operations for articles with filtering & pagination.
 """

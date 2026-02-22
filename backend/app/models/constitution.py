@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm — Constitution Models
+Echorouk Editorial OS — Constitution Models
 =======================================
 Tracks editorial constitution version and user acknowledgements.
 """

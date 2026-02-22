@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm — API Settings Model
+Echorouk Editorial OS — API Settings Model
 ======================================
 Stores external API credentials and service configuration.
 """

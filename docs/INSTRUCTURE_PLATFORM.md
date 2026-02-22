@@ -1,4 +1,7 @@
-﻿# INSTRUCTURE — مرجع منصة Echorouk AI Swarm
+﻿# INSTRUCTURE — مرجع منصة Echorouk Editorial OS
+
+Echorouk Editorial OS is an enterprise operating system for managing editorial content lifecycle from capture to manual-publish readiness, with strict governance and mandatory Human-in-the-Loop.
+
 
 ## 1) الهدف
 هذا الملف هو المرجع التشغيلي والتقني والتحريري للمنصة. الهدف من المنصة:

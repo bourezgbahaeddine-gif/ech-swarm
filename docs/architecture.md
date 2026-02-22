@@ -1,4 +1,7 @@
-# Echorouk AI Swarm — Architecture Documentation
+# Echorouk Editorial OS — Architecture Documentation
+
+Echorouk Editorial OS is an enterprise operating system for managing editorial content lifecycle from capture to manual-publish readiness, with strict governance and mandatory Human-in-the-Loop.
+
 
 ## System Architecture
 
@@ -6,7 +9,7 @@
 
 ```
                     ┌──────────────────────────────────────────────────────────────────┐
-                    │                    ECHOROUK AI SWARM                             │
+                    │                  ECHOROUK EDITORIAL OS                           │
                     │                                                                  │
   RSS Feeds ────►   │  ┌─────────┐    ┌──────────┐    ┌─────────┐    ┌─────────────┐  │
   (300+ sources)    │  │  Scout  │───►│  Router  │───►│ Scribe  │───►│  Editorial  │  │

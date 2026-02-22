@@ -1,5 +1,5 @@
 """
-Echorouk AI Swarm — Cache Service
+Echorouk Editorial OS — Cache Service
 ====================================
 Redis-based caching for deduplication and rate limiting.
 Implements the Global Cache System (24h URL cache).

@@ -1,5 +1,5 @@
 /**
- * Echorouk AI Swarm — Utility Functions
+ * Echorouk Editorial OS — Utility Functions
  */
 
 import { clsx, type ClassValue } from 'clsx';

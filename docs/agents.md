@@ -1,8 +1,11 @@
-# Echorouk AI Swarm — Agent Documentation
+# Echorouk Editorial OS — Agent Documentation
+
+Echorouk Editorial OS is an enterprise operating system for managing editorial content lifecycle from capture to manual-publish readiness, with strict governance and mandatory Human-in-the-Loop.
+
 
 ## Agent Overview
 
-The Echorouk AI Swarm consists of specialized AI agents, each with a single responsibility.
+The Echorouk Editorial OS consists of specialized AI agents, each with a single responsibility.
 
 ---
 
