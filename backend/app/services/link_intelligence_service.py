@@ -44,6 +44,45 @@ TRUSTED_EXTERNAL_MIN = 0.78
 INTERNAL_SCORE_THRESHOLD = 0.16
 EXTERNAL_SCORE_THRESHOLD = 0.24
 ON_DEMAND_SYNC_DISABLED_REASON = "disabled_on_suggest"
+ARABIC_STOPWORDS = {
+    "من",
+    "في",
+    "على",
+    "الى",
+    "إلى",
+    "عن",
+    "مع",
+    "بين",
+    "أو",
+    "ثم",
+    "بعد",
+    "قبل",
+    "خلال",
+    "حول",
+    "ضمن",
+    "اليوم",
+    "أمس",
+    "غدا",
+    "الآن",
+    "هذا",
+    "هذه",
+    "ذلك",
+    "تلك",
+    "هناك",
+    "هنا",
+    "الذي",
+    "التي",
+    "حيث",
+    "عبر",
+    "لدى",
+    "الى",
+    "كما",
+    "لكن",
+    "وقد",
+    "قد",
+}
+LATIN_STOPWORDS = {"the", "and", "for", "with", "from", "that", "this", "into", "over", "after", "before"}
+GENERIC_QUERY_TERMS = {"الجزائر", "خبر", "اخبار", "تفاصيل", "موضوع", "جديد", "اليوم", "رمضان"}
 
 DEFAULT_TRUSTED_EXTERNALS: dict[str, tuple[str, float, str]] = {
     "aps.dz": ("وكالة الأنباء الجزائرية", 0.95, "official"),
@@ -129,12 +168,20 @@ class LinkIntelligenceService:
 
     @staticmethod
     def _tokens(text: str) -> set[str]:
-        value = (text or "").lower()
-        value = re.sub(r"[\u064b-\u065f\u0670]", "", value)
+        value = unescape((text or "").lower())
+        value = re.sub(r"<[^>]+>", " ", value)
+        value = re.sub(r"[\u064b-\u065f\u0670\u0640]", "", value)
         value = value.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا").replace("ى", "ي").replace("ة", "ه")
-        parts = re.split(r"[^a-z0-9\u0600-\u06ff]+", value)
-        stop = {"على", "من", "في", "الى", "إلى", "عن", "مع", "هذا", "هذه", "ذلك", "the", "and", "for"}
-        return {p for p in parts if len(p) >= 3 and p not in stop}
+        value = re.sub(r"[^\w\u0600-\u06ff]+", " ", value)
+        parts = [p.strip("_") for p in value.split() if p.strip("_")]
+        return {
+            p
+            for p in parts
+            if len(p) >= 3
+            and p not in ARABIC_STOPWORDS
+            and p not in LATIN_STOPWORDS
+            and not p.isdigit()
+        }
 
     @staticmethod
     def _safe_float(v: Any, default: float = 0.0) -> float:
@@ -589,8 +636,8 @@ class LinkIntelligenceService:
         if not item_tokens:
             return None
 
-        query_title_norm = re.sub(r"\s+", " ", (query_title or "").strip().lower())
-        item_title_norm = re.sub(r"\s+", " ", (item.title or "").strip().lower())
+        query_title_norm = re.sub(r"\s+", " ", unescape((query_title or "").strip().lower()))
+        item_title_norm = re.sub(r"\s+", " ", unescape((item.title or "").strip().lower()))
         title_sim = SequenceMatcher(None, query_title_norm, item_title_norm).ratio() if query_title_norm and item_title_norm else 0.0
 
         overlap_set = query_tokens.intersection(item_tokens)
@@ -621,6 +668,7 @@ class LinkIntelligenceService:
 
         overlap_ratio = overlap_count / max(1, len(query_tokens))
         title_overlap = len(query_tokens.intersection(title_tokens)) / max(1, len(query_tokens))
+        informative_overlap = len([tok for tok in overlap_set if tok not in GENERIC_QUERY_TERMS])
         category_match = 1.0 if query_category and item.category and query_category == item.category else 0.0
         topic_match = 1.0 if query_category and str(item_meta.get("topic") or item.category or "") == query_category else 0.0
         authority = max(0.0, min(1.0, self._safe_float(item.authority_score, 0.5)))
@@ -637,6 +685,19 @@ class LinkIntelligenceService:
             + 0.08 * authority
             + 0.08 * title_sim
         )
+        if item.link_type == "external":
+            domain = self._normalize_domain(item.domain or "")
+            if domain in AGGREGATOR_DOMAINS:
+                score -= 0.10
+            if informative_overlap == 0:
+                score -= 0.08
+            if title_sim < 0.26:
+                score -= 0.06
+            if authority < TRUSTED_EXTERNAL_MIN:
+                score -= 0.10
+            if overlap_count < 2 and title_sim < 0.32:
+                return None
+            score = max(0.0, score)
         threshold = INTERNAL_SCORE_THRESHOLD if item.link_type == "internal" else EXTERNAL_SCORE_THRESHOLD
         if score < threshold:
             return None
@@ -666,11 +727,14 @@ class LinkIntelligenceService:
         )
 
     def _build_anchor(self, query_tokens: set[str], title: str) -> str:
-        clean_title = re.sub(r"\s+", " ", (title or "").strip())
+        clean_title = unescape(re.sub(r"\s+", " ", (title or "").strip()))
+        clean_title = re.sub(r"<[^>]+>", " ", clean_title)
+        clean_title = re.sub(r"\s+", " ", clean_title).strip()
+        title_tokens = self._tokens(clean_title)
         for tok in sorted(query_tokens, key=len, reverse=True):
-            if tok and tok in clean_title:
+            if tok and tok in title_tokens and tok not in GENERIC_QUERY_TERMS:
                 return tok[:80]
-        words = clean_title.split()
+        words = [w for w in clean_title.split() if self._tokens(w)]
         if not words:
             return "تفاصيل ذات صلة"
         return " ".join(words[: min(5, len(words))])[:120]
@@ -866,12 +930,13 @@ class LinkIntelligenceService:
 
         items_payload: list[dict[str, Any]] = []
         for rec in selected:
+            clean_title = unescape(rec.item.title or "").strip()
             ri = LinkRecommendationItem(
                 run_id=run_id,
                 link_index_item_id=rec.item.id,
                 link_type=rec.item.link_type,
                 url=rec.item.url,
-                title=rec.item.title[:1024],
+                title=clean_title[:1024],
                 anchor_text=rec.anchor_text[:255],
                 placement_hint=rec.placement_hint[:255],
                 reason=rec.reason,

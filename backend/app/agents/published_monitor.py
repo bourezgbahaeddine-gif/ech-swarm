@@ -18,6 +18,7 @@ from bs4 import BeautifulSoup
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.services.ai_service import ai_service
 from app.services.cache_service import cache_service
 from app.services.notification_service import notification_service
 
@@ -39,66 +40,48 @@ CLICKBAIT_TERMS = {
 
 COMMON_SPELLING_MISTAKES = {
     "ان شاء الله": "إن شاء الله",
-    "لكنن": "لكن",
     "الذى": "الذي",
     "هاذا": "هذا",
     "هاذه": "هذه",
     "فى": "في",
     "الى": "إلى",
-    "مسؤولين": "مراجعة الضبط حسب السياق: مسؤولون / مسؤولين",
 }
 
-WHO_HINTS = {
-    "الرئيس",
-    "الوزير",
-    "الوزارة",
-    "الحكومة",
-    "الجيش",
-    "الوكالة",
-    "مصدر",
-    "مسؤول",
-    "شركة",
-}
-WHAT_HINTS = {
-    "أعلن",
-    "أعلنت",
-    "أكد",
-    "كشفت",
-    "قرار",
-    "بيان",
-    "اتفاق",
-    "نتائج",
-    "تحقيق",
-}
-WHERE_HINTS = {
-    "الجزائر",
-    "ولاية",
-    "العاصمة",
-    "محلية",
-    "دولية",
-    "أفريقيا",
-    "غزة",
-}
-WHEN_HINTS = {
-    "اليوم",
-    "أمس",
-    "غدا",
-    "هذا الأسبوع",
-    "هذا الشهر",
-    "خلال",
-    "بتاريخ",
+WHO_HINTS = {"الرئيس", "الوزير", "الوزارة", "الحكومة", "الجيش", "الوكالة", "مصدر", "مسؤول", "شركة"}
+WHAT_HINTS = {"أعلن", "أعلنت", "أكد", "كشفت", "قرار", "بيان", "اتفاق", "نتائج", "تحقيق"}
+WHERE_HINTS = {"الجزائر", "ولاية", "العاصمة", "محلية", "دولية", "أفريقيا", "غزة"}
+WHEN_HINTS = {"اليوم", "أمس", "غدا", "هذا الأسبوع", "هذا الشهر", "خلال", "بتاريخ"}
+
+STRONG_KEYWORDS = {"بيان", "قرار", "رسمي", "إحصائيات", "وثيقة", "مصدر", "أرقام", "تأكيد"}
+
+EDITORIAL_QUALITY_PROMPT = """
+أنت مدقق جودة تحريرية وإملائية محترف لبوابة أخبار عربية.
+قيّم المادة التالية دون مجاملة وبمعايير غرفة أخبار احترافية.
+
+المطلوب:
+1) رصد أخطاء إملائية/نحوية أو صياغات غير صحفية.
+2) رصد مشاكل مهنية: تهويل، غموض، ضعف إسناد، قفزات استنتاجية.
+3) تقديم اقتراحات تحريرية عملية وقابلة للتنفيذ فورًا.
+4) إعطاء تعديل رقمي على الدرجة score_adjustment من -15 إلى +5 فقط.
+
+أعد JSON فقط بالشكل:
+{
+  "issues": ["..."],
+  "suggestions": ["..."],
+  "score_adjustment": -3,
+  "checks": {
+    "spelling": 0,
+    "style": 0,
+    "structure": 0,
+    "accuracy": 0
+  }
 }
 
-STRONG_KEYWORDS = {
-    "بيان",
-    "قرار",
-    "رسمي",
-    "إحصائيات",
-    "وثيقة",
-    "مصدر",
-    "أرقام",
-    "تأكيد",
-}
+قواعد صارمة:
+- لا تضف أي نص خارج JSON.
+- إذا لم تكتشف ملاحظة في محور معين، اتركه بدرجة عالية بدون اختلاق مشاكل.
+- ركّز على جودة التحرير الصحفي الفعلي، لا على الانطباعات العامة.
+"""
 
 
 class PublishedContentMonitorAgent:
@@ -157,19 +140,20 @@ class PublishedContentMonitorAgent:
 
         connector = aiohttp.TCPConnector(ssl=False)
         async with aiohttp.ClientSession(connector=connector, headers={"User-Agent": "EchoroukSwarm/1.0"}) as session:
-            for entry in unique_entries:
+            for idx, entry in enumerate(unique_entries):
                 title = (entry.get("title") or "").strip()
                 summary = self._strip_html(entry.get("summary") or entry.get("description") or "")
                 url = (entry.get("link") or "").strip()
                 published_at = entry.get("published", "") or entry.get("updated", "")
                 body_text = await self._fetch_article_text(session, url, timeout_total=timeout_total)
                 audits.append(
-                    self._audit_entry(
+                    await self._audit_entry(
                         title=title,
                         summary=summary,
                         body_text=body_text,
                         url=url,
                         published_at=published_at,
+                        use_llm=(idx < 8),
                     )
                 )
 
@@ -257,7 +241,66 @@ class PublishedContentMonitorAgent:
         text = "\n".join(p for p in paragraphs if p)
         return re.sub(r"\s+", " ", text).strip()
 
-    def _audit_entry(
+    @staticmethod
+    def _extend_unique(target: list[str], values: list[str], *, max_items: int) -> None:
+        for value in values:
+            clean = re.sub(r"\s+", " ", str(value or "").strip())
+            if not clean or clean in target:
+                continue
+            target.append(clean)
+            if len(target) >= max_items:
+                return
+
+    async def _llm_editorial_review(
+        self,
+        *,
+        title: str,
+        summary: str,
+        body_text: str,
+        first_chunk: str,
+    ) -> dict[str, Any] | None:
+        prompt = (
+            f"{EDITORIAL_QUALITY_PROMPT}\n\n"
+            f"العنوان: {title[:240]}\n"
+            f"الملخص: {summary[:700]}\n"
+            f"الفقرة الافتتاحية: {first_chunk[:700]}\n"
+            f"مقتطف من المتن: {(body_text or summary)[:1800]}\n"
+        )
+        try:
+            data = await ai_service.generate_json(prompt)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("published_monitor_llm_error", error=str(exc))
+            return None
+
+        if not isinstance(data, dict):
+            return None
+        issues = [str(x).strip() for x in (data.get("issues") or []) if str(x).strip()]
+        suggestions = [str(x).strip() for x in (data.get("suggestions") or []) if str(x).strip()]
+        if not issues and not suggestions:
+            return None
+
+        try:
+            score_adjustment = int(float(data.get("score_adjustment", 0)))
+        except Exception:
+            score_adjustment = 0
+        score_adjustment = max(-15, min(5, score_adjustment))
+
+        checks_raw = data.get("checks") if isinstance(data.get("checks"), dict) else {}
+        checks: dict[str, int] = {}
+        for key in ("spelling", "style", "structure", "accuracy"):
+            try:
+                checks[key] = max(0, min(100, int(float(checks_raw.get(key, 0)))))
+            except Exception:
+                checks[key] = 0
+
+        return {
+            "issues": issues[:5],
+            "suggestions": suggestions[:5],
+            "score_adjustment": score_adjustment,
+            "checks": checks,
+        }
+
+    async def _audit_entry(
         self,
         *,
         title: str,
@@ -265,6 +308,7 @@ class PublishedContentMonitorAgent:
         body_text: str,
         url: str,
         published_at: str,
+        use_llm: bool = True,
     ) -> dict[str, Any]:
         score = 100
         issues: list[str] = []
@@ -280,7 +324,7 @@ class PublishedContentMonitorAgent:
         clickbait_hits = [term for term in CLICKBAIT_TERMS if term in lowered_title or term in lowered_text]
         if clickbait_hits:
             score -= min(30, len(clickbait_hits) * 8)
-            issues.append(f"مؤشرات Clickbait: {', '.join(clickbait_hits[:3])}")
+            issues.append(f"مؤشرات تهويل/Clickbait: {', '.join(clickbait_hits[:3])}")
             suggestions.append("استبدال الصياغة المثيرة بعنوان خبري مباشر ودقيق.")
 
         spelling_hits = []
@@ -290,13 +334,13 @@ class PublishedContentMonitorAgent:
         if spelling_hits:
             score -= min(24, len(spelling_hits) * 4)
             issues.append("أخطاء إملائية شائعة مرصودة.")
-            suggestions.append("مراجعة إملائية نهائية قبل النشر واعتماد الصيغة القياسية للأسماء.")
+            suggestions.append("إجراء مراجعة إملائية نهائية واعتماد الصيغة القياسية للأسماء والمصطلحات.")
 
         title_len = len(title_clean)
         if title_len < 35:
             score -= 8
-            issues.append("العنوان قصير جدا لتحسين SEO.")
-            suggestions.append("رفع طول العنوان إلى 35-75 حرفا مع الحفاظ على الوضوح.")
+            issues.append("العنوان قصير جداً لتحسين SEO.")
+            suggestions.append("رفع طول العنوان إلى 35-75 حرفاً مع الحفاظ على الوضوح.")
         elif title_len > 95:
             score -= 10
             issues.append("العنوان طويل ويضعف القراءة.")
@@ -304,7 +348,7 @@ class PublishedContentMonitorAgent:
 
         if word_count < 180:
             score -= 12
-            issues.append("المحتوى قصير ولا يغطي الخبر بشكل كاف.")
+            issues.append("المحتوى قصير ولا يغطي الخبر بشكل كافٍ.")
             suggestions.append("إضافة تفاصيل أساسية وسياق داعم من مصادر موثوقة.")
 
         first_chunk = self._first_chunk(body_text, summary_clean)
@@ -320,8 +364,32 @@ class PublishedContentMonitorAgent:
             issues.append("ضعف في الكلمات المفتاحية التحريرية القوية.")
             suggestions.append("تعزيز المصطلحات الخبرية الدقيقة في العنوان والفقرة الأولى.")
 
+        llm_checks: dict[str, int] | None = None
+        if use_llm and (title_clean or text):
+            llm_review = await self._llm_editorial_review(
+                title=title_clean,
+                summary=summary_clean,
+                body_text=body_text,
+                first_chunk=first_chunk,
+            )
+            if llm_review:
+                self._extend_unique(issues, llm_review.get("issues", []), max_items=8)
+                self._extend_unique(suggestions, llm_review.get("suggestions", []), max_items=8)
+                score += int(llm_review.get("score_adjustment", 0))
+                llm_checks = llm_review.get("checks")
+
         score = max(0, min(100, score))
         grade = self._grade(score)
+
+        metrics: dict[str, Any] = {
+            "title_length": title_len,
+            "word_count": word_count,
+            "clickbait_hits": len(clickbait_hits),
+            "spelling_hits": len(spelling_hits),
+            "strong_keywords_hits": strong_kw_hits,
+        }
+        if llm_checks:
+            metrics["llm_checks"] = llm_checks
 
         return {
             "title": title_clean,
@@ -331,13 +399,7 @@ class PublishedContentMonitorAgent:
             "grade": grade,
             "issues": issues,
             "suggestions": suggestions,
-            "metrics": {
-                "title_length": title_len,
-                "word_count": word_count,
-                "clickbait_hits": len(clickbait_hits),
-                "spelling_hits": len(spelling_hits),
-                "strong_keywords_hits": strong_kw_hits,
-            },
+            "metrics": metrics,
         }
 
     @staticmethod
