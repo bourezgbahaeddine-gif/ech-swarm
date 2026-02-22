@@ -116,7 +116,11 @@ class JobQueueService:
         await self.enqueue(task_name=task_name, queue_name=queue_name, job_id=job_id)
 
     async def get_job(self, db: AsyncSession, job_id: str) -> JobRun | None:
-        row = await db.execute(select(JobRun).where(JobRun.id == UUID(job_id)))
+        try:
+            job_uuid = UUID(job_id)
+        except Exception:  # noqa: BLE001
+            return None
+        row = await db.execute(select(JobRun).where(JobRun.id == job_uuid))
         return row.scalar_one_or_none()
 
     async def list_jobs(

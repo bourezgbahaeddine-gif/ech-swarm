@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import traceback
 from datetime import datetime
 from uuid import UUID
@@ -14,6 +13,7 @@ from sqlalchemy import desc, func, select
 from app.core.database import async_session
 from app.core.logging import get_logger
 from app.models import Article, EditorialDraft, JobRun
+from app.queue.async_runtime import run_async
 from app.queue.celery_app import celery_app
 from app.services.job_queue_service import job_queue_service
 from app.services.link_intelligence_service import link_intelligence_service
@@ -257,15 +257,15 @@ async def _execute_editorial_ai_job(job_id: str) -> dict:
 )
 def run_editorial_ai_job(self: Task, job_id: str) -> dict:
     try:
-        result = asyncio.run(_execute_editorial_ai_job(job_id))
-        asyncio.run(_mark_completed(job_id, result))
-        structlog.contextvars.clear_contextvars()
+        result = run_async(_execute_editorial_ai_job(job_id))
+        run_async(_mark_completed(job_id, result))
         return {"ok": True, "job_id": job_id}
     except Exception as exc:  # noqa: BLE001
         err = str(exc)
         tb = traceback.format_exc()
         is_final = int(getattr(self.request, "retries", 0)) >= int(getattr(self, "max_retries", 5))
-        asyncio.run(_mark_failed_or_dlq(job_id, err, tb, is_final))
+        run_async(_mark_failed_or_dlq(job_id, err, tb, is_final))
         logger.error("editorial_ai_job_failed", job_id=job_id, error=err, final=is_final)
-        structlog.contextvars.clear_contextvars()
         raise
+    finally:
+        structlog.contextvars.clear_contextvars()

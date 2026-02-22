@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import traceback
 from uuid import UUID
 
@@ -19,6 +18,7 @@ from app.core.database import async_session
 from app.core.logging import get_logger
 from app.models import JobRun
 from app.msi.service import msi_monitor_service
+from app.queue.async_runtime import run_async
 from app.queue.celery_app import celery_app
 from app.services.job_queue_service import job_queue_service
 from app.simulator.service import audience_simulation_service
@@ -128,103 +128,103 @@ async def _run_published_monitor(job_id: str) -> dict:
 @celery_app.task(bind=True, autoretry_for=(TimeoutError, ConnectionError), retry_backoff=True, retry_jitter=True, max_retries=5)
 def run_router_batch(self: Task, job_id: str) -> dict:
     try:
-        result = asyncio.run(_run_router_batch(job_id))
-        asyncio.run(_complete(job_id, result))
-        structlog.contextvars.clear_contextvars()
+        result = run_async(_run_router_batch(job_id))
+        run_async(_complete(job_id, result))
         return {"ok": True}
     except Exception as exc:  # noqa: BLE001
         tb = traceback.format_exc()
         final = int(getattr(self.request, "retries", 0)) >= int(getattr(self, "max_retries", 5))
-        asyncio.run(_fail(job_id, str(exc), tb, final))
-        structlog.contextvars.clear_contextvars()
+        run_async(_fail(job_id, str(exc), tb, final))
         raise
+    finally:
+        structlog.contextvars.clear_contextvars()
 
 
 @celery_app.task(bind=True, autoretry_for=(TimeoutError, ConnectionError), retry_backoff=True, retry_jitter=True, max_retries=3)
 def run_scout_batch(self: Task, job_id: str) -> dict:
     try:
-        result = asyncio.run(_run_scout_batch(job_id))
-        asyncio.run(_complete(job_id, result))
-        structlog.contextvars.clear_contextvars()
+        result = run_async(_run_scout_batch(job_id))
+        run_async(_complete(job_id, result))
         return {"ok": True}
     except Exception as exc:  # noqa: BLE001
         tb = traceback.format_exc()
         final = int(getattr(self.request, "retries", 0)) >= int(getattr(self, "max_retries", 3))
-        asyncio.run(_fail(job_id, str(exc), tb, final))
-        structlog.contextvars.clear_contextvars()
+        run_async(_fail(job_id, str(exc), tb, final))
         raise
+    finally:
+        structlog.contextvars.clear_contextvars()
 
 
 @celery_app.task(bind=True, autoretry_for=(TimeoutError, ConnectionError), retry_backoff=True, retry_jitter=True, max_retries=5)
 def run_scribe_batch(self: Task, job_id: str) -> dict:
     try:
-        result = asyncio.run(_run_scribe_batch(job_id))
-        asyncio.run(_complete(job_id, result))
-        structlog.contextvars.clear_contextvars()
+        result = run_async(_run_scribe_batch(job_id))
+        run_async(_complete(job_id, result))
         return {"ok": True}
     except Exception as exc:  # noqa: BLE001
         tb = traceback.format_exc()
         final = int(getattr(self.request, "retries", 0)) >= int(getattr(self, "max_retries", 5))
-        asyncio.run(_fail(job_id, str(exc), tb, final))
-        structlog.contextvars.clear_contextvars()
+        run_async(_fail(job_id, str(exc), tb, final))
         raise
+    finally:
+        structlog.contextvars.clear_contextvars()
 
 
 @celery_app.task(bind=True, autoretry_for=(TimeoutError, ConnectionError), retry_backoff=True, retry_jitter=True, max_retries=3)
 def run_trends_scan(self: Task, job_id: str) -> dict:
     try:
-        result = asyncio.run(_run_trends_scan(job_id))
-        asyncio.run(_complete(job_id, result))
-        structlog.contextvars.clear_contextvars()
+        result = run_async(_run_trends_scan(job_id))
+        run_async(_complete(job_id, result))
         return {"ok": True}
     except Exception as exc:  # noqa: BLE001
         tb = traceback.format_exc()
         final = int(getattr(self.request, "retries", 0)) >= int(getattr(self, "max_retries", 3))
-        asyncio.run(_fail(job_id, str(exc), tb, final))
-        structlog.contextvars.clear_contextvars()
+        run_async(_fail(job_id, str(exc), tb, final))
         raise
+    finally:
+        structlog.contextvars.clear_contextvars()
 
 
 @celery_app.task(bind=True, autoretry_for=(TimeoutError, ConnectionError), retry_backoff=True, retry_jitter=True, max_retries=3)
 def run_published_monitor_scan(self: Task, job_id: str) -> dict:
     try:
-        result = asyncio.run(_run_published_monitor(job_id))
-        asyncio.run(_complete(job_id, result))
-        structlog.contextvars.clear_contextvars()
+        result = run_async(_run_published_monitor(job_id))
+        run_async(_complete(job_id, result))
         return {"ok": True}
     except Exception as exc:  # noqa: BLE001
         tb = traceback.format_exc()
         final = int(getattr(self.request, "retries", 0)) >= int(getattr(self, "max_retries", 3))
-        asyncio.run(_fail(job_id, str(exc), tb, final))
-        structlog.contextvars.clear_contextvars()
+        run_async(_fail(job_id, str(exc), tb, final))
         raise
+    finally:
+        structlog.contextvars.clear_contextvars()
 
 
 @celery_app.task(bind=True, autoretry_for=(TimeoutError, ConnectionError), retry_backoff=True, retry_jitter=True, max_retries=5)
 def run_msi_job(self: Task, job_id: str) -> dict:
     try:
-        result = asyncio.run(_run_msi_job(job_id))
-        asyncio.run(_complete(job_id, result))
-        structlog.contextvars.clear_contextvars()
+        result = run_async(_run_msi_job(job_id))
+        run_async(_complete(job_id, result))
         return {"ok": True}
     except Exception as exc:  # noqa: BLE001
         tb = traceback.format_exc()
         final = int(getattr(self.request, "retries", 0)) >= int(getattr(self, "max_retries", 5))
-        asyncio.run(_fail(job_id, str(exc), tb, final))
-        structlog.contextvars.clear_contextvars()
+        run_async(_fail(job_id, str(exc), tb, final))
         raise
+    finally:
+        structlog.contextvars.clear_contextvars()
 
 
 @celery_app.task(bind=True, autoretry_for=(TimeoutError, ConnectionError), retry_backoff=True, retry_jitter=True, max_retries=5)
 def run_simulator_job(self: Task, job_id: str) -> dict:
     try:
-        result = asyncio.run(_run_simulator_job(job_id))
-        asyncio.run(_complete(job_id, result))
-        structlog.contextvars.clear_contextvars()
+        result = run_async(_run_simulator_job(job_id))
+        run_async(_complete(job_id, result))
         return {"ok": True}
     except Exception as exc:  # noqa: BLE001
         tb = traceback.format_exc()
         final = int(getattr(self.request, "retries", 0)) >= int(getattr(self, "max_retries", 5))
-        asyncio.run(_fail(job_id, str(exc), tb, final))
-        structlog.contextvars.clear_contextvars()
+        run_async(_fail(job_id, str(exc), tb, final))
         raise
+    finally:
+        structlog.contextvars.clear_contextvars()
