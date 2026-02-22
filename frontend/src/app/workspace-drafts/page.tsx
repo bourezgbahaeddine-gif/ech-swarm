@@ -31,7 +31,7 @@ import { cn, formatRelativeTime, truncate } from '@/lib/utils';
 type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
 type RightTab = 'evidence' | 'quality' | 'seo' | 'social' | 'context' | 'msi' | 'simulator' | 'xray';
 type GuideType = 'welcome' | 'action';
-type ActionId = 'quick_check' | 'verify' | 'improve' | 'headlines' | 'seo' | 'social' | 'quality' | 'publish_gate' | 'apply' | 'save' | 'manual_draft' | 'audience_test';
+type ActionId = 'quick_check' | 'verify' | 'improve' | 'headlines' | 'seo' | 'links' | 'social' | 'quality' | 'publish_gate' | 'apply' | 'save' | 'manual_draft' | 'audience_test';
 
 const TABS: Array<{ id: RightTab; label: string }> = [
     { id: 'evidence', label: 'التحقق والأدلة' },
@@ -53,6 +53,7 @@ const ACTION_HELP: Record<ActionId, { title: string; description: string }> = {
     improve: { title: 'زر التحسين', description: 'يولد اقتراح تحسين كفرق (Diff) قابل للقبول أو الرفض.' },
     headlines: { title: 'زر العناوين', description: 'يولد 5 عناوين متنوعة للاستخدام التحريري.' },
     seo: { title: 'زر SEO', description: 'يولد عنوان SEO والوصف والكلمات المفتاحية والوسوم.' },
+    links: { title: 'زر الروابط', description: 'يقترح روابط داخلية وخارجية موثوقة يمكن إدراجها في المسودة بنقرة واحدة.' },
     social: { title: 'زر السوشيال', description: 'ينشئ نسخ Facebook وX وPush والتنبيه العاجل.' },
     quality: { title: 'زر الجودة', description: 'يقيم وضوح وبنية وحياد النص مع توصيات عملية.' },
     publish_gate: { title: 'زر بوابة النشر', description: 'يفحص الجاهزية النهائية ويمنع النشر عند وجود موانع.' },
@@ -153,6 +154,9 @@ function WorkspaceDraftsPageContent() {
     const [claims, setClaims] = useState<any[]>([]);
     const [quality, setQuality] = useState<any | null>(null);
     const [seoPack, setSeoPack] = useState<any | null>(null);
+    const [linkMode, setLinkMode] = useState<'internal' | 'external' | 'mixed'>('mixed');
+    const [linkRunId, setLinkRunId] = useState<string | null>(null);
+    const [linkSuggestions, setLinkSuggestions] = useState<Array<any>>([]);
     const [social, setSocial] = useState<any | null>(null);
     const [simResult, setSimResult] = useState<any | null>(null);
     const [readiness, setReadiness] = useState<any | null>(null);
@@ -216,6 +220,11 @@ function WorkspaceDraftsPageContent() {
         queryKey: ['smart-editor-constitution-tips'],
         queryFn: () => constitutionApi.tips(),
     });
+    const { data: linkHistoryData } = useQuery({
+        queryKey: ['smart-editor-links-history', workId],
+        queryFn: () => editorialApi.linkSuggestionsHistory(workId!, 8),
+        enabled: !!workId,
+    });
 
     const context = contextData?.data;
     const versions = versionsData?.data || [];
@@ -232,6 +241,7 @@ function WorkspaceDraftsPageContent() {
     });
     const msiTopDaily = msiTopDailyData?.data?.items || [];
     const msiTopWeekly = msiTopWeeklyData?.data?.items || [];
+    const linkHistory = linkHistoryData?.data?.items || [];
     const msiContextText = useMemo(
         () =>
             `${context?.draft?.title || ''} ${context?.article?.title_ar || ''} ${context?.article?.original_title || ''}`,
@@ -332,6 +342,50 @@ function WorkspaceDraftsPageContent() {
     const runVerifier = useMutation({ mutationFn: () => editorialApi.verifyClaims(workId!, 0.7), onSuccess: (r) => { setClaims(r.data?.claims || []); setActiveTab('evidence'); } });
     const runQuality = useMutation({ mutationFn: () => editorialApi.qualityScore(workId!), onSuccess: (r) => { setQuality(r.data); setActiveTab('quality'); } });
     const runSeo = useMutation({ mutationFn: () => editorialApi.aiSeoSuggestion(workId!), onSuccess: (r) => { setSeoPack(r.data); setActiveTab('seo'); } });
+    const runLinks = useMutation({
+        mutationFn: () => editorialApi.aiLinkSuggestions(workId!, { mode: linkMode, target_count: 6 }),
+        onSuccess: (r) => {
+            setLinkRunId(r.data?.run_id || null);
+            setLinkSuggestions((r.data?.items || []).map((x: any) => ({ ...x, selected: true })));
+            setActiveTab('seo');
+            queryClient.invalidateQueries({ queryKey: ['smart-editor-links-history', workId] });
+        },
+        onError: (e: any) => setErr(e?.response?.data?.detail || 'تعذر توليد اقتراحات الروابط'),
+    });
+    const validateLinks = useMutation({
+        mutationFn: () => {
+            if (!linkRunId) throw new Error('شغّل اقتراح الروابط أولاً');
+            return editorialApi.validateLinkSuggestions(workId!, linkRunId);
+        },
+        onSuccess: (r) => {
+            const data = r.data || {};
+            setOk(`فحص الروابط: ${data.alive || 0} صالح، ${data.dead || 0} غير صالح.`);
+            queryClient.invalidateQueries({ queryKey: ['smart-editor-links-history', workId] });
+        },
+        onError: (e: any) => setErr(e?.response?.data?.detail || e?.message || 'تعذر فحص الروابط'),
+    });
+    const applyLinks = useMutation({
+        mutationFn: () => {
+            if (!linkRunId) throw new Error('شغّل اقتراح الروابط أولاً');
+            const selectedIds = (linkSuggestions || []).filter((x: any) => x.selected !== false).map((x: any) => Number(x.id));
+            return editorialApi.applyLinkSuggestions(workId!, { run_id: linkRunId, based_on_version: baseVersion, item_ids: selectedIds });
+        },
+        onSuccess: (r) => {
+            const d = r.data?.draft;
+            if (d && editor) {
+                setTitle(cleanText(d.title || ''));
+                setBodyHtml(d.body || '');
+                editor.commands.setContent(d.body || '<p></p>', { emitUpdate: false });
+                setBaseVersion(d.version);
+                setSaveState('saved');
+            }
+            setOk(`تم إدراج ${r.data?.applied_links || 0} رابط في المسودة.`);
+            queryClient.invalidateQueries({ queryKey: ['smart-editor-context', workId] });
+            queryClient.invalidateQueries({ queryKey: ['smart-editor-versions', workId] });
+            queryClient.invalidateQueries({ queryKey: ['smart-editor-links-history', workId] });
+        },
+        onError: (e: any) => setErr(e?.response?.data?.detail || e?.message || 'تعذر تطبيق الروابط'),
+    });
     const runSocial = useMutation({ mutationFn: () => editorialApi.aiSocialVariants(workId!), onSuccess: (r) => { setSocial(r.data?.variants || null); setActiveTab('social'); } });
     const runHeadlines = useMutation({ mutationFn: () => editorialApi.aiHeadlineSuggestion(workId!, 5), onSuccess: (r) => { setHeadlines(r.data?.headlines || []); setActiveTab('seo'); } });
     const runReadiness = useMutation({ mutationFn: () => editorialApi.publishReadiness(workId!), onSuccess: (r) => { setReadiness(r.data); setActiveTab('quality'); } });
@@ -631,6 +685,7 @@ function WorkspaceDraftsPageContent() {
                     <button onClick={() => runWithGuide('improve', () => rewrite.mutate())} className="px-3 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-2"><Sparkles className="w-4 h-4" />تحسين</button>
                     <button onClick={() => runWithGuide('headlines', () => runHeadlines.mutate())} className="px-3 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-200 text-xs">عناوين</button>
                     <button onClick={() => runWithGuide('seo', () => runSeo.mutate())} className="px-3 py-2 rounded-xl bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-200 text-xs">SEO</button>
+                    <button onClick={() => runWithGuide('links', () => runLinks.mutate())} className="px-3 py-2 rounded-xl bg-teal-500/20 border border-teal-500/30 text-teal-200 text-xs">روابط</button>
                     <button onClick={() => runWithGuide('social', () => runSocial.mutate())} className="px-3 py-2 rounded-xl bg-sky-500/20 border border-sky-500/30 text-sky-200 text-xs">سوشيال</button>
                     <button onClick={() => runWithGuide('quality', () => runQuality.mutate())} className="px-3 py-2 rounded-xl bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs">جودة</button>
                     <button onClick={() => runWithGuide('audience_test', () => runAudienceSimulation.mutate())} className="px-3 py-2 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-100 text-xs">
@@ -796,6 +851,85 @@ function WorkspaceDraftsPageContent() {
                                     </div>
                                 </div>
                             ) : <Empty text="اضغط زر «SEO» لاستخراج المقترحات." />}
+                            <div className="mt-3 rounded-xl border border-teal-500/30 bg-teal-500/10 p-2 space-y-2 text-xs text-teal-100">
+                                <p className="font-semibold">Link Intelligence (داخلي + خارجي)</p>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <select
+                                        value={linkMode}
+                                        onChange={(e) => setLinkMode(e.target.value as 'internal' | 'external' | 'mixed')}
+                                        className="rounded-lg bg-black/30 border border-white/20 px-2 py-1 text-xs text-white"
+                                    >
+                                        <option value="mixed">مختلط</option>
+                                        <option value="internal">داخلي فقط</option>
+                                        <option value="external">خارجي فقط</option>
+                                    </select>
+                                    <button
+                                        onClick={() => runLinks.mutate()}
+                                        disabled={runLinks.isPending}
+                                        className="px-2 py-1 rounded-lg bg-teal-500/30 border border-teal-400/40 text-teal-50 disabled:opacity-50"
+                                    >
+                                        {runLinks.isPending ? 'جاري التوليد...' : 'توليد روابط'}
+                                    </button>
+                                    <button
+                                        onClick={() => validateLinks.mutate()}
+                                        disabled={!linkRunId || validateLinks.isPending}
+                                        className="px-2 py-1 rounded-lg bg-white/10 border border-white/20 text-gray-200 disabled:opacity-50"
+                                    >
+                                        فحص الروابط
+                                    </button>
+                                    <button
+                                        onClick={() => applyLinks.mutate()}
+                                        disabled={!linkRunId || applyLinks.isPending || !linkSuggestions.length}
+                                        className="px-2 py-1 rounded-lg bg-emerald-500/30 border border-emerald-400/40 text-emerald-50 disabled:opacity-50"
+                                    >
+                                        تطبيق المحدد
+                                    </button>
+                                </div>
+                                {linkRunId ? <p className="text-[11px] text-teal-50/80">Run ID: {linkRunId}</p> : null}
+
+                                {!!linkSuggestions.length && (
+                                    <div className="space-y-1 max-h-64 overflow-auto">
+                                        {linkSuggestions.map((item: any) => (
+                                            <label key={`lnk-${item.id}`} className="block rounded-lg border border-white/15 bg-black/20 p-2 cursor-pointer">
+                                                <div className="flex items-start gap-2">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={item.selected !== false}
+                                                        onChange={(e) =>
+                                                            setLinkSuggestions((prev) =>
+                                                                prev.map((x: any) =>
+                                                                    x.id === item.id ? { ...x, selected: e.target.checked } : x
+                                                                )
+                                                            )
+                                                        }
+                                                    />
+                                                    <div className="min-w-0 flex-1">
+                                                        <p className="text-teal-100 line-clamp-1">{cleanText(item.title || '')}</p>
+                                                        <p className="text-gray-300 line-clamp-1">{cleanText(item.anchor_text || '')}</p>
+                                                        <p className="text-[11px] text-gray-400 line-clamp-1">{item.url}</p>
+                                                        <p className="text-[11px] text-gray-400">
+                                                            {item.link_type === 'external' ? 'خارجي' : 'داخلي'} •
+                                                            Score {Number(item.score || 0).toFixed(2)} •
+                                                            ثقة {Math.round(Number(item.confidence || 0) * 100)}%
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </label>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {!!linkHistory.length && (
+                                    <div className="rounded-lg border border-white/10 bg-black/20 p-2">
+                                        <p className="text-gray-300 mb-1">آخر تشغيلات الروابط</p>
+                                        {(linkHistory || []).slice(0, 3).map((run: any) => (
+                                            <p key={`hist-${run.run_id}`} className="text-[11px] text-gray-400">
+                                                {run.mode} • {run.status} • {run.run_id}
+                                            </p>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
                             {!!headlines.length && <div className="mt-2 rounded-xl border border-white/10 bg-black/20 p-2 text-xs text-gray-200"><p className="text-gray-400 mb-1">العناوين المقترحة</p>{headlines.map((h: any, i: number) => <p key={`${h?.label || 'h'}-${i}`}>- {cleanText(h?.headline || '')}</p>)}</div>}
                         </Panel>
                     )}

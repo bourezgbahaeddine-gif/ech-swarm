@@ -238,6 +238,31 @@ export interface SmartEditorContext {
     };
 }
 
+export type LinkSuggestionMode = 'internal' | 'external' | 'mixed';
+
+export interface LinkSuggestionItem {
+    id: number;
+    link_type: 'internal' | 'external' | string;
+    url: string;
+    title: string;
+    anchor_text: string;
+    placement_hint: string | null;
+    reason: string | null;
+    score: number;
+    confidence: number;
+    rel_attrs: string | null;
+    status: string;
+    metadata: Record<string, unknown>;
+}
+
+export interface LinkSuggestionRun {
+    run_id: string;
+    mode: LinkSuggestionMode | string;
+    work_id: string;
+    source_counts: Record<string, unknown>;
+    items: LinkSuggestionItem[];
+}
+
 export interface ChiefPendingItem {
     id: number;
     title_ar: string | null;
@@ -379,6 +404,17 @@ export const editorialApi = {
         api.post(`/editorial/workspace/drafts/${workId}/ai/headlines`, { count }),
     aiSeoSuggestion: (workId: string) =>
         api.post(`/editorial/workspace/drafts/${workId}/ai/seo`),
+    aiLinkSuggestions: (workId: string, data: { mode?: LinkSuggestionMode; target_count?: number }) =>
+        api.post<LinkSuggestionRun>(`/editorial/workspace/drafts/${workId}/ai/links/suggest`, data),
+    validateLinkSuggestions: (workId: string, runId: string) =>
+        api.post(`/editorial/workspace/drafts/${workId}/ai/links/validate`, { run_id: runId }),
+    applyLinkSuggestions: (workId: string, data: { run_id: string; based_on_version: number; item_ids?: number[] }) =>
+        api.post(`/editorial/workspace/drafts/${workId}/ai/links/apply`, data),
+    linkSuggestionsHistory: (workId: string, limit = 10) =>
+        api.get<{ work_id: string; items: Array<{ run_id: string; mode: string; status: string; created_at: string; source_counts: Record<string, unknown>; items: LinkSuggestionItem[] }> }>(
+            `/editorial/workspace/drafts/${workId}/ai/links/history`,
+            { params: { limit } },
+        ),
     aiSocialVariants: (workId: string) =>
         api.post(`/editorial/workspace/drafts/${workId}/ai/social`),
     applyAiSuggestion: (workId: string, data: {

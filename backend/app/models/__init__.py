@@ -49,6 +49,13 @@ from app.models.competitor_xray import (
     CompetitorXrayItem,
     CompetitorXrayEvent,
 )
+from app.models.link_intelligence import (
+    LinkIndexItem,
+    TrustedDomain,
+    LinkRecommendationRun,
+    LinkRecommendationItem,
+    LinkClickEvent,
+)
 
 __all__ = [
     "Source", "Article", "EditorDecision", "EditorialDraft", "FeedbackLog",
@@ -93,4 +100,9 @@ __all__ = [
     "CompetitorXrayRun",
     "CompetitorXrayItem",
     "CompetitorXrayEvent",
+    "LinkIndexItem",
+    "TrustedDomain",
+    "LinkRecommendationRun",
+    "LinkRecommendationItem",
+    "LinkClickEvent",
 ]

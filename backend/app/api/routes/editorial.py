@@ -33,6 +33,7 @@ from app.schemas import EditorDecisionCreate, EditorDecisionResponse
 from app.services.article_index_service import article_index_service
 from app.services.ai_service import ai_service
 from app.services.notification_service import notification_service
+from app.services.link_intelligence_service import link_intelligence_service
 from app.services.quality_gate_service import quality_gate_service
 from app.services.smart_editor_service import smart_editor_service
 from app.services.trend_signal_service import bump_keyword_interactions, extract_keywords
@@ -97,6 +98,21 @@ class HeadlineSuggestionRequest(BaseModel):
 
 class ClaimVerifyRequest(BaseModel):
     threshold: float = Field(default=0.70, ge=0.1, le=0.99)
+
+
+class LinkSuggestRequest(BaseModel):
+    mode: Literal["internal", "external", "mixed"] = "mixed"
+    target_count: int = Field(default=6, ge=1, le=12)
+
+
+class LinkValidateRequest(BaseModel):
+    run_id: str = Field(..., min_length=8, max_length=64)
+
+
+class LinkApplyRequest(BaseModel):
+    run_id: str = Field(..., min_length=8, max_length=64)
+    based_on_version: int = Field(..., ge=1)
+    item_ids: Optional[list[int]] = Field(default=None, max_length=20)
 
 
 class ChiefFinalDecisionRequest(BaseModel):
@@ -1479,6 +1495,91 @@ async def workspace_ai_seo(
         draft_html=latest.body or "",
     )
     return {"work_id": work_id, "base_version": latest.version, **result}
+
+
+@router.post("/workspace/drafts/{work_id}/ai/links/suggest")
+async def workspace_ai_links_suggest(
+    work_id: str,
+    payload: LinkSuggestRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(current_user, NEWSROOM_ROLES)
+    await _get_latest_draft_or_404(db, work_id)
+    try:
+        result = await link_intelligence_service.suggest_for_workspace(
+            db,
+            work_id=work_id,
+            mode=payload.mode,
+            target_count=payload.target_count,
+            actor=current_user,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return result
+
+
+@router.post("/workspace/drafts/{work_id}/ai/links/validate")
+async def workspace_ai_links_validate(
+    work_id: str,
+    payload: LinkValidateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(current_user, NEWSROOM_ROLES)
+    await _get_latest_draft_or_404(db, work_id)
+    return await link_intelligence_service.validate_run(db, payload.run_id)
+
+
+@router.post("/workspace/drafts/{work_id}/ai/links/apply")
+async def workspace_ai_links_apply(
+    work_id: str,
+    payload: LinkApplyRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(current_user, NEWSROOM_ROLES)
+    latest = await _get_latest_draft_or_404(db, work_id)
+    if payload.based_on_version != latest.version:
+        raise HTTPException(409, f"Draft version conflict. current={latest.version}")
+
+    items = await link_intelligence_service.get_run_items(db, payload.run_id, payload.item_ids)
+    if not items:
+        raise HTTPException(404, "لا توجد روابط صالحة للتطبيق في هذا التشغيل")
+
+    merged_html, applied_count = link_intelligence_service.apply_links_to_html(latest.body or "", items)
+    if applied_count <= 0:
+        raise HTTPException(400, "لا توجد روابط جديدة لإضافتها (قد تكون مضافة مسبقاً)")
+
+    new_draft = await _create_draft_version(
+        db,
+        latest=latest,
+        title=latest.title,
+        body=merged_html,
+        note=f"ai_apply:links:{payload.run_id}",
+        updated_by=current_user.full_name_ar,
+        change_origin="ai_suggestion",
+    )
+    await db.commit()
+    await link_intelligence_service.mark_applied(db, [x.id for x in items])
+    return {
+        "applied": True,
+        "applied_links": applied_count,
+        "run_id": payload.run_id,
+        "draft": _draft_to_dict(new_draft),
+    }
+
+
+@router.get("/workspace/drafts/{work_id}/ai/links/history")
+async def workspace_ai_links_history(
+    work_id: str,
+    limit: int = 10,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(current_user, NEWSROOM_ROLES)
+    await _get_latest_draft_or_404(db, work_id)
+    return {"work_id": work_id, "items": await link_intelligence_service.history(db, work_id, limit=max(1, min(limit, 30)))}
 
 
 @router.post("/workspace/drafts/{work_id}/ai/social")
