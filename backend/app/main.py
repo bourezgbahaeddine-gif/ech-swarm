@@ -19,10 +19,19 @@ from fastapi.responses import JSONResponse
 from app.core.config import get_settings
 from app.core.database import init_db
 from app.core.logging import setup_logging, get_logger
+from app.core.correlation import (
+    get_correlation_id,
+    get_request_id,
+    new_correlation_id,
+    new_request_id,
+    set_correlation_id,
+    set_request_id,
+)
 from app.services.cache_service import cache_service
 from app.schemas import HealthResponse
 from app.core.database import async_session
-from app.agents import scout_agent, router_agent, scribe_agent, trend_radar_agent, published_content_monitor_agent
+from app.agents import scout_agent
+import structlog
 
 # Import routers
 from app.api.routes.news import router as news_router
@@ -39,8 +48,10 @@ from app.api.routes.msi import router as msi_router
 from app.api.routes.simulator import router as simulator_router
 from app.api.routes.media_logger import router as media_logger_router
 from app.api.routes.competitor_xray import router as competitor_xray_router
+from app.api.routes.jobs import router as jobs_router
 from app.msi.scheduler import start_msi_scheduler, stop_msi_scheduler
 from app.services.competitor_xray_service import competitor_xray_service
+from app.services.job_queue_service import job_queue_service
 
 settings = get_settings()
 logger = get_logger("main")
@@ -57,32 +68,83 @@ _competitor_xray_task: asyncio.Task | None = None
 async def _run_pipeline_once():
     async with async_session() as db:
         scout_stats = await scout_agent.run(db)
-        router_stats = await router_agent.process_batch(db)
-        scribe_stats = None
+        router_job_id = None
+        allowed_router, depth_router, limit_router = await job_queue_service.check_backpressure("ai_router")
+        if allowed_router:
+            router_job = await job_queue_service.create_job(
+                db,
+                job_type="pipeline_router",
+                queue_name="ai_router",
+                payload={"source": "auto_pipeline"},
+                entity_id="auto_pipeline",
+                actor_username="system",
+                max_attempts=3,
+            )
+            await job_queue_service.enqueue_by_job_type(job_type="pipeline_router", job_id=str(router_job.id))
+            router_job_id = str(router_job.id)
+        else:
+            logger.warning("auto_pipeline_router_backpressure", depth=depth_router, limit=limit_router)
+        scribe_job_id = None
         if settings.auto_scribe_enabled:
-            scribe_stats = await scribe_agent.batch_write(db)
+            allowed_scribe, depth_scribe, limit_scribe = await job_queue_service.check_backpressure("ai_scribe")
+            if allowed_scribe:
+                scribe_job = await job_queue_service.create_job(
+                    db,
+                    job_type="pipeline_scribe",
+                    queue_name="ai_scribe",
+                    payload={"source": "auto_pipeline"},
+                    entity_id="auto_pipeline",
+                    actor_username="system",
+                    max_attempts=3,
+                )
+                await job_queue_service.enqueue_by_job_type(job_type="pipeline_scribe", job_id=str(scribe_job.id))
+                scribe_job_id = str(scribe_job.id)
+            else:
+                logger.warning("auto_pipeline_scribe_backpressure", depth=depth_scribe, limit=limit_scribe)
         logger.info(
             "auto_pipeline_tick_done",
             scout=scout_stats,
-            router=router_stats,
-            scribe=scribe_stats,
+            router_job_id=router_job_id,
+            scribe_job_id=scribe_job_id,
         )
 
 
 async def _run_trends_once():
-    alerts = await trend_radar_agent.scan()
-    logger.info("auto_trends_tick_done", alerts_count=len(alerts))
+    async with async_session() as db:
+        allowed, depth, limit_depth = await job_queue_service.check_backpressure("ai_trends")
+        if not allowed:
+            logger.warning("auto_trends_backpressure", depth=depth, limit=limit_depth)
+            return
+        job = await job_queue_service.create_job(
+            db,
+            job_type="trends_scan",
+            queue_name="ai_trends",
+            payload={"geo": "DZ", "category": "all", "limit": 12, "mode": "fast"},
+            entity_id="auto_trends",
+            actor_username="system",
+            max_attempts=3,
+        )
+        await job_queue_service.enqueue_by_job_type(job_type="trends_scan", job_id=str(job.id))
+    logger.info("auto_trends_tick_done", job_id=str(job.id))
 
 
 async def _run_published_monitor_once():
-    report = await published_content_monitor_agent.scan()
-    logger.info(
-        "auto_published_monitor_tick_done",
-        status=report.get("status", "unknown"),
-        total_items=report.get("total_items", 0),
-        weak_items=report.get("weak_items_count", 0),
-        average_score=report.get("average_score", 0),
-    )
+    async with async_session() as db:
+        allowed, depth, limit_depth = await job_queue_service.check_backpressure("ai_quality")
+        if not allowed:
+            logger.warning("auto_published_monitor_backpressure", depth=depth, limit=limit_depth)
+            return
+        job = await job_queue_service.create_job(
+            db,
+            job_type="published_monitor_scan",
+            queue_name="ai_quality",
+            payload={"feed_url": settings.published_monitor_feed_url, "limit": settings.published_monitor_limit},
+            entity_id="auto_published_monitor",
+            actor_username="system",
+            max_attempts=3,
+        )
+        await job_queue_service.enqueue_by_job_type(job_type="published_monitor_scan", job_id=str(job.id))
+    logger.info("auto_published_monitor_tick_done", job_id=str(job.id))
 
 
 async def _run_competitor_xray_once():
@@ -246,9 +308,16 @@ app.add_middleware(
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     """Log all incoming requests with timing."""
+    request_id = request.headers.get("x-request-id") or new_request_id()
+    correlation_id = request.headers.get("x-correlation-id") or new_correlation_id()
+    set_request_id(request_id)
+    set_correlation_id(correlation_id)
+    structlog.contextvars.bind_contextvars(request_id=request_id, correlation_id=correlation_id)
     start = time.time()
     response = await call_next(request)
     elapsed = round((time.time() - start) * 1000, 2)
+    response.headers["x-request-id"] = request_id
+    response.headers["x-correlation-id"] = correlation_id
 
     if request.url.path not in ["/health", "/docs", "/redoc", "/openapi.json"]:
         logger.info(
@@ -257,7 +326,12 @@ async def log_requests(request: Request, call_next):
             path=request.url.path,
             status=response.status_code,
             elapsed_ms=elapsed,
+            request_id=get_request_id(),
+            correlation_id=get_correlation_id(),
         )
+    structlog.contextvars.clear_contextvars()
+    set_request_id("")
+    set_correlation_id("")
 
     return response
 
@@ -301,6 +375,7 @@ app.include_router(msi_router, prefix="/api/v1")
 app.include_router(simulator_router, prefix="/api/v1")
 app.include_router(media_logger_router, prefix="/api/v1")
 app.include_router(competitor_xray_router, prefix="/api/v1")
+app.include_router(jobs_router, prefix="/api/v1")
 
 
 # ── Health Check ──

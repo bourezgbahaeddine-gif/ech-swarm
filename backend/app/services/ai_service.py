@@ -14,6 +14,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.schemas import AIAnalysisResult
+from app.services.provider_manager import provider_manager
 from app.services.settings_service import settings_service
 
 logger = get_logger("ai_service")
@@ -162,27 +163,37 @@ Output Format (JSON only):
 Content to rewrite:
 {content[:6000]}"""
 
-        groq = await self._get_groq()
-        if groq:
-            try:
+        async def _run(provider_name: str) -> dict:
+            if provider_name == "groq":
+                groq = await self._get_groq()
+                if not groq:
+                    raise RuntimeError("groq_not_configured")
                 response = groq.chat.completions.create(
-                    model="llama-3.1-70b-versatile",
+                    model="llama-3.3-70b-versatile",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.35,
                     max_tokens=4000,
                 )
                 result_text = response.choices[0].message.content.strip()
                 return self._parse_json_response(result_text)
-            except Exception as e:
-                logger.warning("groq_rewrite_failed", error=str(e), msg="Falling back to Gemini")
 
-        # Fallback to Gemini Flash
-        gemini = await self._get_gemini()
-        if gemini:
+            gemini = await self._get_gemini()
+            if not gemini:
+                raise RuntimeError("gemini_not_configured")
             model = gemini.GenerativeModel(self._resolve_gemini_model(settings.gemini_model_flash, use_pro_default=False))
             response = model.generate_content(prompt)
             result_text = response.text.strip()
             return self._parse_json_response(result_text)
+
+        async def _fallback(provider_name: str, exc: Exception) -> dict:
+            logger.warning("provider_rewrite_failed", provider=provider_name, error=str(exc), msg="retry_with_fallback_provider")
+            alt = "gemini" if provider_name != "gemini" else "groq"
+            return await _run(alt)
+
+        try:
+            return await provider_manager.call(run_fn=_run, fallback_fn=_fallback)
+        except Exception as e:  # noqa: BLE001
+            logger.error("rewrite_all_providers_failed", error=str(e))
 
         return {"headline": "", "body_html": content, "seo_title": "", "seo_description": "", "tags": []}
 
@@ -247,33 +258,45 @@ Articles:
             return ""
 
     async def generate_text(self, prompt: str) -> str:
-        """Generate text using Gemini Flash (generic helper)."""
-        gemini = await self._get_gemini()
-        if not gemini:
-            return ""
-        try:
+        """Generate text using provider manager with fallback."""
+        async def _run(provider_name: str) -> str:
+            if provider_name == "groq":
+                groq = await self._get_groq()
+                if not groq:
+                    raise RuntimeError("groq_not_configured")
+                response = groq.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    max_tokens=2500,
+                )
+                return (response.choices[0].message.content or "").strip()
+
+            gemini = await self._get_gemini()
+            if not gemini:
+                raise RuntimeError("gemini_not_configured")
             model = gemini.GenerativeModel(self._resolve_gemini_model(settings.gemini_model_flash, use_pro_default=False))
             response = model.generate_content(prompt)
             return response.text.strip()
+
+        async def _fallback(provider_name: str, exc: Exception) -> str:
+            logger.warning("provider_generate_text_failed", provider=provider_name, error=str(exc))
+            alt = "gemini" if provider_name != "gemini" else "groq"
+            return await _run(alt)
+
+        try:
+            return await provider_manager.call(run_fn=_run, fallback_fn=_fallback)
         except Exception as e:
             logger.error("generate_text_error", error=str(e))
             return ""
 
     async def generate_json(self, prompt: str) -> dict:
         """Generate structured JSON using Gemini and parse safely."""
-        gemini = await self._get_gemini()
-        if not gemini:
-            return {}
         try:
-            import json
-
-            model = gemini.GenerativeModel(self._resolve_gemini_model(settings.gemini_model_flash, use_pro_default=False))
-            response = model.generate_content(prompt)
-            text = response.text.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1]
-                text = text.rsplit("```", 1)[0]
-            return json.loads(text)
+            text = await self.generate_text(prompt)
+            if not text:
+                return {}
+            return self._parse_json_response(text)
         except Exception as e:
             logger.error("generate_json_error", error=str(e))
             return {}

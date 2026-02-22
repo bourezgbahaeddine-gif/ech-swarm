@@ -50,11 +50,17 @@ class Settings(BaseSettings):
     redis_port: int = 6379
     redis_password: str = ""
     redis_db: int = 0
+    redis_queue_db: int = 1
 
     @property
     def redis_url(self) -> str:
         auth = f":{self.redis_password}@" if self.redis_password else ""
         return f"redis://{auth}{self.redis_host}:{self.redis_port}/{self.redis_db}"
+
+    @property
+    def redis_queue_url(self) -> str:
+        auth = f":{self.redis_password}@" if self.redis_password else ""
+        return f"redis://{auth}{self.redis_host}:{self.redis_port}/{self.redis_queue_db}"
 
     # ── AI Services ──
     gemini_api_key: str = ""
@@ -100,6 +106,26 @@ class Settings(BaseSettings):
     msi_weekly_minute: int = 30
     msi_default_baseline_days: int = 90
     msi_default_report_limit: int = 30
+
+    # Queue / Workers
+    queue_enabled: bool = True
+    queue_default_name: str = "ai_default"
+    queue_backpressure_enabled: bool = True
+    queue_depth_limit_default: int = 300
+    queue_depth_limit_router: int = 200
+    queue_depth_limit_scribe: int = 120
+    queue_depth_limit_quality: int = 300
+    queue_depth_limit_simulator: int = 100
+    queue_depth_limit_msi: int = 80
+    queue_depth_limit_links: int = 120
+    queue_depth_limit_trends: int = 120
+
+    # Provider routing / circuit breaker
+    provider_health_window_sec: int = 180
+    provider_circuit_failures: int = 5
+    provider_circuit_open_sec: int = 60
+    provider_weight_gemini: float = 0.7
+    provider_weight_groq: float = 0.3
 
     # ── FreshRSS / RSS-Bridge ──
     scout_use_freshrss: bool = False

@@ -26,6 +26,54 @@ services:
     networks:
       - ech-network
 
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: ech-worker
+    command: >
+      celery -A app.queue.celery_app:celery_app worker
+      --loglevel=INFO
+      --queues=ai_router,ai_scribe,ai_quality,ai_simulator,ai_msi,ai_links,ai_trends
+      --concurrency=${CELERY_WORKER_CONCURRENCY:-4}
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      APP_ENV: production
+      APP_DEBUG: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ech-network
+
+  flower:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: ech-flower
+    command: celery -A app.queue.celery_app:celery_app flower --port=5555
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      APP_ENV: production
+      APP_DEBUG: "false"
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "5555:5555"
+    restart: unless-stopped
+    networks:
+      - ech-network
+
   frontend:
     build:
       context: ./frontend

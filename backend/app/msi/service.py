@@ -19,6 +19,7 @@ from app.msi.graph import MsiGraphRunner
 from app.msi.nodes import MsiGraphNodes
 from app.msi.profiles import list_profiles
 from app.msi.state import MSIState
+from app.services.job_queue_service import job_queue_service
 
 logger = get_logger("msi.service")
 settings = get_settings()
@@ -393,6 +394,7 @@ class MsiMonitorService:
         async with async_session() as db:
             items = await self.list_watchlist(db, enabled_only=True)
             triggered = 0
+            queued = 0
             for item in items:
                 if mode == "daily" and not item.run_daily:
                     continue
@@ -405,9 +407,22 @@ class MsiMonitorService:
                     mode=mode,
                     actor=None,
                 )
-                await self.start_run_task(run.run_id)
+                allowed, _, _ = await job_queue_service.check_backpressure("ai_msi")
+                if not allowed:
+                    continue
+                job = await job_queue_service.create_job(
+                    db,
+                    job_type="msi_run",
+                    queue_name="ai_msi",
+                    payload={"run_id": run.run_id, "source": "watchlist_scheduler"},
+                    entity_id=run.run_id,
+                    actor_username="msi_scheduler",
+                    max_attempts=5,
+                )
+                await job_queue_service.enqueue_by_job_type(job_type="msi_run", job_id=str(job.id))
                 triggered += 1
-            return {"mode": mode, "triggered": triggered}
+                queued += 1
+            return {"mode": mode, "triggered": triggered, "queued": queued}
 
     async def seed_default_watchlist(self, db: AsyncSession, actor: User | None = None) -> dict:
         created = 0

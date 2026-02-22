@@ -5,7 +5,7 @@ from typing import Any, Literal, Optional
 from uuid import uuid4
 
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +34,7 @@ from app.services.article_index_service import article_index_service
 from app.services.ai_service import ai_service
 from app.services.notification_service import notification_service
 from app.services.link_intelligence_service import link_intelligence_service
+from app.services.job_queue_service import job_queue_service
 from app.services.quality_gate_service import quality_gate_service
 from app.services.smart_editor_service import smart_editor_service
 from app.services.trend_signal_service import bump_keyword_interactions, extract_keywords
@@ -295,6 +296,60 @@ def _resolve_latest_draft_by_work_id_stmt(work_id: str):
         .order_by(EditorialDraft.version.desc(), EditorialDraft.updated_at.desc(), EditorialDraft.id.desc())
         .limit(1)
     )
+
+
+async def _enqueue_editorial_ai_job(
+    *,
+    db: AsyncSession,
+    request: Request,
+    current_user: User,
+    work_id: str,
+    job_type: str,
+    operation: str,
+    queue_name: str = "ai_quality",
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    allowed, depth, limit_depth = await job_queue_service.check_backpressure(queue_name)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Queue busy for {operation} ({depth}/{limit_depth}). Retry in a moment.",
+        )
+    job_payload = {"operation": operation, "work_id": work_id, **(payload or {})}
+    job = await job_queue_service.create_job(
+        db,
+        job_type=job_type,
+        queue_name=queue_name,
+        payload=job_payload,
+        entity_id=work_id,
+        request_id=request.headers.get("x-request-id"),
+        correlation_id=request.headers.get("x-correlation-id"),
+        actor_user_id=current_user.id,
+        actor_username=current_user.username,
+    )
+    try:
+        await job_queue_service.enqueue_by_job_type(job_type=job_type, job_id=str(job.id))
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "editorial_enqueue_failed",
+            work_id=work_id,
+            job_type=job_type,
+            error=str(exc),
+        )
+        await job_queue_service.mark_failed(db, job, f"queue_unavailable:{exc}")
+        return {
+            "job_id": str(job.id),
+            "status": "queue_unavailable",
+            "work_id": work_id,
+            "operation": operation,
+            "message": "Queue is temporarily unavailable. You can continue editing and retry.",
+        }
+    return {
+        "job_id": str(job.id),
+        "status": "queued",
+        "work_id": work_id,
+        "operation": operation,
+    }
 
 
 NEWSROOM_ROLES = {
@@ -1428,95 +1483,86 @@ async def workspace_draft_restore(
 async def workspace_ai_rewrite(
     work_id: str,
     payload: RewriteSuggestionRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     _require_roles(current_user, NEWSROOM_ROLES)
-    latest = await _get_latest_draft_or_404(db, work_id)
-    article_row = await db.execute(select(Article).where(Article.id == latest.article_id))
-    article = article_row.scalar_one_or_none()
-    if not article:
-        raise HTTPException(404, "Article not found")
-
-    source_text = "\n".join(
-        [
-            article.original_title or "",
-            article.summary or "",
-            article.original_content or "",
-        ]
-    ).strip()
-    suggestion = await smart_editor_service.rewrite_suggestion(
-        source_text=source_text,
-        draft_title=latest.title or article.title_ar or article.original_title,
-        draft_html=latest.body,
-        mode=payload.mode,
-        instruction=payload.instruction or "",
+    await _get_latest_draft_or_404(db, work_id)
+    return await _enqueue_editorial_ai_job(
+        db=db,
+        request=request,
+        current_user=current_user,
+        work_id=work_id,
+        job_type="editorial_rewrite",
+        operation="rewrite",
+        queue_name="ai_quality",
+        payload={"mode": payload.mode, "instruction": payload.instruction or ""},
     )
-    return {"work_id": work_id, "base_version": latest.version, "tool": "rewrite", "suggestion": suggestion}
 
 
 @router.post("/workspace/drafts/{work_id}/ai/headlines")
 async def workspace_ai_headlines(
     work_id: str,
     payload: HeadlineSuggestionRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     _require_roles(current_user, NEWSROOM_ROLES)
-    latest = await _get_latest_draft_or_404(db, work_id)
-    article_row = await db.execute(select(Article).where(Article.id == latest.article_id))
-    article = article_row.scalar_one_or_none()
-    if not article:
-        raise HTTPException(404, "Article not found")
-    source_text = "\n".join([article.original_title or "", article.summary or "", latest.body or ""]).strip()
-    suggestions = await smart_editor_service.headline_suggestions(
-        source_text=source_text,
-        draft_title=latest.title or article.title_ar or article.original_title,
+    await _get_latest_draft_or_404(db, work_id)
+    return await _enqueue_editorial_ai_job(
+        db=db,
+        request=request,
+        current_user=current_user,
+        work_id=work_id,
+        job_type="editorial_headlines",
+        operation="headlines",
+        queue_name="ai_quality",
+        payload={"count": payload.count},
     )
-    return {"work_id": work_id, "base_version": latest.version, "headlines": suggestions[: payload.count]}
 
 
 @router.post("/workspace/drafts/{work_id}/ai/seo")
 async def workspace_ai_seo(
     work_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     _require_roles(current_user, NEWSROOM_ROLES)
-    latest = await _get_latest_draft_or_404(db, work_id)
-    article_row = await db.execute(select(Article).where(Article.id == latest.article_id))
-    article = article_row.scalar_one_or_none()
-    if not article:
-        raise HTTPException(404, "Article not found")
-    source_text = "\n".join([article.original_title or "", article.summary or "", article.original_content or ""])
-    result = await smart_editor_service.seo_suggestions(
-        source_text=source_text,
-        draft_title=latest.title or article.title_ar or article.original_title,
-        draft_html=latest.body or "",
+    await _get_latest_draft_or_404(db, work_id)
+    return await _enqueue_editorial_ai_job(
+        db=db,
+        request=request,
+        current_user=current_user,
+        work_id=work_id,
+        job_type="editorial_seo",
+        operation="seo",
+        queue_name="ai_quality",
     )
-    return {"work_id": work_id, "base_version": latest.version, **result}
 
 
 @router.post("/workspace/drafts/{work_id}/ai/links/suggest")
 async def workspace_ai_links_suggest(
     work_id: str,
     payload: LinkSuggestRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     _require_roles(current_user, NEWSROOM_ROLES)
     await _get_latest_draft_or_404(db, work_id)
-    try:
-        result = await link_intelligence_service.suggest_for_workspace(
-            db,
-            work_id=work_id,
-            mode=payload.mode,
-            target_count=payload.target_count,
-            actor=current_user,
-        )
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    return result
+    return await _enqueue_editorial_ai_job(
+        db=db,
+        request=request,
+        current_user=current_user,
+        work_id=work_id,
+        job_type="editorial_links_suggest",
+        operation="links_suggest",
+        queue_name="ai_links",
+        payload={"mode": payload.mode, "target_count": payload.target_count},
+    )
 
 
 @router.post("/workspace/drafts/{work_id}/ai/links/validate")
@@ -1585,128 +1631,92 @@ async def workspace_ai_links_history(
 @router.post("/workspace/drafts/{work_id}/ai/social")
 async def workspace_ai_social(
     work_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     _require_roles(current_user, NEWSROOM_ROLES)
-    latest = await _get_latest_draft_or_404(db, work_id)
-    article_row = await db.execute(select(Article).where(Article.id == latest.article_id))
-    article = article_row.scalar_one_or_none()
-    if not article:
-        raise HTTPException(404, "Article not found")
-    source_text = "\n".join([article.original_title or "", article.summary or "", article.original_content or ""])
-    variants = await smart_editor_service.social_variants(
-        source_text=source_text,
-        draft_title=latest.title or article.title_ar or article.original_title,
-        draft_html=latest.body or "",
+    await _get_latest_draft_or_404(db, work_id)
+    return await _enqueue_editorial_ai_job(
+        db=db,
+        request=request,
+        current_user=current_user,
+        work_id=work_id,
+        job_type="editorial_social",
+        operation="social",
+        queue_name="ai_quality",
     )
-    await quality_gate_service.save_report(
-        db,
-        article_id=article.id,
-        stage="SOCIAL_VARIANTS",
-        passed=True,
-        score=100,
-        blocking_reasons=[],
-        actionable_fixes=[],
-        report_json={"variants": variants, "work_id": work_id, "version": latest.version},
-        created_by=current_user.full_name_ar,
-        upsert_by_stage=True,
-    )
-    await db.commit()
-    return {"work_id": work_id, "base_version": latest.version, "variants": variants}
 
 
 @router.post("/workspace/drafts/{work_id}/ai/apply")
 async def workspace_ai_apply(
     work_id: str,
     payload: DraftSuggestionApplyRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     _require_roles(current_user, NEWSROOM_ROLES)
     latest = await _get_latest_draft_or_404(db, work_id)
-    if payload.based_on_version != latest.version:
-        raise HTTPException(409, f"Draft version conflict. current={latest.version}")
-
-    new_draft = await _create_draft_version(
-        db,
-        latest=latest,
-        title=payload.title,
-        body=payload.body,
-        note=payload.note or f"ai_apply:{payload.suggestion_tool}",
-        updated_by=current_user.full_name_ar,
-        change_origin="ai_suggestion",
+    return await _enqueue_editorial_ai_job(
+        db=db,
+        request=request,
+        current_user=current_user,
+        work_id=work_id,
+        job_type="editorial_ai_apply",
+        operation="apply_suggestion",
+        queue_name="ai_quality",
+        payload={
+            "based_on_version": payload.based_on_version,
+            "title": payload.title,
+            "body": payload.body,
+            "note": payload.note,
+            "suggestion_tool": payload.suggestion_tool,
+            "current_version": latest.version,
+        },
     )
-    await db.commit()
-    return {"applied": True, "draft": _draft_to_dict(new_draft)}
 
 
 @router.post("/workspace/drafts/{work_id}/verify/claims")
 async def workspace_verify_claims(
     work_id: str,
     payload: ClaimVerifyRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     _require_roles(current_user, NEWSROOM_ROLES)
-    latest = await _get_latest_draft_or_404(db, work_id)
-    article_row = await db.execute(select(Article).where(Article.id == latest.article_id))
-    article = article_row.scalar_one_or_none()
-    if not article:
-        raise HTTPException(404, "Article not found")
-    report = smart_editor_service.fact_check_report(
-        text=smart_editor_service.html_to_text(latest.body),
-        source_url=article.original_url,
-        threshold=payload.threshold,
+    await _get_latest_draft_or_404(db, work_id)
+    return await _enqueue_editorial_ai_job(
+        db=db,
+        request=request,
+        current_user=current_user,
+        work_id=work_id,
+        job_type="editorial_claims",
+        operation="claims",
+        queue_name="ai_quality",
+        payload={"threshold": payload.threshold},
     )
-    await quality_gate_service.save_report(
-        db,
-        article_id=article.id,
-        stage="FACT_CHECK",
-        passed=bool(report["passed"]),
-        score=report.get("score"),
-        blocking_reasons=report.get("blocking_reasons", []),
-        actionable_fixes=report.get("actionable_fixes", []),
-        report_json=report,
-        created_by=current_user.full_name_ar,
-        upsert_by_stage=True,
-    )
-    await db.commit()
-    return report
 
 
 @router.post("/workspace/drafts/{work_id}/quality/score")
 async def workspace_quality_score(
     work_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     _require_roles(current_user, NEWSROOM_ROLES)
-    latest = await _get_latest_draft_or_404(db, work_id)
-    article_row = await db.execute(select(Article).where(Article.id == latest.article_id))
-    article = article_row.scalar_one_or_none()
-    if not article:
-        raise HTTPException(404, "Article not found")
-    source_text = "\n".join([article.original_title or "", article.summary or "", article.original_content or ""])
-    report = smart_editor_service.quality_score(
-        title=latest.title or article.title_ar or article.original_title,
-        html=latest.body or "",
-        source_text=source_text,
+    await _get_latest_draft_or_404(db, work_id)
+    return await _enqueue_editorial_ai_job(
+        db=db,
+        request=request,
+        current_user=current_user,
+        work_id=work_id,
+        job_type="editorial_quality",
+        operation="quality",
+        queue_name="ai_quality",
     )
-    await quality_gate_service.save_report(
-        db,
-        article_id=article.id,
-        stage="QUALITY_SCORE",
-        passed=bool(report["passed"]),
-        score=report.get("score"),
-        blocking_reasons=report.get("blocking_reasons", []),
-        actionable_fixes=report.get("actionable_fixes", []),
-        report_json=report,
-        created_by=current_user.full_name_ar,
-        upsert_by_stage=True,
-    )
-    await db.commit()
-    return report
 
 
 @router.get("/workspace/drafts/{work_id}/publish-readiness")

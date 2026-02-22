@@ -30,6 +30,7 @@ class MsiRunResponse(BaseModel):
     mode: str
     start: datetime
     end: datetime
+    job_id: str | None = None
 
 
 class MsiRunStatusResponse(BaseModel):

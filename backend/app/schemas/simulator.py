@@ -24,6 +24,7 @@ class SimRunResponse(BaseModel):
     platform: str
     mode: str
     headline: str
+    job_id: str | None = None
 
 
 class SimRunStatusResponse(BaseModel):
@@ -75,4 +76,3 @@ class SimHistoryItem(BaseModel):
 class SimHistoryResponse(BaseModel):
     items: list[SimHistoryItem]
     total: int
-

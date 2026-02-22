@@ -6,7 +6,7 @@ import asyncio
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +22,7 @@ from app.schemas.simulator import (
     SimRunResponse,
     SimRunStatusResponse,
 )
+from app.services.job_queue_service import job_queue_service
 from app.simulator.service import audience_simulation_service
 
 router = APIRouter(prefix="/sim", tags=["Audience Simulator"])
@@ -49,6 +50,7 @@ def _require_view(user: User) -> None:
 @router.post("/run", response_model=SimRunResponse, status_code=status.HTTP_202_ACCEPTED)
 async def run_simulation(
     payload: SimRunRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -73,14 +75,46 @@ async def run_simulation(
                 detail="جداول محاكي الجمهور غير موجودة. نفّذ migration: alembic upgrade head",
             ) from exc
         raise
-    if run.status in {"queued", "running"}:
-        await audience_simulation_service.start_run_task(run.run_id)
+    allowed, depth, limit_depth = await job_queue_service.check_backpressure("ai_simulator")
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Simulator queue is busy ({depth}/{limit_depth}). Retry in a moment.",
+        )
+    job = await job_queue_service.create_job(
+        db,
+        job_type="simulator_run",
+        queue_name="ai_simulator",
+        payload={"run_id": run.run_id},
+        entity_id=run.run_id,
+        request_id=request.headers.get("x-request-id"),
+        correlation_id=request.headers.get("x-correlation-id"),
+        actor_user_id=current_user.id,
+        actor_username=current_user.username,
+    )
+    try:
+        await job_queue_service.enqueue_by_job_type(job_type="simulator_run", job_id=str(job.id))
+    except Exception as exc:  # noqa: BLE001
+        await job_queue_service.mark_failed(db, job, f"queue_unavailable:{exc}")
+        run.status = "failed"
+        run.error = f"queue_unavailable:{exc}"[:2000]
+        run.finished_at = datetime.utcnow()
+        await db.commit()
+        return SimRunResponse(
+            run_id=run.run_id,
+            status="failed",
+            platform=run.platform,
+            mode=run.mode,
+            headline=run.headline,
+            job_id=str(job.id),
+        )
     return SimRunResponse(
         run_id=run.run_id,
         status=run.status,
         platform=run.platform,
         mode=run.mode,
         headline=run.headline,
+        job_id=str(job.id),
     )
 
 

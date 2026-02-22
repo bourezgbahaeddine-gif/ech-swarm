@@ -56,6 +56,7 @@ from app.models.link_intelligence import (
     LinkRecommendationItem,
     LinkClickEvent,
 )
+from app.models.job_queue import JobRun, DeadLetterJob
 
 __all__ = [
     "Source", "Article", "EditorDecision", "EditorialDraft", "FeedbackLog",
@@ -105,4 +106,6 @@ __all__ = [
     "LinkRecommendationRun",
     "LinkRecommendationItem",
     "LinkClickEvent",
+    "JobRun",
+    "DeadLetterJob",
 ]

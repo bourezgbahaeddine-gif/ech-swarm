@@ -3,13 +3,12 @@ Echorouk AI Swarm - Dashboard & Agent Control API.
 """
 
 from datetime import datetime, timedelta
-import asyncio
 
-from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, func, and_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db, async_session
+from app.core.database import get_db
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.models import Article, Source, PipelineRun, FailedJob, NewsStatus, UrgencyLevel
@@ -17,7 +16,8 @@ from app.models.user import User, UserRole
 from app.api.routes.auth import get_current_user
 from app.schemas import DashboardStats, PipelineRunResponse
 from app.services.cache_service import cache_service
-from app.agents import scout_agent, router_agent, scribe_agent, trend_radar_agent, published_content_monitor_agent
+from app.agents import published_content_monitor_agent
+from app.services.job_queue_service import job_queue_service
 
 logger = get_logger("api.dashboard")
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
@@ -148,39 +148,47 @@ async def get_failed_jobs(
     ]
 
 
-async def _run_scout_pipeline():
-    async with async_session() as db:
-        stats = await scout_agent.run(db)
-        await router_agent.process_batch(db)
-        logger.info("scout_pipeline_completed", stats=stats)
+async def _enqueue_dashboard_job(
+    *,
+    db: AsyncSession,
+    request: Request,
+    current_user: User,
+    job_type: str,
+    queue_name: str,
+    payload: dict | None = None,
+    entity_id: str | None = None,
+) -> dict:
+    allowed, depth, limit_depth = await job_queue_service.check_backpressure(queue_name)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Queue busy for {job_type} ({depth}/{limit_depth}). Retry in a moment.",
+        )
 
-
-async def _run_router_pipeline():
-    async with async_session() as db:
-        stats = await router_agent.process_batch(db)
-        logger.info("router_pipeline_completed", stats=stats)
-
-
-async def _run_scribe_pipeline():
-    async with async_session() as db:
-        stats = await scribe_agent.batch_write(db)
-        logger.info("scribe_pipeline_completed", stats=stats)
-
-
-async def _run_trends_scan(geo: str, category: str, limit: int, mode: str):
-    alerts = await trend_radar_agent.scan(geo=geo, category=category, limit=limit, mode=mode)
-    logger.info("trends_scan_completed", alerts_count=len(alerts), geo=geo, category=category, limit=limit, mode=mode)
-
-
-async def _run_published_monitor_scan(feed_url: str | None, limit: int | None):
-    report = await published_content_monitor_agent.scan(feed_url=feed_url, limit=limit)
-    logger.info(
-        "published_monitor_scan_triggered",
-        status=report.get("status", "unknown"),
-        total_items=report.get("total_items", 0),
-        weak_items=report.get("weak_items_count", 0),
-        average_score=report.get("average_score", 0),
+    job = await job_queue_service.create_job(
+        db,
+        job_type=job_type,
+        queue_name=queue_name,
+        payload=payload or {},
+        entity_id=entity_id,
+        request_id=request.headers.get("x-request-id"),
+        correlation_id=request.headers.get("x-correlation-id"),
+        actor_user_id=current_user.id,
+        actor_username=current_user.username,
+        max_attempts=3,
     )
+    try:
+        await job_queue_service.enqueue_by_job_type(job_type=job_type, job_id=str(job.id))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("dashboard_enqueue_failed", job_type=job_type, error=str(exc))
+        await job_queue_service.mark_failed(db, job, f"queue_unavailable:{exc}")
+        return {
+            "job_id": str(job.id),
+            "status": "queue_unavailable",
+            "job_type": job_type,
+            "message": "Queue unavailable. Retry in a moment.",
+        }
+    return {"job_id": str(job.id), "status": "queued", "job_type": job_type}
 
 
 def _assert_agent_control_permission(user: User) -> None:
@@ -212,76 +220,104 @@ def _assert_trend_permission(user: User) -> None:
 
 @router.post("/agents/scout/run")
 async def trigger_scout(
-    background_tasks: BackgroundTasks,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Queue Scout Agent run in background and return immediately."""
+    """Enqueue scout pipeline run."""
     _assert_newsroom_refresh_permission(current_user)
-    background_tasks.add_task(_run_scout_pipeline)
-    return {"message": "تمت جدولة تشغيل الكشاف."}
+    ticket = await _enqueue_dashboard_job(
+        db=db,
+        request=request,
+        current_user=current_user,
+        job_type="pipeline_scout",
+        queue_name="ai_router",
+        payload={"source": "dashboard"},
+        entity_id="dashboard_scout",
+    )
+    return {"message": "Scout queued.", **ticket}
 
 
 @router.post("/agents/router/run")
 async def trigger_router(
-    background_tasks: BackgroundTasks,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Queue Router Agent run in background and return immediately."""
+    """Enqueue router run."""
     _assert_newsroom_refresh_permission(current_user)
-    background_tasks.add_task(_run_router_pipeline)
-    return {"message": "تمت جدولة تشغيل الموجه."}
+    ticket = await _enqueue_dashboard_job(
+        db=db,
+        request=request,
+        current_user=current_user,
+        job_type="pipeline_router",
+        queue_name="ai_router",
+        payload={"source": "dashboard"},
+        entity_id="dashboard_router",
+    )
+    return {"message": "Router queued.", **ticket}
 
 
 @router.post("/agents/scribe/run")
 async def trigger_scribe(
-    background_tasks: BackgroundTasks,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Queue Scribe Agent run in background and return immediately."""
+    """Enqueue scribe run."""
     _assert_agent_control_permission(current_user)
-    background_tasks.add_task(_run_scribe_pipeline)
-    return {"message": "تمت جدولة تشغيل الكاتب."}
+    ticket = await _enqueue_dashboard_job(
+        db=db,
+        request=request,
+        current_user=current_user,
+        job_type="pipeline_scribe",
+        queue_name="ai_scribe",
+        payload={"source": "dashboard"},
+        entity_id="dashboard_scribe",
+    )
+    return {"message": "Scribe queued.", **ticket}
 
 
 @router.post("/agents/trends/scan")
 async def trigger_trend_scan(
-    background_tasks: BackgroundTasks,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
     geo: str = Query("DZ", min_length=2, max_length=16),
     category: str = Query("all", min_length=2, max_length=32),
     limit: int = Query(12, ge=1, le=30),
     mode: str = Query("fast", pattern="^(fast|deep)$"),
-    wait: bool = Query(False),
     current_user: User = Depends(get_current_user),
 ):
-    """Run Trend Radar scan (sync when wait=true, async otherwise)."""
+    """Enqueue trend scan run."""
     _assert_trend_permission(current_user)
-    if wait:
-        try:
-            alerts = await asyncio.wait_for(
-                trend_radar_agent.scan(geo=geo, category=category, limit=limit, mode=mode),
-                timeout=25,
-            )
-            return {"message": "اكتمل مسح التراند.", "alerts": [a.model_dump(mode="json") for a in alerts]}
-        except TimeoutError:
-            payload = await cache_service.get_json(f"trends:last:{geo.upper()}:{category.lower()}")
-            return {
-                "message": "انتهت مهلة المسح. تم إرجاع آخر نتائج مخزنة.",
-                "alerts": (payload or {}).get("alerts", []),
-            }
-
-    background_tasks.add_task(_run_trends_scan, geo.upper(), category.lower(), limit, mode.lower())
-    return {"message": "تمت جدولة مسح التراند."}
+    ticket = await _enqueue_dashboard_job(
+        db=db,
+        request=request,
+        current_user=current_user,
+        job_type="trends_scan",
+        queue_name="ai_trends",
+        payload={
+            "geo": geo.upper(),
+            "category": category.lower(),
+            "limit": limit,
+            "mode": mode.lower(),
+        },
+        entity_id=f"trend:{geo.upper()}:{category.lower()}",
+    )
+    return {"message": "Trends scan queued.", **ticket}
 
 
 @router.get("/agents/trends/latest")
 async def get_latest_trend_scan(
+    request: Request,
     geo: str = Query("DZ", min_length=2, max_length=16),
     category: str = Query("all", min_length=2, max_length=32),
     refresh_if_empty: bool = Query(True),
     limit: int = Query(12, ge=1, le=30),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Fetch latest cached trend scan payload for a geography/category."""
+    """Fetch latest cached trend payload (and optionally enqueue refresh)."""
     _assert_trend_permission(current_user)
     geo = geo.upper()
     category = category.lower()
@@ -290,53 +326,48 @@ async def get_latest_trend_scan(
         return payload
 
     if refresh_if_empty:
-        try:
-            alerts = await asyncio.wait_for(
-                trend_radar_agent.scan(geo=geo, category=category, limit=limit, mode="fast"),
-                timeout=15,
-            )
-            if alerts:
-                return {"alerts": [a.model_dump(mode="json") for a in alerts]}
-        except TimeoutError:
-            logger.warning("latest_trends_refresh_timeout", geo=geo, category=category)
-        except Exception as exc:
-            logger.warning("latest_trends_refresh_error", geo=geo, category=category, error=str(exc))
+        ticket = await _enqueue_dashboard_job(
+            db=db,
+            request=request,
+            current_user=current_user,
+            job_type="trends_scan",
+            queue_name="ai_trends",
+            payload={"geo": geo, "category": category, "limit": limit, "mode": "fast"},
+            entity_id=f"trend:{geo}:{category}",
+        )
+        return {"alerts": [], "status": "refresh_queued", **ticket}
 
     return payload or {"alerts": []}
 
 
 @router.post("/agents/published-monitor/run")
 async def trigger_published_monitor(
-    background_tasks: BackgroundTasks,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
     feed_url: str | None = Query(default=None),
     limit: int | None = Query(default=None, ge=1, le=30),
-    wait: bool = Query(False),
     current_user: User = Depends(get_current_user),
 ):
-    """Run published-content quality monitor (sync or async)."""
+    """Enqueue published-content quality monitor."""
     _assert_newsroom_refresh_permission(current_user)
-    if wait:
-        try:
-            report = await asyncio.wait_for(
-                published_content_monitor_agent.scan(feed_url=feed_url, limit=limit),
-                timeout=30,
-            )
-            return {"message": "اكتمل فحص المحتوى المنشور.", "report": report}
-        except TimeoutError:
-            payload = await published_content_monitor_agent.latest()
-            return {
-                "message": "انتهت مهلة الفحص. تم إرجاع آخر تقرير متوفر.",
-                "report": payload or {"status": "empty", "items": []},
-            }
-
-    background_tasks.add_task(_run_published_monitor_scan, feed_url, limit)
-    return {"message": "تمت جدولة فحص المحتوى المنشور."}
+    ticket = await _enqueue_dashboard_job(
+        db=db,
+        request=request,
+        current_user=current_user,
+        job_type="published_monitor_scan",
+        queue_name="ai_quality",
+        payload={"feed_url": feed_url, "limit": limit},
+        entity_id="published_monitor",
+    )
+    return {"message": "Published monitor queued.", **ticket}
 
 
 @router.get("/agents/published-monitor/latest")
 async def get_latest_published_monitor(
+    request: Request,
     refresh_if_empty: bool = Query(True),
     limit: int | None = Query(default=None, ge=1, le=30),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Get latest published-content quality report."""
@@ -344,8 +375,19 @@ async def get_latest_published_monitor(
     payload = await published_content_monitor_agent.latest()
     if payload:
         return payload
+
     if refresh_if_empty:
-        return await published_content_monitor_agent.scan(limit=limit)
+        ticket = await _enqueue_dashboard_job(
+            db=db,
+            request=request,
+            current_user=current_user,
+            job_type="published_monitor_scan",
+            queue_name="ai_quality",
+            payload={"feed_url": settings.published_monitor_feed_url, "limit": limit},
+            entity_id="published_monitor",
+        )
+        return {"status": "refresh_queued", "items": [], **ticket}
+
     return {"status": "empty", "items": []}
 
 
