@@ -228,6 +228,8 @@ class LinkIntelligenceService:
         upserted = 0
         feed_count = 0
         sitemap_count = 0
+        feed_ok = False
+        sitemap_ok = False
 
         def _upsert(url: str, title: str, summary: str | None, published_at: datetime | None) -> None:
             nonlocal upserted
@@ -293,6 +295,7 @@ class LinkIntelligenceService:
                             pub_dt = None
                     _upsert(link, title, summary, pub_dt)
                     feed_count += 1
+                feed_ok = True
         except Exception as exc:
             logger.warning("link_index_feed_sync_failed", error=str(exc))
 
@@ -312,13 +315,21 @@ class LinkIntelligenceService:
                         pub_dt = None
                 _upsert(link, title, None, pub_dt)
                 sitemap_count += 1
+            sitemap_ok = True
         except Exception as exc:
             logger.warning("link_index_news_sitemap_sync_failed", error=str(exc))
 
         await db.commit()
-        self._last_public_sync_at = now
+        if feed_ok or sitemap_ok or upserted > 0:
+            self._last_public_sync_at = now
         logger.info("link_index_public_sync_done", upserted=upserted, feed=feed_count, sitemap=sitemap_count)
-        return {"upserted": upserted, "feed": feed_count, "sitemap": sitemap_count}
+        return {
+            "upserted": upserted,
+            "feed": feed_count,
+            "sitemap": sitemap_count,
+            "feed_ok": 1 if feed_ok else 0,
+            "sitemap_ok": 1 if sitemap_ok else 0,
+        }
 
     async def _latest_draft(self, db: AsyncSession, work_id: str) -> EditorialDraft | None:
         row = await db.execute(
@@ -349,6 +360,22 @@ class LinkIntelligenceService:
 
         overlap_set = query_tokens.intersection(item_tokens)
         overlap_count = len(overlap_set)
+        if overlap_count == 0 and item.link_type == "internal":
+            # Relaxed Arabic matching for internal links to avoid empty results
+            title_norm = self._tokens(item.title or "")
+            loose_hits: set[str] = set()
+            for q in query_tokens:
+                if len(q) < 4:
+                    continue
+                for t in title_norm:
+                    if len(t) < 4:
+                        continue
+                    if q in t or t in q:
+                        loose_hits.add(q)
+                        break
+            if loose_hits:
+                overlap_set = loose_hits
+                overlap_count = len(loose_hits)
         if overlap_count == 0:
             return None
         if item.link_type == "external" and overlap_count < 2:
@@ -454,6 +481,23 @@ class LinkIntelligenceService:
         rows = await db.execute(stmt.order_by(desc(LinkIndexItem.published_at)).limit(2500))
         candidates = rows.scalars().all()
         trusted = await self._load_trusted_domains(db)
+        internal_candidates_total = len([c for c in candidates if c.link_type == "internal"])
+        external_candidates_total = len([c for c in candidates if c.link_type == "external"])
+
+        if mode in {"internal", "mixed"} and internal_candidates_total == 0:
+            retry_sync = await self.sync_internal_from_public_sources(db, force=True)
+            public_sync = {
+                **public_sync,
+                "retry_upserted": retry_sync.get("upserted", 0),
+                "retry_feed": retry_sync.get("feed", 0),
+                "retry_sitemap": retry_sync.get("sitemap", 0),
+                "retry_feed_ok": retry_sync.get("feed_ok", 0),
+                "retry_sitemap_ok": retry_sync.get("sitemap_ok", 0),
+            }
+            rows = await db.execute(stmt.order_by(desc(LinkIndexItem.published_at)).limit(2500))
+            candidates = rows.scalars().all()
+            internal_candidates_total = len([c for c in candidates if c.link_type == "internal"])
+            external_candidates_total = len([c for c in candidates if c.link_type == "external"])
 
         source_url = self._canonical_url(article.original_url) if article and article.original_url else ""
 
@@ -497,6 +541,40 @@ class LinkIntelligenceService:
                 backup = scored_internal[len(selected): len(selected) + missing]
                 selected.extend(backup)
 
+        # Hard fallback: never return empty internal suggestions when internal candidates exist
+        if mode in {"internal", "mixed"} and not [x for x in selected if x.item.link_type == "internal"]:
+            fallback_items = [c for c in candidates if c.link_type == "internal"]
+            fallback_items.sort(key=lambda x: x.published_at or datetime.min, reverse=True)
+            for fb in fallback_items[: min(8, target_count)]:
+                if self._arabic_ratio(fb.title or "") < 0.2:
+                    continue
+                selected.append(
+                    _ScoredItem(
+                        item=fb,
+                        score=0.2401,
+                        confidence=0.41,
+                        anchor_text=self._build_anchor(query_tokens, fb.title or ""),
+                        reason="مطابقة داخلية احتياطية من أحدث محتوى الشروق",
+                        placement_hint="بعد الفقرة التي تشرح خلفية الخبر",
+                        rel_attrs="internal",
+                    )
+                )
+                if len([x for x in selected if x.item.link_type == "internal"]) >= max(1, min(3, target_count)):
+                    break
+
+        # Deduplicate final list by URL and cap to target_count
+        final_selected: list[_ScoredItem] = []
+        seen_urls: set[str] = set()
+        for rec in selected:
+            url_key = rec.item.url
+            if url_key in seen_urls:
+                continue
+            seen_urls.add(url_key)
+            final_selected.append(rec)
+            if len(final_selected) >= target_count:
+                break
+        selected = final_selected
+
         run_id = f"LNK-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{abs(hash((work_id, datetime.utcnow().isoformat()))) % 10_000_000:07d}"
         run = LinkRecommendationRun(
             run_id=run_id,
@@ -506,6 +584,8 @@ class LinkIntelligenceService:
             mode=mode,
             status="completed",
             source_counts_json={
+                "internal_candidates_total": internal_candidates_total,
+                "external_candidates_total": external_candidates_total,
                 "internal_pool": len(scored_internal),
                 "external_pool": len(scored_external),
                 "internal_selected": len([x for x in selected if x.item.link_type == "internal"]),
