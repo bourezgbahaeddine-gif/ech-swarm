@@ -36,12 +36,29 @@ logger = get_logger("link_intelligence.service")
 
 LINK_MODES = {"internal", "external", "mixed"}
 INTERNAL_DOMAINS = {"echoroukonline.com", "www.echoroukonline.com"}
+AGGREGATOR_DOMAINS = {"news.google.com", "google.com", "news.yahoo.com"}
 ECHOROUK_FEED_URL = "https://www.echoroukonline.com/feed"
 ECHOROUK_NEWS_SITEMAP_URL = "https://www.echoroukonline.com/news-sitemap.xml"
 
 TRUSTED_EXTERNAL_MIN = 0.78
 INTERNAL_SCORE_THRESHOLD = 0.16
-EXTERNAL_SCORE_THRESHOLD = 0.34
+EXTERNAL_SCORE_THRESHOLD = 0.24
+
+DEFAULT_TRUSTED_EXTERNALS: dict[str, tuple[str, float, str]] = {
+    "aps.dz": ("وكالة الأنباء الجزائرية", 0.95, "official"),
+    "el-mouradia.dz": ("رئاسة الجمهورية", 0.98, "official"),
+    "premier-ministre.gov.dz": ("الوزارة الأولى", 0.97, "official"),
+    "mfa.gov.dz": ("وزارة الخارجية", 0.96, "official"),
+    "interieur.gov.dz": ("وزارة الداخلية", 0.96, "official"),
+    "meteo.dz": ("الديوان الوطني للأرصاد الجوية", 0.95, "official"),
+    "bank-of-algeria.dz": ("بنك الجزائر", 0.95, "official"),
+    "sonatrach.com": ("سوناطراك", 0.92, "institutional"),
+    "reuters.com": ("Reuters", 0.90, "wire"),
+    "apnews.com": ("Associated Press", 0.90, "wire"),
+    "bbc.com": ("BBC", 0.85, "standard"),
+    "france24.com": ("France 24", 0.80, "standard"),
+    "aljazeera.net": ("Al Jazeera", 0.84, "standard"),
+}
 
 
 @dataclass
@@ -59,6 +76,7 @@ class LinkIntelligenceService:
     def __init__(self) -> None:
         self._last_sync_at: datetime | None = None
         self._last_public_sync_at: datetime | None = None
+        self._resolve_cache: dict[str, tuple[str, datetime]] = {}
 
     @staticmethod
     def _now() -> datetime:
@@ -78,14 +96,35 @@ class LinkIntelligenceService:
     @staticmethod
     def _extract_domain(url: str) -> str:
         try:
-            return (urlparse(url).netloc or "").lower().strip()
+            return LinkIntelligenceService._normalize_domain(urlparse(url).netloc or "")
         except Exception:
             return ""
 
     @staticmethod
+    def _normalize_domain(domain: str) -> str:
+        value = (domain or "").lower().strip().strip(".")
+        if value.startswith("www."):
+            value = value[4:]
+        return value
+
+    @staticmethod
+    def _extract_source_domain(source_name: str | None) -> str:
+        if not source_name:
+            return ""
+        val = source_name.strip().lower()
+        # If source_name is plain domain
+        if re.match(r"^[a-z0-9.-]+\.[a-z]{2,}$", val):
+            return LinkIntelligenceService._normalize_domain(val)
+        # Extract domain token from free text
+        m = re.search(r"([a-z0-9-]+\.[a-z0-9.-]+\.[a-z]{2,}|[a-z0-9.-]+\.[a-z]{2,})", val)
+        if m:
+            return LinkIntelligenceService._normalize_domain(m.group(1))
+        return ""
+
+    @staticmethod
     def _is_internal(url: str) -> bool:
         domain = LinkIntelligenceService._extract_domain(url)
-        return domain in INTERNAL_DOMAINS or domain.endswith(".echoroukonline.com")
+        return domain in {LinkIntelligenceService._normalize_domain(x) for x in INTERNAL_DOMAINS} or domain.endswith(".echoroukonline.com")
 
     @staticmethod
     def _tokens(text: str) -> set[str]:
@@ -133,7 +172,49 @@ class LinkIntelligenceService:
     async def _load_trusted_domains(self, db: AsyncSession) -> dict[str, TrustedDomain]:
         rows = await db.execute(select(TrustedDomain).where(TrustedDomain.enabled.is_(True)))
         items = rows.scalars().all()
-        return {x.domain.lower(): x for x in items}
+        trusted_map = {self._normalize_domain(x.domain): x for x in items}
+        if trusted_map:
+            return trusted_map
+
+        # Safety fallback if migration seed wasn't applied in an environment
+        for domain, (name, trust, tier) in DEFAULT_TRUSTED_EXTERNALS.items():
+            item = TrustedDomain(
+                domain=domain,
+                display_name=name,
+                trust_score=trust,
+                tier=tier,
+                enabled=True,
+                notes="auto-seeded fallback",
+                created_by="link_intelligence_service",
+            )
+            db.add(item)
+        await db.commit()
+
+        rows = await db.execute(select(TrustedDomain).where(TrustedDomain.enabled.is_(True)))
+        items = rows.scalars().all()
+        return {self._normalize_domain(x.domain): x for x in items}
+
+    def _resolve_final_url(self, url: str, timeout: int = 5) -> str:
+        canon = self._canonical_url(url)
+        if not canon:
+            return ""
+        cached = self._resolve_cache.get(canon)
+        now = self._now()
+        if cached and (now - cached[1]) < timedelta(hours=8):
+            return cached[0]
+        try:
+            req = Request(canon, method="HEAD", headers={"User-Agent": "Mozilla/5.0 (LinkIntelligenceBot)"})
+            with urlopen(req, timeout=timeout) as resp:
+                final = self._canonical_url(getattr(resp, "url", canon) or canon)
+        except Exception:
+            try:
+                req = Request(canon, method="GET", headers={"User-Agent": "Mozilla/5.0 (LinkIntelligenceBot)"})
+                with urlopen(req, timeout=timeout) as resp:
+                    final = self._canonical_url(getattr(resp, "url", canon) or canon)
+            except Exception:
+                final = canon
+        self._resolve_cache[canon] = (final, now)
+        return final
 
     async def sync_index_from_articles(self, db: AsyncSession, *, limit: int = 3000, force: bool = False) -> dict[str, int]:
         if not force and self._last_sync_at and (self._now() - self._last_sync_at) < timedelta(minutes=30):
@@ -158,6 +239,10 @@ class LinkIntelligenceService:
 
         upserted = 0
         skipped = 0
+        external_upserted = 0
+        aggregator_resolved = 0
+        aggregator_passthrough = 0
+        max_aggregator_resolve = 120
         now = self._now()
         for article in articles:
             url = self._canonical_url(article.original_url or "")
@@ -165,10 +250,31 @@ class LinkIntelligenceService:
                 skipped += 1
                 continue
             domain = self._extract_domain(url)
+            source_domain = self._extract_source_domain(article.source_name)
             is_internal = self._is_internal(url)
-            if not is_internal and domain not in trusted:
-                skipped += 1
-                continue
+            if not is_internal:
+                trusted_domain = domain if domain in trusted else ""
+                if not trusted_domain and source_domain in trusted:
+                    trusted_domain = source_domain
+
+                if domain in AGGREGATOR_DOMAINS and (trusted_domain or source_domain):
+                    resolved_url = ""
+                    if aggregator_resolved < max_aggregator_resolve:
+                        resolved_url = self._resolve_final_url(url)
+                    resolved_domain = self._extract_domain(resolved_url) if resolved_url else ""
+                    if resolved_domain in trusted:
+                        url = resolved_url
+                        domain = resolved_domain
+                        trusted_domain = resolved_domain
+                        aggregator_resolved += 1
+                    elif trusted_domain:
+                        # Keep source-trusted domain even if redirect resolution fails.
+                        domain = trusted_domain
+                        aggregator_passthrough += 1
+
+                if not trusted_domain and domain not in trusted:
+                    skipped += 1
+                    continue
 
             title = (article.title_ar or article.original_title or "").strip()
             if len(title) < 5:
@@ -193,6 +299,8 @@ class LinkIntelligenceService:
                 existing.is_active = True
                 existing.last_seen_at = now
                 upserted += 1
+                if not is_internal:
+                    external_upserted += 1
                 continue
 
             item = LinkIndexItem(
@@ -213,11 +321,27 @@ class LinkIntelligenceService:
             db.add(item)
             by_url[url] = item
             upserted += 1
+            if not is_internal:
+                external_upserted += 1
 
         await db.commit()
         self._last_sync_at = now
-        logger.info("link_index_sync_done", upserted=upserted, skipped=skipped, total=len(articles))
-        return {"upserted": upserted, "skipped": skipped}
+        logger.info(
+            "link_index_sync_done",
+            upserted=upserted,
+            external_upserted=external_upserted,
+            skipped=skipped,
+            total=len(articles),
+            aggregator_resolved=aggregator_resolved,
+            aggregator_passthrough=aggregator_passthrough,
+        )
+        return {
+            "upserted": upserted,
+            "external_upserted": external_upserted,
+            "skipped": skipped,
+            "aggregator_resolved": aggregator_resolved,
+            "aggregator_passthrough": aggregator_passthrough,
+        }
 
     async def sync_internal_from_public_sources(self, db: AsyncSession, *, force: bool = False) -> dict[str, int]:
         if not force and self._last_public_sync_at and (self._now() - self._last_public_sync_at) < timedelta(minutes=45):
@@ -386,7 +510,7 @@ class LinkIntelligenceService:
                 overlap_count = 1
         if overlap_count == 0:
             return None
-        if item.link_type == "external" and overlap_count < 2:
+        if item.link_type == "external" and overlap_count < 1 and title_sim < 0.45:
             return None
 
         overlap_ratio = overlap_count / max(1, len(query_tokens))
@@ -508,6 +632,20 @@ class LinkIntelligenceService:
             internal_candidates_total = len([c for c in candidates if c.link_type == "internal"])
             external_candidates_total = len([c for c in candidates if c.link_type == "external"])
 
+        if mode in {"external", "mixed"} and external_candidates_total == 0:
+            retry_external_sync = await self.sync_index_from_articles(db, force=True, limit=1200)
+            sync_stats = {
+                **sync_stats,
+                "retry_external_upserted": retry_external_sync.get("external_upserted", 0),
+                "retry_external_total": retry_external_sync.get("upserted", 0),
+                "retry_aggregator_resolved": retry_external_sync.get("aggregator_resolved", 0),
+                "retry_aggregator_passthrough": retry_external_sync.get("aggregator_passthrough", 0),
+            }
+            rows = await db.execute(stmt.order_by(desc(LinkIndexItem.published_at)).limit(2500))
+            candidates = rows.scalars().all()
+            internal_candidates_total = len([c for c in candidates if c.link_type == "internal"])
+            external_candidates_total = len([c for c in candidates if c.link_type == "external"])
+
         source_url = self._canonical_url(article.original_url) if article and article.original_url else ""
 
         scored_internal: list[_ScoredItem] = []
@@ -516,7 +654,7 @@ class LinkIntelligenceService:
             if source_url and item.url == source_url:
                 continue
             if item.link_type == "external":
-                domain = (item.domain or "").lower()
+                domain = self._normalize_domain(item.domain or "")
                 td = trusted.get(domain)
                 if not td:
                     continue
@@ -539,12 +677,15 @@ class LinkIntelligenceService:
         elif mode == "external":
             selected = self._dedupe_by_domain(scored_external, target_count)
         else:
-            top_external = self._dedupe_by_domain(scored_external, 1)
-            allow_external = bool(top_external and top_external[0].score >= 0.42)
-            internal_target = target_count - (1 if allow_external else 0)
+            top_external = self._dedupe_by_domain(scored_external, min(2, target_count))
+            allow_external = bool(top_external and top_external[0].score >= 0.30)
+            external_take = 0
+            if allow_external:
+                external_take = 2 if len(top_external) > 1 and top_external[1].score >= 0.27 else 1
+            internal_target = target_count - external_take
             selected.extend(scored_internal[: max(0, internal_target)])
             if allow_external:
-                selected.extend(top_external[:1])
+                selected.extend(top_external[:external_take])
             if len(selected) < target_count:
                 missing = target_count - len(selected)
                 backup = scored_internal[len(selected): len(selected) + missing]
@@ -570,6 +711,31 @@ class LinkIntelligenceService:
                     )
                 )
                 if len([x for x in selected if x.item.link_type == "internal"]) >= max(1, min(3, target_count)):
+                    break
+
+        # External fallback: if no external selected, use highest-trust recent external references
+        if mode in {"external", "mixed"} and not [x for x in selected if x.item.link_type == "external"]:
+            fallback_ext = [c for c in candidates if c.link_type == "external"]
+            fallback_ext.sort(
+                key=lambda x: (self._safe_float(x.authority_score, 0.0), x.published_at or datetime.min),
+                reverse=True,
+            )
+            max_ext = target_count if mode == "external" else min(2, target_count)
+            for fb in fallback_ext:
+                if self._safe_float(fb.authority_score, 0.0) < TRUSTED_EXTERNAL_MIN:
+                    continue
+                selected.append(
+                    _ScoredItem(
+                        item=fb,
+                        score=0.2301,
+                        confidence=0.39,
+                        anchor_text=self._build_anchor(query_tokens, fb.title or ""),
+                        reason="مرجع خارجي موثوق احتياطي من مصدر عالي الثقة",
+                        placement_hint="بعد الجملة التي تحتاج توثيقا أو رقما رسميا",
+                        rel_attrs="noopener noreferrer",
+                    )
+                )
+                if len([x for x in selected if x.item.link_type == "external"]) >= max_ext:
                     break
 
         # Deduplicate final list by URL and cap to target_count
