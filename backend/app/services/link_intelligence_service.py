@@ -7,10 +7,13 @@ from __future__ import annotations
 
 import math
 import re
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from email.utils import parsedate_to_datetime
+from html import unescape
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
 
 from sqlalchemy import desc, select
@@ -32,6 +35,12 @@ logger = get_logger("link_intelligence.service")
 
 LINK_MODES = {"internal", "external", "mixed"}
 INTERNAL_DOMAINS = {"echoroukonline.com", "www.echoroukonline.com"}
+ECHOROUK_FEED_URL = "https://www.echoroukonline.com/feed"
+ECHOROUK_NEWS_SITEMAP_URL = "https://www.echoroukonline.com/news-sitemap.xml"
+
+TRUSTED_EXTERNAL_MIN = 0.78
+INTERNAL_SCORE_THRESHOLD = 0.26
+EXTERNAL_SCORE_THRESHOLD = 0.34
 
 
 @dataclass
@@ -48,6 +57,7 @@ class _ScoredItem:
 class LinkIntelligenceService:
     def __init__(self) -> None:
         self._last_sync_at: datetime | None = None
+        self._last_public_sync_at: datetime | None = None
 
     @staticmethod
     def _now() -> datetime:
@@ -91,6 +101,33 @@ class LinkIntelligenceService:
             return float(v)
         except Exception:
             return default
+
+    @staticmethod
+    def _arabic_ratio(text: str) -> float:
+        if not text:
+            return 0.0
+        letters = re.findall(r"[A-Za-z\u0600-\u06ff]", text)
+        if not letters:
+            return 0.0
+        ar_letters = re.findall(r"[\u0600-\u06ff]", text)
+        return len(ar_letters) / max(1, len(letters))
+
+    @staticmethod
+    def _fetch_text(url: str, timeout: int = 10) -> str:
+        req = Request(url, headers={"User-Agent": "Mozilla/5.0 (LinkIntelligenceBot)"})
+        with urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+        return raw.decode("utf-8", "ignore")
+
+    @staticmethod
+    def _slug_to_title(url: str) -> str:
+        path = urlparse(url).path.strip("/")
+        if not path:
+            return ""
+        slug = unquote(path.split("/")[-1])
+        slug = re.sub(r"[-_]+", " ", slug)
+        slug = re.sub(r"\s+", " ", slug).strip()
+        return slug[:200]
 
     async def _load_trusted_domains(self, db: AsyncSession) -> dict[str, TrustedDomain]:
         rows = await db.execute(select(TrustedDomain).where(TrustedDomain.enabled.is_(True)))
@@ -181,6 +218,108 @@ class LinkIntelligenceService:
         logger.info("link_index_sync_done", upserted=upserted, skipped=skipped, total=len(articles))
         return {"upserted": upserted, "skipped": skipped}
 
+    async def sync_internal_from_public_sources(self, db: AsyncSession, *, force: bool = False) -> dict[str, int]:
+        if not force and self._last_public_sync_at and (self._now() - self._last_public_sync_at) < timedelta(minutes=45):
+            return {"upserted": 0, "feed": 0, "sitemap": 0}
+
+        existing_rows = await db.execute(select(LinkIndexItem))
+        by_url: dict[str, LinkIndexItem] = {item.url: item for item in existing_rows.scalars().all()}
+        now = self._now()
+        upserted = 0
+        feed_count = 0
+        sitemap_count = 0
+
+        def _upsert(url: str, title: str, summary: str | None, published_at: datetime | None) -> None:
+            nonlocal upserted
+            canon = self._canonical_url(url)
+            if not canon or not self._is_internal(canon):
+                return
+            clean_title = re.sub(r"\s+", " ", (title or "").strip())
+            if len(clean_title) < 6:
+                clean_title = self._slug_to_title(canon)
+            if len(clean_title) < 6:
+                return
+
+            existing = by_url.get(canon)
+            if existing:
+                existing.link_type = "internal"
+                existing.domain = self._extract_domain(canon)
+                existing.title = clean_title[:1024]
+                if summary:
+                    existing.summary = summary[:2000]
+                if published_at:
+                    existing.published_at = published_at
+                existing.authority_score = max(0.9, self._safe_float(existing.authority_score, 0.9))
+                existing.is_active = True
+                existing.last_seen_at = now
+                upserted += 1
+                return
+
+            item = LinkIndexItem(
+                url=canon,
+                domain=self._extract_domain(canon),
+                link_type="internal",
+                title=clean_title[:1024],
+                summary=(summary or "")[:2000],
+                category=None,
+                keywords_json=[],
+                published_at=published_at,
+                authority_score=0.92,
+                source_article_id=None,
+                is_active=True,
+                first_seen_at=now,
+                last_seen_at=now,
+            )
+            db.add(item)
+            by_url[canon] = item
+            upserted += 1
+
+        try:
+            feed_xml = self._fetch_text(ECHOROUK_FEED_URL, timeout=12)
+            root = ET.fromstring(feed_xml)
+            channel = root.find("channel")
+            if channel is not None:
+                for node in channel.findall("item")[:180]:
+                    link = (node.findtext("link") or "").strip()
+                    title = (node.findtext("title") or "").strip()
+                    desc = (node.findtext("description") or "").strip()
+                    summary = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", unescape(desc))).strip()
+                    pub_dt = None
+                    pub_raw = (node.findtext("pubDate") or "").strip()
+                    if pub_raw:
+                        try:
+                            pub_dt = parsedate_to_datetime(pub_raw).replace(tzinfo=None)
+                        except Exception:
+                            pub_dt = None
+                    _upsert(link, title, summary, pub_dt)
+                    feed_count += 1
+        except Exception as exc:
+            logger.warning("link_index_feed_sync_failed", error=str(exc))
+
+        try:
+            news_sitemap_xml = self._fetch_text(ECHOROUK_NEWS_SITEMAP_URL, timeout=12)
+            root = ET.fromstring(news_sitemap_xml)
+            ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9", "news": "http://www.google.com/schemas/sitemap-news/0.9"}
+            for node in root.findall("sm:url", ns)[:260]:
+                link = (node.findtext("sm:loc", "", ns) or "").strip()
+                title = (node.findtext("news:news/news:title", "", ns) or "").strip()
+                pub_raw = (node.findtext("news:news/news:publication_date", "", ns) or "").strip()
+                pub_dt = None
+                if pub_raw:
+                    try:
+                        pub_dt = datetime.fromisoformat(pub_raw.replace("Z", "+00:00")).replace(tzinfo=None)
+                    except Exception:
+                        pub_dt = None
+                _upsert(link, title, None, pub_dt)
+                sitemap_count += 1
+        except Exception as exc:
+            logger.warning("link_index_news_sitemap_sync_failed", error=str(exc))
+
+        await db.commit()
+        self._last_public_sync_at = now
+        logger.info("link_index_public_sync_done", upserted=upserted, feed=feed_count, sitemap=sitemap_count)
+        return {"upserted": upserted, "feed": feed_count, "sitemap": sitemap_count}
+
     async def _latest_draft(self, db: AsyncSession, work_id: str) -> EditorialDraft | None:
         row = await db.execute(
             select(EditorialDraft)
@@ -198,6 +337,9 @@ class LinkIntelligenceService:
         query_category: str | None,
         item: LinkIndexItem,
     ) -> _ScoredItem | None:
+        if self._arabic_ratio(query_title) >= 0.35 and self._arabic_ratio(item.title or "") < 0.20:
+            return None
+
         title_tokens = self._tokens(item.title or "")
         summary_tokens = self._tokens(item.summary or "")
         kw_tokens = self._tokens(" ".join(item.keywords_json or []))
@@ -205,37 +347,45 @@ class LinkIntelligenceService:
         if not item_tokens:
             return None
 
-        overlap_count = len(query_tokens.intersection(item_tokens))
+        overlap_set = query_tokens.intersection(item_tokens)
+        overlap_count = len(overlap_set)
+        if overlap_count == 0:
+            return None
+        if item.link_type == "external" and overlap_count < 2:
+            return None
+
         overlap_ratio = overlap_count / max(1, len(query_tokens))
-        title_hit = 1.0 if query_title and any(t in (item.title or "") for t in list(query_tokens)[:4]) else 0.0
+        title_overlap = len(query_tokens.intersection(title_tokens)) / max(1, len(query_tokens))
         category_match = 1.0 if query_category and item.category and query_category == item.category else 0.0
         authority = max(0.0, min(1.0, self._safe_float(item.authority_score, 0.5)))
 
-        recency = 0.4
+        recency = 0.45
         if item.published_at:
-            age_hours = max(0.0, (self._now() - item.published_at).total_seconds() / 3600.0)
-            recency = math.exp(-age_hours / 240.0)
+            age_hours = max(0.0, (self._now() - item.published_at).total_seconds() / 3600.0)  # type: ignore[operator]
+            recency = math.exp(-age_hours / 220.0)
 
         score = (
-            0.48 * overlap_ratio
-            + 0.18 * title_hit
-            + 0.12 * category_match
-            + 0.12 * recency
-            + 0.10 * authority
+            0.62 * overlap_ratio
+            + 0.14 * title_overlap
+            + 0.10 * category_match
+            + 0.08 * recency
+            + 0.06 * authority
         )
-        if score < 0.14:
+        threshold = INTERNAL_SCORE_THRESHOLD if item.link_type == "internal" else EXTERNAL_SCORE_THRESHOLD
+        if score < threshold:
             return None
 
-        confidence = max(0.0, min(1.0, score * 1.35))
+        confidence = max(0.0, min(1.0, score * 1.28))
         anchor = self._build_anchor(query_tokens, item.title)
         link_kind = "داخلي" if item.link_type == "internal" else "خارجي"
-        reason = f"تطابق {link_kind} عبر الكلمات المفتاحية والسياق التحريري"
+        matched_preview = "، ".join(sorted(list(overlap_set))[:4]) if overlap_set else "تطابق عام"
+        reason = f"مطابقة {link_kind}: {matched_preview}"
         placement = (
             "بعد فقرة الخلفية أو سياق الخبر"
             if item.link_type == "internal"
             else "بعد الجملة التي تحتوي تصريحا أو رقما يحتاج توثيقا"
         )
-        rel_attrs = "internal" if item.link_type == "internal" else ("noopener noreferrer" if authority >= 0.75 else "noopener noreferrer nofollow")
+        rel_attrs = "internal" if item.link_type == "internal" else ("noopener noreferrer" if authority >= 0.85 else "noopener noreferrer nofollow")
 
         return _ScoredItem(
             item=item,
@@ -249,7 +399,7 @@ class LinkIntelligenceService:
 
     def _build_anchor(self, query_tokens: set[str], title: str) -> str:
         clean_title = re.sub(r"\s+", " ", (title or "").strip())
-        for tok in query_tokens:
+        for tok in sorted(query_tokens, key=len, reverse=True):
             if tok and tok in clean_title:
                 return tok[:80]
         words = clean_title.split()
@@ -279,11 +429,20 @@ class LinkIntelligenceService:
             article = row.scalar_one_or_none()
 
         sync_stats = await self.sync_index_from_articles(db)
+        public_sync = {"upserted": 0, "feed": 0, "sitemap": 0}
+        if mode in {"internal", "mixed"}:
+            public_sync = await self.sync_internal_from_public_sources(db)
 
         body_text = re.sub(r"<[^>]+>", " ", draft.body or "")
         query_title = (draft.title or (article.title_ar if article else "") or (article.original_title if article else "") or "").strip()
         query_category = article.category.value if article and getattr(article.category, "value", None) else None
-        query_tokens = self._tokens(f"{query_title} {body_text}") or self._tokens(query_title)
+        query_tokens = self._tokens(query_title)
+        if len(query_tokens) < 6:
+            body_tokens = self._tokens(body_text)
+            for tok in body_tokens:
+                query_tokens.add(tok)
+                if len(query_tokens) >= 14:
+                    break
         if not query_tokens:
             query_tokens = {"الجزائر", "خبر"}
 
@@ -294,6 +453,7 @@ class LinkIntelligenceService:
             stmt = stmt.where(LinkIndexItem.link_type == "external")
         rows = await db.execute(stmt.order_by(desc(LinkIndexItem.published_at)).limit(2500))
         candidates = rows.scalars().all()
+        trusted = await self._load_trusted_domains(db)
 
         source_url = self._canonical_url(article.original_url) if article and article.original_url else ""
 
@@ -302,6 +462,13 @@ class LinkIntelligenceService:
         for item in candidates:
             if source_url and item.url == source_url:
                 continue
+            if item.link_type == "external":
+                domain = (item.domain or "").lower()
+                td = trusted.get(domain)
+                if not td:
+                    continue
+                if self._safe_float(td.trust_score, 0.0) < TRUSTED_EXTERNAL_MIN:
+                    continue
             scored = self._score_item(query_tokens=query_tokens, query_title=query_title, query_category=query_category, item=item)
             if not scored:
                 continue
@@ -319,9 +486,12 @@ class LinkIntelligenceService:
         elif mode == "external":
             selected = self._dedupe_by_domain(scored_external, target_count)
         else:
-            ext_target = min(2, max(1, target_count // 3))
-            selected.extend(scored_internal[: max(0, target_count - ext_target)])
-            selected.extend(self._dedupe_by_domain(scored_external, ext_target))
+            top_external = self._dedupe_by_domain(scored_external, 1)
+            allow_external = bool(top_external and top_external[0].score >= 0.42)
+            internal_target = target_count - (1 if allow_external else 0)
+            selected.extend(scored_internal[: max(0, internal_target)])
+            if allow_external:
+                selected.extend(top_external[:1])
             if len(selected) < target_count:
                 missing = target_count - len(selected)
                 backup = scored_internal[len(selected): len(selected) + missing]
@@ -338,8 +508,12 @@ class LinkIntelligenceService:
             source_counts_json={
                 "internal_pool": len(scored_internal),
                 "external_pool": len(scored_external),
+                "internal_selected": len([x for x in selected if x.item.link_type == "internal"]),
+                "external_selected": len([x for x in selected if x.item.link_type == "external"]),
                 "selected": len(selected),
+                "query_terms": sorted(list(query_tokens))[:8],
                 "sync": sync_stats,
+                "sync_public": public_sync,
             },
             created_by_user_id=actor.id if actor else None,
             created_by_username=actor.username if actor else "system",
