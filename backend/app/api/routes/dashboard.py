@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.config import get_settings
+from app.core.correlation import get_correlation_id, get_request_id
 from app.core.logging import get_logger
 from app.models import Article, Source, PipelineRun, FailedJob, NewsStatus, UrgencyLevel
 from app.models.user import User, UserRole
@@ -171,8 +172,8 @@ async def _enqueue_dashboard_job(
         queue_name=queue_name,
         payload=payload or {},
         entity_id=entity_id,
-        request_id=request.headers.get("x-request-id"),
-        correlation_id=request.headers.get("x-correlation-id"),
+        request_id=request.headers.get("x-request-id") or get_request_id(),
+        correlation_id=request.headers.get("x-correlation-id") or get_correlation_id(),
         actor_user_id=current_user.id,
         actor_username=current_user.username,
         max_attempts=3,

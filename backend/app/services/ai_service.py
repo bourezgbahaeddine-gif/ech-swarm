@@ -12,6 +12,7 @@ from typing import Optional
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.core.config import get_settings
+from app.core.json_utils import parse_llm_json
 from app.core.logging import get_logger
 from app.schemas import AIAnalysisResult
 from app.services.provider_manager import provider_manager
@@ -40,15 +41,7 @@ class AIService:
 
     @staticmethod
     def _parse_json_response(raw_text: str) -> dict:
-        text = (raw_text or "").strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1]
-            text = text.rsplit("```", 1)[0]
-        # Some models prepend prose before JSON; keep the first JSON object.
-        match = re.search(r"\{[\s\S]*\}", text)
-        if match:
-            text = match.group(0)
-        return json.loads(text)
+        return parse_llm_json(raw_text)
 
     async def _get_gemini(self):
         """Lazy-load Gemini client."""
@@ -116,7 +109,7 @@ Output Schema (JSON only, no markdown):
                 result_text = result_text.split("\n", 1)[1]
                 result_text = result_text.rsplit("```", 1)[0]
 
-            data = json.loads(result_text)
+            data = self._parse_json_response(result_text)
             elapsed = int((time.time() - start) * 1000)
 
             logger.info("ai_analysis_complete", model="flash", elapsed_ms=elapsed)

@@ -33,6 +33,7 @@ class LinkIndexItem(Base):
     summary = Column(Text, nullable=True)
     category = Column(String(64), nullable=True, index=True)
     keywords_json = Column(JSON, nullable=False, default=list)
+    metadata_json = Column(JSON, nullable=False, default=dict)
     published_at = Column(DateTime, nullable=True, index=True)
     authority_score = Column(Float, nullable=False, default=0.5)
     source_article_id = Column(Integer, ForeignKey("articles.id"), nullable=True, index=True)
@@ -128,4 +129,3 @@ class LinkClickEvent(Base):
     __table_args__ = (
         UniqueConstraint("work_id", "url", "created_at", name="uq_link_click_work_url_time"),
     )
-

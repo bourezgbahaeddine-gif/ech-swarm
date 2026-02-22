@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routes.auth import get_current_user
+from app.core.correlation import get_correlation_id, get_request_id
 from app.core.database import async_session, get_db
 from app.models.user import User, UserRole
 from app.msi.profiles import load_profile
@@ -110,8 +111,8 @@ async def run_msi(
         queue_name="ai_msi",
         payload={"run_id": run.run_id},
         entity_id=run.run_id,
-        request_id=request.headers.get("x-request-id"),
-        correlation_id=request.headers.get("x-correlation-id"),
+        request_id=request.headers.get("x-request-id") or get_request_id(),
+        correlation_id=request.headers.get("x-correlation-id") or get_correlation_id(),
         actor_user_id=current_user.id,
         actor_username=current_user.username,
     )

@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, ValidationError
 from tenacity import AsyncRetrying, stop_after_attempt, wait_exponential
 
 from app.core.config import get_settings
+from app.core.json_utils import parse_llm_json
 from app.core.logging import get_logger
 from app.simulator.profiles import SIMULATOR_DIR, load_policy_profile
 from app.simulator.state import PersonaReaction, SimulationAdvice, SimulationBreakdown, SimulationResult, SimulationState
@@ -241,15 +242,7 @@ class SimulationGraphNodes:
             return None
 
     def _parse_json_response(self, raw_text: str) -> dict[str, Any]:
-        text = (raw_text or "").strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1]
-            text = text.rsplit("```", 1)[0]
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1:
-            text = text[start : end + 1]
-        return json.loads(text)
+        return parse_llm_json(raw_text)
 
     def _fallback_simulation(self, st: SimulationState) -> tuple[list[PersonaReaction], SimulationBreakdown, SimulationAdvice]:
         headline = st.sanitized_headline

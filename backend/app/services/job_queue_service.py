@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -11,6 +11,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.correlation import get_correlation_id, get_request_id
 from app.core.logging import get_logger
 from app.models import DeadLetterJob, JobRun
 from app.queue.celery_app import celery_app
@@ -38,7 +39,7 @@ JOB_TASK_MAP: dict[str, tuple[str, str]] = {
     "editorial_social": ("app.queue.tasks.ai_tasks.run_editorial_ai_job", "ai_quality"),
     "editorial_claims": ("app.queue.tasks.ai_tasks.run_editorial_ai_job", "ai_quality"),
     "editorial_quality": ("app.queue.tasks.ai_tasks.run_editorial_ai_job", "ai_quality"),
-    "editorial_links_suggest": ("app.queue.tasks.ai_tasks.run_editorial_ai_job", "ai_links"),
+    "editorial_links_suggest": ("app.queue.tasks.ai_tasks.run_editorial_links_job", "ai_links"),
     "editorial_ai_apply": ("app.queue.tasks.ai_tasks.run_editorial_ai_job", "ai_quality"),
     "pipeline_scout": ("app.queue.tasks.pipeline_tasks.run_scout_batch", "ai_router"),
     "pipeline_router": ("app.queue.tasks.pipeline_tasks.run_router_batch", "ai_router"),
@@ -84,6 +85,8 @@ class JobQueueService:
         priority: str = "normal",
         max_attempts: int = 5,
     ) -> JobRun:
+        request_id = request_id or get_request_id() or None
+        correlation_id = correlation_id or get_correlation_id() or None
         job = JobRun(
             job_type=job_type,
             queue_name=queue_name,
@@ -103,6 +106,53 @@ class JobQueueService:
         await db.commit()
         await db.refresh(job)
         return job
+
+    async def mark_stale_jobs_failed(
+        self,
+        db: AsyncSession,
+        *,
+        stale_running_minutes: int = 15,
+        stale_queued_minutes: int = 30,
+        reason: str = "stale_timeout",
+    ) -> dict[str, int]:
+        now = datetime.utcnow()
+        running_cutoff = now - timedelta(minutes=max(1, stale_running_minutes))
+        queued_cutoff = now - timedelta(minutes=max(1, stale_queued_minutes))
+        updated = {"running_failed": 0, "queued_failed": 0}
+
+        running_rows = await db.execute(
+            select(JobRun).where(
+                JobRun.status == "running",
+                JobRun.started_at.is_not(None),
+                JobRun.started_at <= running_cutoff,
+                JobRun.finished_at.is_(None),
+            )
+        )
+        stale_running = list(running_rows.scalars().all())
+        for job in stale_running:
+            job.status = "failed"
+            job.error = f"{reason}:running>{stale_running_minutes}m"
+            job.finished_at = now
+            updated["running_failed"] += 1
+
+        queued_rows = await db.execute(
+            select(JobRun).where(
+                JobRun.status == "queued",
+                JobRun.started_at.is_(None),
+                JobRun.queued_at <= queued_cutoff,
+                JobRun.finished_at.is_(None),
+            )
+        )
+        stale_queued = list(queued_rows.scalars().all())
+        for job in stale_queued:
+            job.status = "failed"
+            job.error = f"{reason}:queued>{stale_queued_minutes}m"
+            job.finished_at = now
+            updated["queued_failed"] += 1
+
+        if updated["running_failed"] or updated["queued_failed"]:
+            await db.commit()
+        return updated
 
     async def enqueue(self, *, task_name: str, queue_name: str, job_id: str) -> None:
         celery_app.send_task(task_name, kwargs={"job_id": job_id}, queue=queue_name)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import traceback
 from datetime import datetime
 from uuid import UUID
@@ -21,6 +22,8 @@ from app.services.quality_gate_service import quality_gate_service
 from app.services.smart_editor_service import smart_editor_service
 
 logger = get_logger("queue.ai_tasks")
+LINKS_TASK_SOFT_LIMIT_SEC = 45
+LINKS_TASK_HARD_LIMIT_SEC = 60
 
 
 async def _latest_draft_or_none(work_id: str) -> EditorialDraft | None:
@@ -121,13 +124,19 @@ async def _mark_failed_or_dlq(job_id: str, error: str, tb: str, is_final: bool) 
             await job_queue_service.mark_failed(db, job, error)
 
 
-async def _execute_editorial_ai_job(job_id: str) -> dict:
+async def _execute_editorial_ai_job(
+    job_id: str,
+    *,
+    allowed_operations: set[str] | None = None,
+) -> dict:
     job = await _mark_running(job_id)
     payload = job.payload_json or {}
     op = str(payload.get("operation") or "")
     work_id = str(payload.get("work_id") or "")
     if not op or not work_id:
         raise RuntimeError("invalid_job_payload")
+    if allowed_operations is not None and op not in allowed_operations:
+        raise RuntimeError(f"operation_not_allowed:{op}")
 
     latest = await _latest_draft_or_none(work_id)
     if not latest:
@@ -266,6 +275,37 @@ def run_editorial_ai_job(self: Task, job_id: str) -> dict:
         is_final = int(getattr(self.request, "retries", 0)) >= int(getattr(self, "max_retries", 5))
         run_async(_mark_failed_or_dlq(job_id, err, tb, is_final))
         logger.error("editorial_ai_job_failed", job_id=job_id, error=err, final=is_final)
+        raise
+    finally:
+        structlog.contextvars.clear_contextvars()
+
+
+@celery_app.task(
+    bind=True,
+    autoretry_for=(TimeoutError, ConnectionError),
+    retry_backoff=True,
+    retry_backoff_max=120,
+    retry_jitter=True,
+    max_retries=2,
+    soft_time_limit=LINKS_TASK_SOFT_LIMIT_SEC,
+    time_limit=LINKS_TASK_HARD_LIMIT_SEC,
+)
+def run_editorial_links_job(self: Task, job_id: str) -> dict:
+    try:
+        result = run_async(
+            asyncio.wait_for(
+                _execute_editorial_ai_job(job_id, allowed_operations={"links_suggest"}),
+                timeout=LINKS_TASK_SOFT_LIMIT_SEC,
+            )
+        )
+        run_async(_mark_completed(job_id, result))
+        return {"ok": True, "job_id": job_id}
+    except Exception as exc:  # noqa: BLE001
+        err = str(exc)
+        tb = traceback.format_exc()
+        is_final = int(getattr(self.request, "retries", 0)) >= int(getattr(self, "max_retries", 2))
+        run_async(_mark_failed_or_dlq(job_id, err, tb, is_final))
+        logger.error("editorial_links_job_failed", job_id=job_id, error=err, final=is_final)
         raise
     finally:
         structlog.contextvars.clear_contextvars()

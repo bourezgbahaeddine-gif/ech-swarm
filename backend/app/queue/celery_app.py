@@ -28,6 +28,7 @@ celery_app.conf.update(
     task_default_exchange=settings.queue_default_name,
     task_default_routing_key=settings.queue_default_name,
     task_routes={
+        "app.queue.tasks.ai_tasks.run_editorial_links_job": {"queue": "ai_links"},
         "app.queue.tasks.ai_tasks.*": {"queue": "ai_quality"},
         "app.queue.tasks.pipeline_tasks.run_scout_batch": {"queue": "ai_router"},
         "app.queue.tasks.pipeline_tasks.run_router_batch": {"queue": "ai_router"},

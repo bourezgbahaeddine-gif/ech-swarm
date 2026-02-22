@@ -23,6 +23,7 @@ VIEW_ROLES = {
     UserRole.print_editor,
 }
 RETRY_ROLES = {UserRole.director, UserRole.editor_chief}
+MAINTAIN_ROLES = {UserRole.director, UserRole.editor_chief}
 
 
 def _require_view(user: User) -> None:
@@ -32,6 +33,11 @@ def _require_view(user: User) -> None:
 
 def _require_retry(user: User) -> None:
     if user.role not in RETRY_ROLES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
+
+
+def _require_maintain(user: User) -> None:
+    if user.role not in MAINTAIN_ROLES:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
 
 
@@ -150,3 +156,24 @@ async def retry_job(
     await db.commit()
     await job_queue_service.enqueue_by_job_type(job_type=job.job_type, job_id=str(job.id))
     return {"job_id": str(job.id), "status": "queued", "message": "Retry enqueued"}
+
+
+@router.post("/recover/stale", status_code=status.HTTP_200_OK)
+async def recover_stale_jobs(
+    stale_running_minutes: int = Query(15, ge=1, le=1440),
+    stale_queued_minutes: int = Query(30, ge=1, le=1440),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_maintain(current_user)
+    result = await job_queue_service.mark_stale_jobs_failed(
+        db,
+        stale_running_minutes=stale_running_minutes,
+        stale_queued_minutes=stale_queued_minutes,
+    )
+    return {
+        "status": "ok",
+        "stale_running_minutes": stale_running_minutes,
+        "stale_queued_minutes": stale_queued_minutes,
+        **result,
+    }

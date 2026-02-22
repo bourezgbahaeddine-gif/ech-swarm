@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.scribe import scribe_agent
 from app.api.routes.auth import get_current_user
+from app.core.correlation import get_correlation_id, get_request_id
 from app.core.database import get_db, async_session
 from app.core.logging import get_logger
 from app.models import (
@@ -308,6 +309,7 @@ async def _enqueue_editorial_ai_job(
     operation: str,
     queue_name: str = "ai_quality",
     payload: dict[str, Any] | None = None,
+    max_attempts: int = 5,
 ) -> dict[str, Any]:
     allowed, depth, limit_depth = await job_queue_service.check_backpressure(queue_name)
     if not allowed:
@@ -322,10 +324,11 @@ async def _enqueue_editorial_ai_job(
         queue_name=queue_name,
         payload=job_payload,
         entity_id=work_id,
-        request_id=request.headers.get("x-request-id"),
-        correlation_id=request.headers.get("x-correlation-id"),
+        request_id=request.headers.get("x-request-id") or get_request_id(),
+        correlation_id=request.headers.get("x-correlation-id") or get_correlation_id(),
         actor_user_id=current_user.id,
         actor_username=current_user.username,
+        max_attempts=max_attempts,
     )
     try:
         await job_queue_service.enqueue_by_job_type(job_type=job_type, job_id=str(job.id))
@@ -1561,6 +1564,7 @@ async def workspace_ai_links_suggest(
         job_type="editorial_links_suggest",
         operation="links_suggest",
         queue_name="ai_links",
+        max_attempts=2,
         payload={"mode": payload.mode, "target_count": payload.target_count},
     )
 

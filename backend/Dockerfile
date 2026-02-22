@@ -20,8 +20,10 @@ COPY backend/ .
 COPY alembic /app/alembic
 COPY alembic.ini /app/alembic.ini
 
-# Create temp directories
-RUN mkdir -p /tmp/audio /tmp/media
+# Create runtime user for workers and writable temp directories.
+RUN groupadd -g 10001 appuser && useradd -m -u 10001 -g 10001 appuser \
+    && mkdir -p /tmp/audio /tmp/media \
+    && chown -R appuser:appuser /app /tmp/audio /tmp/media
 
 EXPOSE 8000
 

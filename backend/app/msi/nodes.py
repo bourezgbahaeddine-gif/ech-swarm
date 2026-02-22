@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.json_utils import parse_llm_json
 from app.core.logging import get_logger
 from app.models import Article, MsiBaseline
 from app.msi.profiles import load_profile
@@ -522,7 +523,7 @@ class MsiGraphNodes:
             model = gemini.GenerativeModel(settings.gemini_model_flash)
             response = model.generate_content(prompt)
             text = (response.text or "").strip()
-            data = json.loads(text)
+            data = parse_llm_json(text)
             if not isinstance(data, dict):
                 return None
             return {

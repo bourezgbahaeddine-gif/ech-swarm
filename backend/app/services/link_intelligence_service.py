@@ -43,6 +43,7 @@ ECHOROUK_NEWS_SITEMAP_URL = "https://www.echoroukonline.com/news-sitemap.xml"
 TRUSTED_EXTERNAL_MIN = 0.78
 INTERNAL_SCORE_THRESHOLD = 0.16
 EXTERNAL_SCORE_THRESHOLD = 0.24
+ON_DEMAND_SYNC_DISABLED_REASON = "disabled_on_suggest"
 
 DEFAULT_TRUSTED_EXTERNALS: dict[str, tuple[str, float, str]] = {
     "aps.dz": ("وكالة الأنباء الجزائرية", 0.95, "official"),
@@ -153,6 +154,21 @@ class LinkIntelligenceService:
         return len(ar_letters) / max(1, len(letters))
 
     @staticmethod
+    def _detect_language(text: str) -> str:
+        ratio = LinkIntelligenceService._arabic_ratio(text or "")
+        if ratio >= 0.35:
+            return "ar"
+        if ratio <= 0.08:
+            return "en"
+        return "mixed"
+
+    def _freshness_score(self, published_at: datetime | None) -> float:
+        if not published_at:
+            return 0.35
+        age_hours = max(0.0, (self._now() - published_at).total_seconds() / 3600.0)
+        return max(0.0, min(1.0, math.exp(-age_hours / 220.0)))
+
+    @staticmethod
     def _fetch_text(url: str, timeout: int = 10) -> str:
         req = Request(url, headers={"User-Agent": "Mozilla/5.0 (LinkIntelligenceBot)"})
         with urlopen(req, timeout=timeout) as resp:
@@ -216,7 +232,14 @@ class LinkIntelligenceService:
         self._resolve_cache[canon] = (final, now)
         return final
 
-    async def sync_index_from_articles(self, db: AsyncSession, *, limit: int = 3000, force: bool = False) -> dict[str, int]:
+    async def sync_index_from_articles(
+        self,
+        db: AsyncSession,
+        *,
+        limit: int = 3000,
+        force: bool = False,
+        resolve_aggregators: bool = False,
+    ) -> dict[str, int]:
         if not force and self._last_sync_at and (self._now() - self._last_sync_at) < timedelta(minutes=30):
             return {"upserted": 0, "skipped": 0}
 
@@ -242,7 +265,7 @@ class LinkIntelligenceService:
         external_upserted = 0
         aggregator_resolved = 0
         aggregator_passthrough = 0
-        max_aggregator_resolve = 120
+        max_aggregator_resolve = 120 if resolve_aggregators else 0
         now = self._now()
         for article in articles:
             url = self._canonical_url(article.original_url or "")
@@ -284,6 +307,14 @@ class LinkIntelligenceService:
             trust = 0.85 if is_internal else (trusted.get(domain).trust_score if trusted.get(domain) else 0.6)
             category = article.category.value if getattr(article.category, "value", None) else (str(article.category) if article.category else None)
             keywords = article.keywords if isinstance(article.keywords, list) else []
+            published_at = article.published_at or article.crawled_at
+            metadata = {
+                "topic": category or "general",
+                "lang": self._detect_language(title),
+                "freshness": self._freshness_score(published_at),
+                "source_kind": "internal" if is_internal else "external",
+                "indexed_from": "articles",
+            }
 
             existing = by_url.get(url)
             if existing:
@@ -293,7 +324,8 @@ class LinkIntelligenceService:
                 existing.summary = (article.summary or "")[:2000]
                 existing.category = category
                 existing.keywords_json = keywords[:12]
-                existing.published_at = article.published_at or article.crawled_at
+                existing.metadata_json = metadata
+                existing.published_at = published_at
                 existing.authority_score = trust
                 existing.source_article_id = article.id
                 existing.is_active = True
@@ -311,7 +343,8 @@ class LinkIntelligenceService:
                 summary=(article.summary or "")[:2000],
                 category=category,
                 keywords_json=keywords[:12],
-                published_at=article.published_at or article.crawled_at,
+                metadata_json=metadata,
+                published_at=published_at,
                 authority_score=trust,
                 source_article_id=article.id,
                 is_active=True,
@@ -368,6 +401,13 @@ class LinkIntelligenceService:
                 return
 
             existing = by_url.get(canon)
+            metadata = {
+                "topic": existing.category if existing and existing.category else "general",
+                "lang": self._detect_language(clean_title),
+                "freshness": self._freshness_score(published_at),
+                "source_kind": "internal",
+                "indexed_from": "public_sources",
+            }
             if existing:
                 existing.link_type = "internal"
                 existing.domain = self._extract_domain(canon)
@@ -376,6 +416,7 @@ class LinkIntelligenceService:
                     existing.summary = summary[:2000]
                 if published_at:
                     existing.published_at = published_at
+                existing.metadata_json = {**(existing.metadata_json or {}), **metadata}
                 existing.authority_score = max(0.9, self._safe_float(existing.authority_score, 0.9))
                 existing.is_active = True
                 existing.last_seen_at = now
@@ -390,6 +431,7 @@ class LinkIntelligenceService:
                 summary=(summary or "")[:2000],
                 category=None,
                 keywords_json=[],
+                metadata_json=metadata,
                 published_at=published_at,
                 authority_score=0.92,
                 source_article_id=None,
@@ -465,6 +507,68 @@ class LinkIntelligenceService:
         )
         return row.scalar_one_or_none()
 
+    async def _external_candidates_from_articles(
+        self,
+        db: AsyncSession,
+        *,
+        trusted: dict[str, TrustedDomain],
+        limit: int = 900,
+    ) -> list[LinkIndexItem]:
+        rows = await db.execute(
+            select(Article)
+            .where(Article.original_url.is_not(None))
+            .order_by(desc(Article.updated_at))
+            .limit(limit)
+        )
+        out: list[LinkIndexItem] = []
+        seen_urls: set[str] = set()
+        for article in rows.scalars().all():
+            url = self._canonical_url(article.original_url or "")
+            if not url or self._is_internal(url):
+                continue
+            domain = self._extract_domain(url)
+            source_domain = self._extract_source_domain(article.source_name)
+            if domain in AGGREGATOR_DOMAINS and source_domain in trusted:
+                domain = source_domain
+            elif domain not in trusted and source_domain in trusted:
+                domain = source_domain
+            if domain not in trusted:
+                continue
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+
+            title = (article.title_ar or article.original_title or "").strip()
+            if len(title) < 6:
+                continue
+            category = article.category.value if getattr(article.category, "value", None) else (str(article.category) if article.category else None)
+            published_at = article.published_at or article.crawled_at
+            trust = self._safe_float(trusted[domain].trust_score, 0.75)
+            out.append(
+                LinkIndexItem(
+                    id=None,
+                    url=url,
+                    domain=domain,
+                    link_type="external",
+                    title=title[:1024],
+                    summary=(article.summary or "")[:2000],
+                    category=category,
+                    keywords_json=(article.keywords if isinstance(article.keywords, list) else [])[:12],
+                    metadata_json={
+                        "topic": category or "general",
+                        "lang": self._detect_language(title),
+                        "freshness": self._freshness_score(published_at),
+                        "source_kind": "external",
+                        "indexed_from": "article_scan",
+                    },
+                    published_at=published_at,
+                    authority_score=trust,
+                    source_article_id=article.id,
+                    is_active=True,
+                )
+            )
+        return out
+
     def _score_item(
         self,
         *,
@@ -473,7 +577,9 @@ class LinkIntelligenceService:
         query_category: str | None,
         item: LinkIndexItem,
     ) -> _ScoredItem | None:
-        if self._arabic_ratio(query_title) >= 0.35 and self._arabic_ratio(item.title or "") < 0.20:
+        item_meta = item.metadata_json or {}
+        item_lang = str(item_meta.get("lang") or self._detect_language(item.title or ""))
+        if self._arabic_ratio(query_title) >= 0.35 and item_lang == "en":
             return None
 
         title_tokens = self._tokens(item.title or "")
@@ -496,17 +602,17 @@ class LinkIntelligenceService:
             for q in query_tokens:
                 if len(q) < 4:
                     continue
-                for t in title_norm:
-                    if len(t) < 4:
+                for tok in title_norm:
+                    if len(tok) < 4:
                         continue
-                    if q in t or t in q:
+                    if q in tok or tok in q:
                         loose_hits.add(q)
                         break
             if loose_hits:
                 overlap_set = loose_hits
                 overlap_count = len(loose_hits)
             elif title_sim >= 0.42:
-                overlap_set = {"عنوان-مشابه"}
+                overlap_set = {"?????-?????"}
                 overlap_count = 1
         if overlap_count == 0:
             return None
@@ -516,19 +622,19 @@ class LinkIntelligenceService:
         overlap_ratio = overlap_count / max(1, len(query_tokens))
         title_overlap = len(query_tokens.intersection(title_tokens)) / max(1, len(query_tokens))
         category_match = 1.0 if query_category and item.category and query_category == item.category else 0.0
+        topic_match = 1.0 if query_category and str(item_meta.get("topic") or item.category or "") == query_category else 0.0
         authority = max(0.0, min(1.0, self._safe_float(item.authority_score, 0.5)))
 
-        recency = 0.45
-        if item.published_at:
-            age_hours = max(0.0, (self._now() - item.published_at).total_seconds() / 3600.0)  # type: ignore[operator]
-            recency = math.exp(-age_hours / 220.0)
+        recency = self._safe_float(item_meta.get("freshness"), -1.0)
+        if recency < 0.0:
+            recency = self._freshness_score(item.published_at)
 
         score = (
-            0.62 * overlap_ratio
+            0.50 * overlap_ratio
             + 0.14 * title_overlap
-            + 0.10 * category_match
-            + 0.08 * recency
-            + 0.06 * authority
+            + 0.10 * max(category_match, topic_match)
+            + 0.10 * recency
+            + 0.08 * authority
             + 0.08 * title_sim
         )
         threshold = INTERNAL_SCORE_THRESHOLD if item.link_type == "internal" else EXTERNAL_SCORE_THRESHOLD
@@ -537,13 +643,15 @@ class LinkIntelligenceService:
 
         confidence = max(0.0, min(1.0, score * 1.28))
         anchor = self._build_anchor(query_tokens, item.title)
-        link_kind = "داخلي" if item.link_type == "internal" else "خارجي"
-        matched_preview = "، ".join(sorted(list(overlap_set))[:4]) if overlap_set else "تطابق عام"
-        reason = f"مطابقة {link_kind}: {matched_preview}"
+        link_kind = "?????" if item.link_type == "internal" else "?????"
+        matched_preview = "? ".join(sorted(list(overlap_set))[:4]) if overlap_set else "????? ???"
+        reason = f"?????? {link_kind}: {matched_preview}"
+        if recency >= 0.70:
+            reason += " | ????? ??????"
         placement = (
-            "بعد فقرة الخلفية أو سياق الخبر"
+            "??? ???? ??????? ?? ???? ?????"
             if item.link_type == "internal"
-            else "بعد الجملة التي تحتوي تصريحا أو رقما يحتاج توثيقا"
+            else "??? ?????? ???? ????? ?????? ?? ???? ????? ??????"
         )
         rel_attrs = "internal" if item.link_type == "internal" else ("noopener noreferrer" if authority >= 0.85 else "noopener noreferrer nofollow")
 
@@ -588,10 +696,8 @@ class LinkIntelligenceService:
             row = await db.execute(select(Article).where(Article.id == draft.article_id))
             article = row.scalar_one_or_none()
 
-        sync_stats = await self.sync_index_from_articles(db)
-        public_sync = {"upserted": 0, "feed": 0, "sitemap": 0}
-        if mode in {"internal", "mixed"}:
-            public_sync = await self.sync_internal_from_public_sources(db)
+        sync_stats = {"mode": "index_only", "reason": ON_DEMAND_SYNC_DISABLED_REASON}
+        public_sync = {"mode": "index_only", "reason": ON_DEMAND_SYNC_DISABLED_REASON}
 
         body_text = re.sub(r"<[^>]+>", " ", draft.body or "")
         query_title = (draft.title or (article.title_ar if article else "") or (article.original_title if article else "") or "").strip()
@@ -612,39 +718,18 @@ class LinkIntelligenceService:
         elif mode == "external":
             stmt = stmt.where(LinkIndexItem.link_type == "external")
         rows = await db.execute(stmt.order_by(desc(LinkIndexItem.published_at)).limit(2500))
-        candidates = rows.scalars().all()
+        candidates = list(rows.scalars().all())
         trusted = await self._load_trusted_domains(db)
         internal_candidates_total = len([c for c in candidates if c.link_type == "internal"])
         external_candidates_total = len([c for c in candidates if c.link_type == "external"])
-
-        if mode in {"internal", "mixed"} and internal_candidates_total == 0:
-            retry_sync = await self.sync_internal_from_public_sources(db, force=True)
-            public_sync = {
-                **public_sync,
-                "retry_upserted": retry_sync.get("upserted", 0),
-                "retry_feed": retry_sync.get("feed", 0),
-                "retry_sitemap": retry_sync.get("sitemap", 0),
-                "retry_feed_ok": retry_sync.get("feed_ok", 0),
-                "retry_sitemap_ok": retry_sync.get("sitemap_ok", 0),
-            }
-            rows = await db.execute(stmt.order_by(desc(LinkIndexItem.published_at)).limit(2500))
-            candidates = rows.scalars().all()
-            internal_candidates_total = len([c for c in candidates if c.link_type == "internal"])
-            external_candidates_total = len([c for c in candidates if c.link_type == "external"])
-
         if mode in {"external", "mixed"} and external_candidates_total == 0:
-            retry_external_sync = await self.sync_index_from_articles(db, force=True, limit=1200)
+            article_external = await self._external_candidates_from_articles(db, trusted=trusted)
+            candidates.extend(article_external)
+            external_candidates_total = len([c for c in candidates if c.link_type == "external"])
             sync_stats = {
                 **sync_stats,
-                "retry_external_upserted": retry_external_sync.get("external_upserted", 0),
-                "retry_external_total": retry_external_sync.get("upserted", 0),
-                "retry_aggregator_resolved": retry_external_sync.get("aggregator_resolved", 0),
-                "retry_aggregator_passthrough": retry_external_sync.get("aggregator_passthrough", 0),
+                "external_article_scan_candidates": external_candidates_total,
             }
-            rows = await db.execute(stmt.order_by(desc(LinkIndexItem.published_at)).limit(2500))
-            candidates = rows.scalars().all()
-            internal_candidates_total = len([c for c in candidates if c.link_type == "internal"])
-            external_candidates_total = len([c for c in candidates if c.link_type == "external"])
 
         source_url = self._canonical_url(article.original_url) if article and article.original_url else ""
 

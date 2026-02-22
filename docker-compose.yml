@@ -43,6 +43,7 @@ services:
       REDIS_HOST: redis
       APP_ENV: production
       APP_DEBUG: "false"
+    user: "${APP_UID:-10001}:${APP_GID:-10001}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -65,6 +66,7 @@ services:
       REDIS_HOST: redis
       APP_ENV: production
       APP_DEBUG: "false"
+    user: "${APP_UID:-10001}:${APP_GID:-10001}"
     depends_on:
       redis:
         condition: service_healthy

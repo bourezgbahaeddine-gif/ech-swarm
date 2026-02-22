@@ -12,6 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routes.auth import get_current_user
+from app.core.correlation import get_correlation_id, get_request_id
 from app.core.database import async_session, get_db
 from app.models.user import User, UserRole
 from app.schemas.simulator import (
@@ -87,8 +88,8 @@ async def run_simulation(
         queue_name="ai_simulator",
         payload={"run_id": run.run_id},
         entity_id=run.run_id,
-        request_id=request.headers.get("x-request-id"),
-        correlation_id=request.headers.get("x-correlation-id"),
+        request_id=request.headers.get("x-request-id") or get_request_id(),
+        correlation_id=request.headers.get("x-correlation-id") or get_correlation_id(),
         actor_user_id=current_user.id,
         actor_username=current_user.username,
     )
