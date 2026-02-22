@@ -8,6 +8,7 @@ RSS burst detection, and competitor feeds.
 import asyncio
 from collections import Counter
 from datetime import timedelta
+from datetime import datetime
 from typing import Optional
 import re
 import math
@@ -197,7 +198,10 @@ class TrendRadarAgent:
             if alerts:
                 await cache_service.set_json(
                     f"trends:last:{geo}:{category}",
-                    {"alerts": [a.model_dump(mode="json") for a in alerts]},
+                    {
+                        "alerts": [a.model_dump(mode="json") for a in alerts],
+                        "generated_at": datetime.utcnow().isoformat(),
+                    },
                     ttl=timedelta(minutes=20),
                 )
 

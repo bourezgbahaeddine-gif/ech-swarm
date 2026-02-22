@@ -190,6 +190,26 @@ class JobQueueService:
         rows = await db.execute(stmt)
         return list(rows.scalars().all())
 
+    async def find_active_job(
+        self,
+        db: AsyncSession,
+        *,
+        job_type: str,
+        entity_id: str | None = None,
+        max_age_minutes: int = 30,
+    ) -> JobRun | None:
+        cutoff = datetime.utcnow() - timedelta(minutes=max(1, max_age_minutes))
+        stmt = select(JobRun).where(
+            JobRun.job_type == job_type,
+            JobRun.status.in_(("queued", "running")),
+            JobRun.queued_at >= cutoff,
+        )
+        if entity_id:
+            stmt = stmt.where(JobRun.entity_id == entity_id)
+        stmt = stmt.order_by(desc(JobRun.queued_at)).limit(1)
+        rows = await db.execute(stmt)
+        return rows.scalar_one_or_none()
+
     async def queue_depths(self) -> dict[str, int]:
         queue_names = sorted(set(list(QUEUE_LIMITS.keys()) + [settings.queue_default_name]))
         depths: dict[str, int] = {}

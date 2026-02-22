@@ -111,6 +111,15 @@ async def _run_pipeline_once():
 
 async def _run_trends_once():
     async with async_session() as db:
+        active_job = await job_queue_service.find_active_job(
+            db,
+            job_type="trends_scan",
+            entity_id="auto_trends",
+            max_age_minutes=max(5, settings.trend_radar_interval_minutes * 2),
+        )
+        if active_job:
+            logger.info("auto_trends_skip_active_job", job_id=str(active_job.id), status=active_job.status)
+            return
         allowed, depth, limit_depth = await job_queue_service.check_backpressure("ai_trends")
         if not allowed:
             logger.warning("auto_trends_backpressure", depth=depth, limit=limit_depth)
@@ -193,7 +202,6 @@ async def lifespan(app: FastAPI):
     _shutdown_event.clear()
     if settings.auto_pipeline_enabled:
         newsroom_interval_seconds = 20 * 60
-        trend_interval_seconds = 10 * 60
         _pipeline_task = asyncio.create_task(
             _periodic_loop(
                 "pipeline",
@@ -201,6 +209,14 @@ async def lifespan(app: FastAPI):
                 _run_pipeline_once,
             )
         )
+        logger.info(
+            "auto_pipeline_enabled",
+            scout_interval_minutes=20,
+            auto_scribe_enabled=settings.auto_scribe_enabled,
+        )
+
+    if settings.auto_trends_enabled:
+        trend_interval_seconds = max(300, settings.trend_radar_interval_minutes * 60)
         _trends_task = asyncio.create_task(
             _periodic_loop(
                 "trends",
@@ -209,10 +225,8 @@ async def lifespan(app: FastAPI):
             )
         )
         logger.info(
-            "auto_pipeline_enabled",
-            scout_interval_minutes=20,
-            trend_interval_minutes=10,
-            auto_scribe_enabled=settings.auto_scribe_enabled,
+            "auto_trends_enabled",
+            trend_interval_minutes=settings.trend_radar_interval_minutes,
         )
 
     if settings.published_monitor_enabled:

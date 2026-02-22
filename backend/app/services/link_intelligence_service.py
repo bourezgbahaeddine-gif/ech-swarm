@@ -116,6 +116,8 @@ class _ScoredItem:
     reason: str
     placement_hint: str
     rel_attrs: str
+    matched_terms: tuple[str, ...]
+    topic_key: str
 
 
 class LinkIntelligenceService:
@@ -678,7 +680,16 @@ class LinkIntelligenceService:
         informative_overlap = len([tok for tok in overlap_set if tok not in GENERIC_QUERY_TERMS])
         category_match = 1.0 if query_category and item.category and query_category == item.category else 0.0
         topic_match = 1.0 if query_category and str(item_meta.get("topic") or item.category or "") == query_category else 0.0
+        topical_signal = max(category_match, topic_match)
         authority = max(0.0, min(1.0, self._safe_float(item.authority_score, 0.5)))
+
+        # Strict topical gate for internal links: reject generic/weak overlap to avoid off-topic suggestions.
+        generic_only_overlap = overlap_count > 0 and informative_overlap == 0
+        if item.link_type == "internal":
+            if generic_only_overlap and title_sim < 0.32 and topical_signal < 1.0:
+                return None
+            if overlap_ratio < 0.10 and title_sim < 0.30 and topical_signal < 1.0:
+                return None
 
         recency = self._safe_float(item_meta.get("freshness"), -1.0)
         if recency < 0.0:
@@ -731,6 +742,8 @@ class LinkIntelligenceService:
             reason=reason,
             placement_hint=placement,
             rel_attrs=rel_attrs,
+            matched_terms=tuple(sorted(list(overlap_set))[:6]),
+            topic_key=self._topic_key(item),
         )
 
     def _build_anchor(self, query_tokens: set[str], title: str) -> str:
@@ -745,6 +758,47 @@ class LinkIntelligenceService:
         if not words:
             return "تفاصيل ذات صلة"
         return " ".join(words[: min(5, len(words))])[:120]
+
+    @staticmethod
+    def _topic_key(item: LinkIndexItem) -> str:
+        meta = item.metadata_json or {}
+        topic = str(meta.get("topic") or item.category or "general").strip().lower()
+        return topic or "general"
+
+    def _select_internal_diverse(self, items: list[_ScoredItem], limit: int) -> list[_ScoredItem]:
+        if limit <= 0 or not items:
+            return []
+        selected: list[_ScoredItem] = []
+        topic_usage: dict[str, int] = {}
+        term_usage: dict[str, int] = {}
+        remaining = list(items)
+
+        while remaining and len(selected) < limit:
+            best_idx = 0
+            best_adjusted = -10.0
+            for idx, rec in enumerate(remaining):
+                adjusted = rec.score
+                topic_hits = topic_usage.get(rec.topic_key, 0)
+                if topic_hits == 0:
+                    adjusted += 0.015
+                else:
+                    adjusted -= min(0.09, 0.03 * topic_hits)
+
+                repeated_term_penalty = 0.0
+                for term in rec.matched_terms:
+                    repeated_term_penalty += 0.016 * term_usage.get(term, 0)
+                adjusted -= min(0.08, repeated_term_penalty)
+
+                if adjusted > best_adjusted:
+                    best_adjusted = adjusted
+                    best_idx = idx
+
+            picked = remaining.pop(best_idx)
+            selected.append(picked)
+            topic_usage[picked.topic_key] = topic_usage.get(picked.topic_key, 0) + 1
+            for term in picked.matched_terms:
+                term_usage[term] = term_usage.get(term, 0) + 1
+        return selected
 
     async def suggest_for_workspace(
         self,
@@ -782,6 +836,8 @@ class LinkIntelligenceService:
                     break
         if not query_tokens:
             query_tokens = {"الجزائر", "خبر"}
+        scoring_tokens = {tok for tok in query_tokens if tok not in GENERIC_QUERY_TERMS}
+        active_query_tokens = scoring_tokens if len(scoring_tokens) >= 3 else query_tokens
 
         stmt = select(LinkIndexItem).where(LinkIndexItem.is_active.is_(True))
         if mode == "internal":
@@ -816,7 +872,12 @@ class LinkIntelligenceService:
                     continue
                 if self._safe_float(td.trust_score, 0.0) < TRUSTED_EXTERNAL_MIN:
                     continue
-            scored = self._score_item(query_tokens=query_tokens, query_title=query_title, query_category=query_category, item=item)
+            scored = self._score_item(
+                query_tokens=active_query_tokens,
+                query_title=query_title,
+                query_category=query_category,
+                item=item,
+            )
             if not scored:
                 continue
             if item.link_type == "internal":
@@ -829,7 +890,7 @@ class LinkIntelligenceService:
 
         selected: list[_ScoredItem] = []
         if mode == "internal":
-            selected = scored_internal[:target_count]
+            selected = self._select_internal_diverse(scored_internal, target_count)
         elif mode == "external":
             selected = self._dedupe_by_domain(scored_external, target_count)
         else:
@@ -839,13 +900,14 @@ class LinkIntelligenceService:
             if allow_external:
                 external_take = 2 if len(top_external) > 1 and top_external[1].score >= 0.24 else 1
             internal_target = target_count - external_take
-            selected.extend(scored_internal[: max(0, internal_target)])
+            selected.extend(self._select_internal_diverse(scored_internal, max(0, internal_target)))
             if allow_external:
                 selected.extend(top_external[:external_take])
             if len(selected) < target_count:
                 missing = target_count - len(selected)
-                backup = scored_internal[len(selected): len(selected) + missing]
-                selected.extend(backup)
+                selected_urls = {x.item.url for x in selected}
+                backup_pool = [x for x in scored_internal if x.item.url not in selected_urls]
+                selected.extend(self._select_internal_diverse(backup_pool, missing))
         selected_before_fallback = len(selected)
 
         # Hard fallback: never return empty internal suggestions when internal candidates exist
@@ -860,10 +922,12 @@ class LinkIntelligenceService:
                         item=fb,
                         score=0.2401,
                         confidence=0.41,
-                        anchor_text=self._build_anchor(query_tokens, fb.title or ""),
+                        anchor_text=self._build_anchor(active_query_tokens, fb.title or ""),
                         reason="مطابقة داخلية احتياطية من أحدث محتوى الشروق",
                         placement_hint="بعد الفقرة التي تشرح خلفية الخبر",
                         rel_attrs="internal",
+                        matched_terms=tuple(),
+                        topic_key=self._topic_key(fb),
                     )
                 )
                 if len([x for x in selected if x.item.link_type == "internal"]) >= max(1, min(3, target_count)):
@@ -884,10 +948,12 @@ class LinkIntelligenceService:
                     item=fb,
                     score=0.2301,
                     confidence=0.39,
-                    anchor_text=self._build_anchor(query_tokens, fb.title or ""),
+                    anchor_text=self._build_anchor(active_query_tokens, fb.title or ""),
                     reason="مرجع خارجي موثوق احتياطي من مصدر عالي الثقة",
                     placement_hint="بعد الجملة التي تحتاج توثيقا أو رقما رسميا",
                     rel_attrs="noopener noreferrer",
+                    matched_terms=tuple(),
+                    topic_key=self._topic_key(fb),
                 )
                 if mode == "mixed" and len(selected) >= target_count:
                     selected = selected[: max(0, target_count - 1)] + [fallback_scored]

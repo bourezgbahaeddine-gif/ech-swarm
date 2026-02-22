@@ -291,6 +291,22 @@ async def trigger_trend_scan(
 ):
     """Enqueue trend scan run."""
     _assert_trend_permission(current_user)
+    geo_upper = geo.upper()
+    category_lower = category.lower()
+    entity_id = f"trend:{geo_upper}:{category_lower}"
+    active = await job_queue_service.find_active_job(
+        db,
+        job_type="trends_scan",
+        entity_id=entity_id,
+        max_age_minutes=max(5, settings.trend_radar_interval_minutes * 2),
+    )
+    if active:
+        return {
+            "message": "Trends scan already active.",
+            "job_id": str(active.id),
+            "status": active.status,
+            "job_type": "trends_scan",
+        }
     ticket = await _enqueue_dashboard_job(
         db=db,
         request=request,
@@ -298,12 +314,12 @@ async def trigger_trend_scan(
         job_type="trends_scan",
         queue_name="ai_trends",
         payload={
-            "geo": geo.upper(),
-            "category": category.lower(),
+            "geo": geo_upper,
+            "category": category_lower,
             "limit": limit,
             "mode": mode.lower(),
         },
-        entity_id=f"trend:{geo.upper()}:{category.lower()}",
+        entity_id=entity_id,
     )
     return {"message": "Trends scan queued.", **ticket}
 
@@ -314,6 +330,8 @@ async def get_latest_trend_scan(
     geo: str = Query("DZ", min_length=2, max_length=16),
     category: str = Query("all", min_length=2, max_length=32),
     refresh_if_empty: bool = Query(True),
+    refresh_if_stale: bool = Query(True),
+    stale_after_minutes: int = Query(20, ge=5, le=120),
     limit: int = Query(12, ge=1, le=30),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -323,10 +341,32 @@ async def get_latest_trend_scan(
     geo = geo.upper()
     category = category.lower()
     payload = await cache_service.get_json(f"trends:last:{geo}:{category}")
-    if payload and payload.get("alerts"):
+    generated_at = None
+    if payload and payload.get("generated_at"):
+        try:
+            generated_at = datetime.fromisoformat(str(payload.get("generated_at")))
+        except Exception:  # noqa: BLE001
+            generated_at = None
+    stale_cutoff = datetime.utcnow() - timedelta(minutes=stale_after_minutes)
+    is_stale = bool(payload and generated_at and generated_at <= stale_cutoff)
+
+    if payload and payload.get("alerts") and not (refresh_if_stale and is_stale):
         return payload
 
-    if refresh_if_empty:
+    should_refresh = (refresh_if_empty and not (payload and payload.get("alerts"))) or (refresh_if_stale and is_stale)
+    if should_refresh:
+        entity_id = f"trend:{geo}:{category}"
+        active = await job_queue_service.find_active_job(
+            db,
+            job_type="trends_scan",
+            entity_id=entity_id,
+            max_age_minutes=max(5, settings.trend_radar_interval_minutes * 2),
+        )
+        if active:
+            status_payload = {"alerts": (payload or {}).get("alerts", []), "status": "refresh_running", "job_id": str(active.id)}
+            if payload and payload.get("generated_at"):
+                status_payload["generated_at"] = payload.get("generated_at")
+            return status_payload
         ticket = await _enqueue_dashboard_job(
             db=db,
             request=request,
@@ -334,9 +374,12 @@ async def get_latest_trend_scan(
             job_type="trends_scan",
             queue_name="ai_trends",
             payload={"geo": geo, "category": category, "limit": limit, "mode": "fast"},
-            entity_id=f"trend:{geo}:{category}",
+            entity_id=entity_id,
         )
-        return {"alerts": [], "status": "refresh_queued", **ticket}
+        refresh_status = "refresh_queued"
+        if is_stale:
+            refresh_status = "stale_refresh_queued"
+        return {"alerts": (payload or {}).get("alerts", []), "status": refresh_status, **ticket}
 
     return payload or {"alerts": []}
 

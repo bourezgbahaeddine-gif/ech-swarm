@@ -85,6 +85,7 @@ class Settings(BaseSettings):
     scout_interval_minutes: int = 20
     trend_radar_interval_minutes: int = 10
     auto_pipeline_enabled: bool = False
+    auto_trends_enabled: bool = True
     auto_scribe_enabled: bool = True
     published_monitor_enabled: bool = True
     published_monitor_interval_minutes: int = 15
