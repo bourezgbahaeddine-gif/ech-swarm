@@ -10,6 +10,7 @@ import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from difflib import SequenceMatcher
 from email.utils import parsedate_to_datetime
 from html import unescape
 from typing import Any
@@ -39,7 +40,7 @@ ECHOROUK_FEED_URL = "https://www.echoroukonline.com/feed"
 ECHOROUK_NEWS_SITEMAP_URL = "https://www.echoroukonline.com/news-sitemap.xml"
 
 TRUSTED_EXTERNAL_MIN = 0.78
-INTERNAL_SCORE_THRESHOLD = 0.26
+INTERNAL_SCORE_THRESHOLD = 0.16
 EXTERNAL_SCORE_THRESHOLD = 0.34
 
 
@@ -358,6 +359,10 @@ class LinkIntelligenceService:
         if not item_tokens:
             return None
 
+        query_title_norm = re.sub(r"\s+", " ", (query_title or "").strip().lower())
+        item_title_norm = re.sub(r"\s+", " ", (item.title or "").strip().lower())
+        title_sim = SequenceMatcher(None, query_title_norm, item_title_norm).ratio() if query_title_norm and item_title_norm else 0.0
+
         overlap_set = query_tokens.intersection(item_tokens)
         overlap_count = len(overlap_set)
         if overlap_count == 0 and item.link_type == "internal":
@@ -376,6 +381,9 @@ class LinkIntelligenceService:
             if loose_hits:
                 overlap_set = loose_hits
                 overlap_count = len(loose_hits)
+            elif title_sim >= 0.42:
+                overlap_set = {"عنوان-مشابه"}
+                overlap_count = 1
         if overlap_count == 0:
             return None
         if item.link_type == "external" and overlap_count < 2:
@@ -397,6 +405,7 @@ class LinkIntelligenceService:
             + 0.10 * category_match
             + 0.08 * recency
             + 0.06 * authority
+            + 0.08 * title_sim
         )
         threshold = INTERNAL_SCORE_THRESHOLD if item.link_type == "internal" else EXTERNAL_SCORE_THRESHOLD
         if score < threshold:
@@ -540,6 +549,7 @@ class LinkIntelligenceService:
                 missing = target_count - len(selected)
                 backup = scored_internal[len(selected): len(selected) + missing]
                 selected.extend(backup)
+        selected_before_fallback = len(selected)
 
         # Hard fallback: never return empty internal suggestions when internal candidates exist
         if mode in {"internal", "mixed"} and not [x for x in selected if x.item.link_type == "internal"]:
@@ -590,6 +600,7 @@ class LinkIntelligenceService:
                 "external_pool": len(scored_external),
                 "internal_selected": len([x for x in selected if x.item.link_type == "internal"]),
                 "external_selected": len([x for x in selected if x.item.link_type == "external"]),
+                "selected_before_fallback": selected_before_fallback,
                 "selected": len(selected),
                 "query_terms": sorted(list(query_tokens))[:8],
                 "sync": sync_stats,
