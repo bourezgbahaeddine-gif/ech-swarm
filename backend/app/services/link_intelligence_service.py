@@ -612,7 +612,7 @@ class LinkIntelligenceService:
                 overlap_set = loose_hits
                 overlap_count = len(loose_hits)
             elif title_sim >= 0.42:
-                overlap_set = {"?????-?????"}
+                overlap_set = {"مطابقة-عنوان"}
                 overlap_count = 1
         if overlap_count == 0:
             return None
@@ -643,15 +643,15 @@ class LinkIntelligenceService:
 
         confidence = max(0.0, min(1.0, score * 1.28))
         anchor = self._build_anchor(query_tokens, item.title)
-        link_kind = "?????" if item.link_type == "internal" else "?????"
-        matched_preview = "? ".join(sorted(list(overlap_set))[:4]) if overlap_set else "????? ???"
-        reason = f"?????? {link_kind}: {matched_preview}"
+        link_kind = "داخلي" if item.link_type == "internal" else "خارجي"
+        matched_preview = "، ".join(sorted(list(overlap_set))[:4]) if overlap_set else "تطابق موضوعي"
+        reason = f"مطابقة {link_kind}: {matched_preview}"
         if recency >= 0.70:
-            reason += " | ????? ??????"
+            reason += " | حداثة مرتفعة"
         placement = (
-            "??? ???? ??????? ?? ???? ?????"
+            "بعد فقرة الخلفية أو السياق"
             if item.link_type == "internal"
-            else "??? ?????? ???? ????? ?????? ?? ???? ????? ??????"
+            else "بعد الجملة التي تحتاج توثيقاً أو رقماً رسمياً"
         )
         rel_attrs = "internal" if item.link_type == "internal" else ("noopener noreferrer" if authority >= 0.85 else "noopener noreferrer nofollow")
 
