@@ -533,18 +533,6 @@ function WorkspaceDraftsPageContent() {
             queryClient.invalidateQueries({ queryKey: ['smart-editor-context', workId] });
         },
     });
-    const isEditorActionPending =
-        runQuickCheck.isPending ||
-        runVerifier.isPending ||
-        rewrite.isPending ||
-        runHeadlines.isPending ||
-        runSeo.isPending ||
-        runLinks.isPending ||
-        runSocial.isPending ||
-        runQuality.isPending ||
-        runReadiness.isPending ||
-        applyToArticle.isPending ||
-        applySuggestion.isPending;
     const createManualDraft = useMutation({
         mutationFn: () =>
             editorialApi.createManualWorkspaceDraft({
@@ -621,7 +609,13 @@ function WorkspaceDraftsPageContent() {
         setErr(null);
         setOk(null);
         if (typeof window === 'undefined') return callback();
-        if (window.localStorage.getItem(actionKey(action))) return callback();
+        try {
+            if (window.localStorage.getItem(actionKey(action))) return callback();
+        } catch {
+            // Privacy mode / blocked storage: never block the action.
+            callback();
+            return;
+        }
         pendingActionRef.current = callback;
         setGuideType('action');
         setGuideAction(action);
@@ -762,25 +756,25 @@ function WorkspaceDraftsPageContent() {
                 <div className="mt-3 flex flex-wrap gap-2">
                     <button
                         onClick={() => runWithGuide('quick_check', () => runQuickCheck.mutate())}
-                        disabled={isEditorActionPending}
+                        disabled={runQuickCheck.isPending}
                         className="px-3 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-100 text-xs flex items-center gap-2 disabled:opacity-60"
                     >
                         <ShieldCheck className="w-4 h-4" />
                         {runQuickCheck.isPending ? 'جاري الفحص...' : 'فحص سريع'}
                     </button>
-                    <button disabled={isEditorActionPending} onClick={() => runWithGuide('verify', () => runVerifier.mutate())} className="px-3 py-2 rounded-xl bg-cyan-500/20 border border-cyan-500/30 text-cyan-200 text-xs flex items-center gap-2 disabled:opacity-60"><SearchCheck className="w-4 h-4" />تحقق</button>
-                    <button disabled={isEditorActionPending} onClick={() => runWithGuide('improve', () => rewrite.mutate())} className="px-3 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-2 disabled:opacity-60"><Sparkles className="w-4 h-4" />تحسين</button>
-                    <button disabled={isEditorActionPending} onClick={() => runWithGuide('headlines', () => runHeadlines.mutate())} className="px-3 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-200 text-xs disabled:opacity-60">عناوين</button>
-                    <button disabled={isEditorActionPending} onClick={() => runWithGuide('seo', () => runSeo.mutate())} className="px-3 py-2 rounded-xl bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-200 text-xs disabled:opacity-60">SEO</button>
-                    <button disabled={isEditorActionPending} onClick={() => runWithGuide('links', () => runLinks.mutate())} className="px-3 py-2 rounded-xl bg-teal-500/20 border border-teal-500/30 text-teal-200 text-xs disabled:opacity-60">روابط</button>
-                    <button disabled={isEditorActionPending} onClick={() => runWithGuide('social', () => runSocial.mutate())} className="px-3 py-2 rounded-xl bg-sky-500/20 border border-sky-500/30 text-sky-200 text-xs disabled:opacity-60">سوشيال</button>
-                    <button disabled={isEditorActionPending} onClick={() => runWithGuide('quality', () => runQuality.mutate())} className="px-3 py-2 rounded-xl bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs disabled:opacity-60">جودة</button>
-                    <button disabled={isEditorActionPending || runAudienceSimulation.isPending} onClick={() => runWithGuide('audience_test', () => runAudienceSimulation.mutate())} className="px-3 py-2 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-100 text-xs disabled:opacity-60">
+                    <button disabled={runVerifier.isPending} onClick={() => runWithGuide('verify', () => runVerifier.mutate())} className="px-3 py-2 rounded-xl bg-cyan-500/20 border border-cyan-500/30 text-cyan-200 text-xs flex items-center gap-2 disabled:opacity-60"><SearchCheck className="w-4 h-4" />{runVerifier.isPending ? 'جاري التحقق...' : 'تحقق'}</button>
+                    <button disabled={rewrite.isPending} onClick={() => runWithGuide('improve', () => rewrite.mutate())} className="px-3 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-2 disabled:opacity-60"><Sparkles className="w-4 h-4" />{rewrite.isPending ? 'جاري التحسين...' : 'تحسين'}</button>
+                    <button disabled={runHeadlines.isPending} onClick={() => runWithGuide('headlines', () => runHeadlines.mutate())} className="px-3 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-200 text-xs disabled:opacity-60">{runHeadlines.isPending ? 'جاري التوليد...' : 'عناوين'}</button>
+                    <button disabled={runSeo.isPending} onClick={() => runWithGuide('seo', () => runSeo.mutate())} className="px-3 py-2 rounded-xl bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-200 text-xs disabled:opacity-60">{runSeo.isPending ? 'جاري التحليل...' : 'SEO'}</button>
+                    <button disabled={runLinks.isPending} onClick={() => runWithGuide('links', () => runLinks.mutate())} className="px-3 py-2 rounded-xl bg-teal-500/20 border border-teal-500/30 text-teal-200 text-xs disabled:opacity-60">{runLinks.isPending ? 'جاري جلب الروابط...' : 'روابط'}</button>
+                    <button disabled={runSocial.isPending} onClick={() => runWithGuide('social', () => runSocial.mutate())} className="px-3 py-2 rounded-xl bg-sky-500/20 border border-sky-500/30 text-sky-200 text-xs disabled:opacity-60">{runSocial.isPending ? 'جاري التوليد...' : 'سوشيال'}</button>
+                    <button disabled={runQuality.isPending} onClick={() => runWithGuide('quality', () => runQuality.mutate())} className="px-3 py-2 rounded-xl bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs disabled:opacity-60">{runQuality.isPending ? 'جاري التقييم...' : 'جودة'}</button>
+                    <button disabled={runAudienceSimulation.isPending} onClick={() => runWithGuide('audience_test', () => runAudienceSimulation.mutate())} className="px-3 py-2 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-100 text-xs disabled:opacity-60">
                         محاكي الجمهور
                     </button>
-                    <button disabled={isEditorActionPending} onClick={() => runWithGuide('publish_gate', () => runReadiness.mutate())} className="px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-200 text-xs disabled:opacity-60">بوابة النشر</button>
-                    <button disabled={isEditorActionPending} onClick={() => runWithGuide('apply', () => applyToArticle.mutate())} className="px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs disabled:opacity-60">إرسال لاعتماد رئيس التحرير</button>
-                    <button disabled={isEditorActionPending || autosave.isPending} onClick={() => runWithGuide('save', () => { setSaveState('saving'); autosave.mutate(); })} className="px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs flex items-center gap-2 disabled:opacity-60"><Save className="w-4 h-4" />حفظ</button>
+                    <button disabled={runReadiness.isPending} onClick={() => runWithGuide('publish_gate', () => runReadiness.mutate())} className="px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-200 text-xs disabled:opacity-60">{runReadiness.isPending ? 'جاري الفحص...' : 'بوابة النشر'}</button>
+                    <button disabled={applyToArticle.isPending} onClick={() => runWithGuide('apply', () => applyToArticle.mutate())} className="px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs disabled:opacity-60">{applyToArticle.isPending ? 'جاري الإرسال...' : 'إرسال لاعتماد رئيس التحرير'}</button>
+                    <button disabled={autosave.isPending} onClick={() => runWithGuide('save', () => { setSaveState('saving'); autosave.mutate(); })} className="px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs flex items-center gap-2 disabled:opacity-60"><Save className="w-4 h-4" />حفظ</button>
                 </div>
 
                 {(err || ok) && <div className={cn('mt-3 rounded-xl px-3 py-2 text-xs', err ? 'bg-red-500/15 text-red-200 border border-red-500/30' : 'bg-emerald-500/15 text-emerald-200 border border-emerald-500/30')}>{err || ok}</div>}
