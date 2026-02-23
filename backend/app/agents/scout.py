@@ -167,6 +167,34 @@ class ScoutAgent:
         await db.commit()
 
     @staticmethod
+    def _normalized_host(url: str) -> str:
+        try:
+            host = (urlparse(url or "").netloc or "").lower()
+        except Exception:
+            return ""
+        if host.startswith("www."):
+            host = host[4:]
+        return host
+
+    def _is_blocked_source_entry(self, source_name: str, link: str) -> bool:
+        blocked_domains = settings.scout_blocked_domains_set
+        if not blocked_domains:
+            return False
+        source_host = self._normalized_host(source_name)
+        link_host = self._normalized_host(link)
+        source_name_l = (source_name or "").lower()
+        for blocked in blocked_domains:
+            if not blocked:
+                continue
+            if source_host and (source_host == blocked or source_host.endswith(f".{blocked}")):
+                return True
+            if link_host and (link_host == blocked or link_host.endswith(f".{blocked}")):
+                return True
+            if blocked in source_name_l:
+                return True
+        return False
+
+    @staticmethod
     def _entry_source_name(entry) -> str:
         """Best-effort source extraction from FreshRSS item."""
         def clean_name(value: str) -> str:
@@ -419,8 +447,16 @@ class ScoutAgent:
         else:
             title = entry.get("title", "").strip()
             link = entry.get("link", "").strip()
-
         if not title or not link:
+            return
+
+        if self._is_blocked_source_entry(source.name, link):
+            stats["duplicates"] += 1
+            logger.info(
+                "entry_skipped_blocked_source",
+                source=source.name,
+                link=link,
+            )
             return
 
         # ── Deduplication Gate ──

@@ -151,6 +151,7 @@ class Settings(BaseSettings):
     scout_concurrency: int = 8
     scout_max_new_per_run: int = 250
     scout_max_article_age_hours: int = 72
+    scout_blocked_domains: str = "echoroukonline.com,www.echoroukonline.com"
 
     # TTS
     tts_voice: str = "ar-DZ-IsmaelNeural"
@@ -163,6 +164,18 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",")]
+
+    @property
+    def scout_blocked_domains_set(self) -> set[str]:
+        domains: set[str] = set()
+        for raw in (self.scout_blocked_domains or "").split(","):
+            host = raw.strip().lower()
+            if not host:
+                continue
+            if host.startswith("www."):
+                host = host[4:]
+            domains.add(host)
+        return domains
 
     class Config:
         env_file = ".env"
