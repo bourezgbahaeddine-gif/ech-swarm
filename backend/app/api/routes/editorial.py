@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
 import re
 from typing import Any, Literal, Optional
@@ -311,6 +311,61 @@ async def _enqueue_editorial_ai_job(
     payload: dict[str, Any] | None = None,
     max_attempts: int = 5,
 ) -> dict[str, Any]:
+    def _coerce_bool(raw: str | None, default: bool) -> bool:
+        if raw is None:
+            return default
+        return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+    def _coerce_wait_timeout(raw: str | None, default: int = 90) -> int:
+        try:
+            value = int(raw) if raw is not None else default
+        except (TypeError, ValueError):
+            value = default
+        return max(5, min(value, 180))
+
+    wait_for_result = _coerce_bool(request.query_params.get("wait"), True)
+    wait_timeout_seconds = _coerce_wait_timeout(request.query_params.get("wait_timeout_seconds"), 90)
+
+    active = await job_queue_service.find_active_job(
+        db,
+        job_type=job_type,
+        entity_id=work_id,
+        max_age_minutes=45,
+    )
+    if active:
+        ticket = {
+            "job_id": str(active.id),
+            "status": active.status,
+            "work_id": work_id,
+            "operation": operation,
+        }
+        if not wait_for_result:
+            return ticket
+        deadline = datetime.utcnow() + timedelta(seconds=wait_timeout_seconds)
+        while datetime.utcnow() < deadline:
+            current = await job_queue_service.get_job(db, str(active.id))
+            if not current:
+                break
+            if current.status == "completed":
+                result_payload = current.result_json or {}
+                return {
+                    "job_id": str(active.id),
+                    "status": "completed",
+                    "work_id": work_id,
+                    "operation": operation,
+                    **result_payload,
+                }
+            if current.status in {"failed", "dead_lettered"}:
+                return {
+                    "job_id": str(active.id),
+                    "status": current.status,
+                    "work_id": work_id,
+                    "operation": operation,
+                    "error": current.error,
+                }
+            await asyncio.sleep(1)
+        return ticket
+
     allowed, depth, limit_depth = await job_queue_service.check_backpressure(queue_name)
     if not allowed:
         raise HTTPException(
@@ -353,6 +408,34 @@ async def _enqueue_editorial_ai_job(
         "work_id": work_id,
         "operation": operation,
     }
+    if not wait_for_result:
+        return ticket
+
+    deadline = datetime.utcnow() + timedelta(seconds=wait_timeout_seconds)
+    while datetime.utcnow() < deadline:
+        current = await job_queue_service.get_job(db, str(job.id))
+        if not current:
+            break
+        if current.status == "completed":
+            result_payload = current.result_json or {}
+            return {
+                "job_id": str(job.id),
+                "status": "completed",
+                "work_id": work_id,
+                "operation": operation,
+                **result_payload,
+            }
+        if current.status in {"failed", "dead_lettered"}:
+            return {
+                "job_id": str(job.id),
+                "status": current.status,
+                "work_id": work_id,
+                "operation": operation,
+                "error": current.error,
+            }
+        await asyncio.sleep(1)
+
+    return ticket
 
 
 NEWSROOM_ROLES = {

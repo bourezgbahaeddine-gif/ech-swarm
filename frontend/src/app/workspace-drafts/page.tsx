@@ -177,6 +177,7 @@ function WorkspaceDraftsPageContent() {
     const [guideType, setGuideType] = useState<GuideType>('welcome');
     const [guideAction, setGuideAction] = useState<ActionId | null>(null);
     const pendingActionRef = useRef<null | (() => void)>(null);
+    const lastSavedRef = useRef<{ title: string; body: string }>({ title: '', body: '' });
     const visibleTabs = useMemo(() => TABS.filter((tab) => (tab.id === 'msi' ? isDirector : true)), [isDirector]);
 
     const { data: listData, isLoading: listLoading } = useQuery({
@@ -294,6 +295,7 @@ function WorkspaceDraftsPageContent() {
         editor.commands.setContent(draft.body || '<p></p>', { emitUpdate: false });
         setBaseVersion(draft.version || 1);
         setSaveState('saved');
+        lastSavedRef.current = { title: cleanText(draft.title || ''), body: draft.body || '' };
         setSuggestion(null);
         setSimResult(null);
     }, [context?.draft?.id, editor]);
@@ -309,7 +311,7 @@ function WorkspaceDraftsPageContent() {
         onSuccess: (res) => {
             setSaveState('saved');
             setBaseVersion(res.data?.draft?.version || baseVersion);
-            queryClient.invalidateQueries({ queryKey: ['smart-editor-context', workId] });
+            lastSavedRef.current = { title: cleanText(title || ''), body: bodyHtml || '' };
             queryClient.invalidateQueries({ queryKey: ['smart-editor-versions', workId] });
         },
         onError: (e: any) => { setSaveState('error'); setErr(e?.response?.data?.detail || 'تعذر الحفظ التلقائي'); },
@@ -317,9 +319,16 @@ function WorkspaceDraftsPageContent() {
 
     useEffect(() => {
         if (!workId || saveState !== 'unsaved') return;
+        if (autosave.isPending) return;
+        const currentTitle = cleanText(title || '');
+        const currentBody = bodyHtml || '';
+        if (lastSavedRef.current.title === currentTitle && lastSavedRef.current.body === currentBody) {
+            setSaveState('saved');
+            return;
+        }
         const t = window.setTimeout(() => { setSaveState('saving'); autosave.mutate(); }, 1200);
         return () => window.clearTimeout(t);
-    }, [saveState, workId, title, bodyHtml]);
+    }, [saveState, workId, title, bodyHtml, autosave.isPending]);
 
     const rewrite = useMutation({ mutationFn: () => editorialApi.aiRewriteSuggestion(workId!, { mode: 'formal' }), onSuccess: (r) => { setSuggestion(r.data?.suggestion || null); setActiveTab('quality'); } });
     const applySuggestion = useMutation({
@@ -391,9 +400,11 @@ function WorkspaceDraftsPageContent() {
     const runReadiness = useMutation({ mutationFn: () => editorialApi.publishReadiness(workId!), onSuccess: (r) => { setReadiness(r.data); setActiveTab('quality'); } });
     const runQuickCheck = useMutation({
         mutationFn: async () => {
-            const verifyRes = await editorialApi.verifyClaims(workId!, 0.7);
-            const qualityRes = await editorialApi.qualityScore(workId!);
-            const readinessRes = await editorialApi.publishReadiness(workId!);
+            const [verifyRes, qualityRes, readinessRes] = await Promise.all([
+                editorialApi.verifyClaims(workId!, 0.7),
+                editorialApi.qualityScore(workId!),
+                editorialApi.publishReadiness(workId!),
+            ]);
             return { verifyRes, qualityRes, readinessRes };
         },
         onSuccess: ({ verifyRes, qualityRes, readinessRes }) => {
