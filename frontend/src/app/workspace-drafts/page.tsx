@@ -23,7 +23,7 @@ import {
     Sparkles,
 } from 'lucide-react';
 
-import { competitorXrayApi, editorialApi, msiApi, simApi } from '@/lib/api';
+import { competitorXrayApi, editorialApi, jobsApi, msiApi, simApi } from '@/lib/api';
 import { constitutionApi } from '@/lib/constitution-api';
 import { useAuth } from '@/lib/auth';
 import { cn, formatRelativeTime, truncate } from '@/lib/utils';
@@ -330,11 +330,51 @@ function WorkspaceDraftsPageContent() {
         return () => window.clearTimeout(t);
     }, [saveState, workId, title, bodyHtml, autosave.isPending]);
 
-    const rewrite = useMutation({ mutationFn: () => editorialApi.aiRewriteSuggestion(workId!, { mode: 'formal' }), onSuccess: (r) => { setSuggestion(r.data?.suggestion || null); setActiveTab('quality'); } });
+    async function runEditorialActionWithPolling<T = any>(
+        action: () => Promise<any>,
+        label: string,
+        timeoutMs = 90_000,
+        pollMs = 750,
+    ): Promise<T> {
+        const initial = await action();
+        const payload = initial?.data;
+        if (!payload || payload.status !== 'queued' || !payload.job_id) {
+            return payload as T;
+        }
+
+        setOk(`${label}: جاري التنفيذ...`);
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            const statusRes = await jobsApi.getJob(payload.job_id);
+            const status = statusRes?.data?.status;
+            if (status === 'completed') {
+                return (statusRes?.data?.result || {}) as T;
+            }
+            if (status === 'failed' || status === 'dead_lettered') {
+                throw new Error(statusRes?.data?.error || `فشلت العملية (${status}).`);
+            }
+            await new Promise((resolve) => setTimeout(resolve, pollMs));
+        }
+        throw new Error(`انتهت مهلة انتظار ${label}.`);
+    }
+
+    const rewrite = useMutation({
+        mutationFn: () => runEditorialActionWithPolling(() => editorialApi.aiRewriteSuggestion(workId!, { mode: 'formal' }), 'تحسين النص'),
+        onSuccess: (data) => {
+            setSuggestion(data?.suggestion || null);
+            setActiveTab('quality');
+        },
+        onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر تشغيل تحسين النص'),
+    });
     const applySuggestion = useMutation({
-        mutationFn: () => editorialApi.applyAiSuggestion(workId!, { title: suggestion?.title, body: suggestion?.body_html || '', based_on_version: baseVersion, suggestion_tool: 'rewrite' }),
-        onSuccess: (r) => {
-            const d = r.data?.draft;
+        mutationFn: () => runEditorialActionWithPolling(() => editorialApi.applyAiSuggestion(workId!, {
+            title: suggestion?.title,
+            body: suggestion?.body_html || '',
+            based_on_version: baseVersion,
+            suggestion_tool: 'rewrite',
+        }), 'تطبيق الاقتراح'),
+        onSuccess: (data) => {
+            const d = data?.draft;
             if (d && editor) {
                 setTitle(cleanText(d.title || ''));
                 setBodyHtml(d.body || '');
@@ -346,16 +386,32 @@ function WorkspaceDraftsPageContent() {
             queryClient.invalidateQueries({ queryKey: ['smart-editor-context', workId] });
             queryClient.invalidateQueries({ queryKey: ['smart-editor-versions', workId] });
         },
+        onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر تطبيق الاقتراح'),
     });
 
-    const runVerifier = useMutation({ mutationFn: () => editorialApi.verifyClaims(workId!, 0.7), onSuccess: (r) => { setClaims(r.data?.claims || []); setActiveTab('evidence'); } });
-    const runQuality = useMutation({ mutationFn: () => editorialApi.qualityScore(workId!), onSuccess: (r) => { setQuality(r.data); setActiveTab('quality'); } });
-    const runSeo = useMutation({ mutationFn: () => editorialApi.aiSeoSuggestion(workId!), onSuccess: (r) => { setSeoPack(r.data); setActiveTab('seo'); } });
+    const runVerifier = useMutation({
+        mutationFn: () => runEditorialActionWithPolling(() => editorialApi.verifyClaims(workId!, 0.7), 'التحقق من الادعاءات'),
+        onSuccess: (data) => { setClaims(data?.claims || []); setActiveTab('evidence'); },
+        onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر تنفيذ التحقق'),
+    });
+    const runQuality = useMutation({
+        mutationFn: () => runEditorialActionWithPolling(() => editorialApi.qualityScore(workId!), 'تقييم الجودة'),
+        onSuccess: (data) => { setQuality(data); setActiveTab('quality'); },
+        onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر تنفيذ تقييم الجودة'),
+    });
+    const runSeo = useMutation({
+        mutationFn: () => runEditorialActionWithPolling(() => editorialApi.aiSeoSuggestion(workId!), 'تحسين SEO'),
+        onSuccess: (data) => { setSeoPack(data); setActiveTab('seo'); },
+        onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر تشغيل اقتراحات SEO'),
+    });
     const runLinks = useMutation({
-        mutationFn: () => editorialApi.aiLinkSuggestions(workId!, { mode: linkMode, target_count: 6 }),
-        onSuccess: (r) => {
-            setLinkRunId(r.data?.run_id || null);
-            setLinkSuggestions((r.data?.items || []).map((x: any) => ({ ...x, selected: true })));
+        mutationFn: () => runEditorialActionWithPolling(
+            () => editorialApi.aiLinkSuggestions(workId!, { mode: linkMode, target_count: 6 }),
+            'اقتراح الروابط',
+        ),
+        onSuccess: (data) => {
+            setLinkRunId(data?.run_id || null);
+            setLinkSuggestions((data?.items || []).map((x: any) => ({ ...x, selected: true })));
             setActiveTab('seo');
             queryClient.invalidateQueries({ queryKey: ['smart-editor-links-history', workId] });
         },
@@ -395,21 +451,29 @@ function WorkspaceDraftsPageContent() {
         },
         onError: (e: any) => setErr(e?.response?.data?.detail || e?.message || 'تعذر تطبيق الروابط'),
     });
-    const runSocial = useMutation({ mutationFn: () => editorialApi.aiSocialVariants(workId!), onSuccess: (r) => { setSocial(r.data?.variants || null); setActiveTab('social'); } });
-    const runHeadlines = useMutation({ mutationFn: () => editorialApi.aiHeadlineSuggestion(workId!, 5), onSuccess: (r) => { setHeadlines(r.data?.headlines || []); setActiveTab('seo'); } });
+    const runSocial = useMutation({
+        mutationFn: () => runEditorialActionWithPolling(() => editorialApi.aiSocialVariants(workId!), 'نسخ السوشيال'),
+        onSuccess: (data) => { setSocial(data?.variants || null); setActiveTab('social'); },
+        onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر توليد نسخ السوشيال'),
+    });
+    const runHeadlines = useMutation({
+        mutationFn: () => runEditorialActionWithPolling(() => editorialApi.aiHeadlineSuggestion(workId!, 5), 'اقتراح العناوين'),
+        onSuccess: (data) => { setHeadlines(data?.headlines || []); setActiveTab('seo'); },
+        onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر توليد العناوين'),
+    });
     const runReadiness = useMutation({ mutationFn: () => editorialApi.publishReadiness(workId!), onSuccess: (r) => { setReadiness(r.data); setActiveTab('quality'); } });
     const runQuickCheck = useMutation({
         mutationFn: async () => {
-            const [verifyRes, qualityRes, readinessRes] = await Promise.all([
-                editorialApi.verifyClaims(workId!, 0.7),
-                editorialApi.qualityScore(workId!),
+            const [verifyData, qualityData, readinessRes] = await Promise.all([
+                runEditorialActionWithPolling(() => editorialApi.verifyClaims(workId!, 0.7), 'التحقق من الادعاءات'),
+                runEditorialActionWithPolling(() => editorialApi.qualityScore(workId!), 'تقييم الجودة'),
                 editorialApi.publishReadiness(workId!),
             ]);
-            return { verifyRes, qualityRes, readinessRes };
+            return { verifyData, qualityData, readinessRes };
         },
-        onSuccess: ({ verifyRes, qualityRes, readinessRes }) => {
-            setClaims(verifyRes.data?.claims || []);
-            setQuality(qualityRes.data);
+        onSuccess: ({ verifyData, qualityData, readinessRes }) => {
+            setClaims(verifyData?.claims || []);
+            setQuality(qualityData);
             setReadiness(readinessRes.data);
             setActiveTab('quality');
             setErr(null);
@@ -469,6 +533,18 @@ function WorkspaceDraftsPageContent() {
             queryClient.invalidateQueries({ queryKey: ['smart-editor-context', workId] });
         },
     });
+    const isEditorActionPending =
+        runQuickCheck.isPending ||
+        runVerifier.isPending ||
+        rewrite.isPending ||
+        runHeadlines.isPending ||
+        runSeo.isPending ||
+        runLinks.isPending ||
+        runSocial.isPending ||
+        runQuality.isPending ||
+        runReadiness.isPending ||
+        applyToArticle.isPending ||
+        applySuggestion.isPending;
     const createManualDraft = useMutation({
         mutationFn: () =>
             editorialApi.createManualWorkspaceDraft({
@@ -686,25 +762,25 @@ function WorkspaceDraftsPageContent() {
                 <div className="mt-3 flex flex-wrap gap-2">
                     <button
                         onClick={() => runWithGuide('quick_check', () => runQuickCheck.mutate())}
-                        disabled={runQuickCheck.isPending}
+                        disabled={isEditorActionPending}
                         className="px-3 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-100 text-xs flex items-center gap-2 disabled:opacity-60"
                     >
                         <ShieldCheck className="w-4 h-4" />
-                        فحص سريع
+                        {runQuickCheck.isPending ? 'جاري الفحص...' : 'فحص سريع'}
                     </button>
-                    <button onClick={() => runWithGuide('verify', () => runVerifier.mutate())} className="px-3 py-2 rounded-xl bg-cyan-500/20 border border-cyan-500/30 text-cyan-200 text-xs flex items-center gap-2"><SearchCheck className="w-4 h-4" />تحقق</button>
-                    <button onClick={() => runWithGuide('improve', () => rewrite.mutate())} className="px-3 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-2"><Sparkles className="w-4 h-4" />تحسين</button>
-                    <button onClick={() => runWithGuide('headlines', () => runHeadlines.mutate())} className="px-3 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-200 text-xs">عناوين</button>
-                    <button onClick={() => runWithGuide('seo', () => runSeo.mutate())} className="px-3 py-2 rounded-xl bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-200 text-xs">SEO</button>
-                    <button onClick={() => runWithGuide('links', () => runLinks.mutate())} className="px-3 py-2 rounded-xl bg-teal-500/20 border border-teal-500/30 text-teal-200 text-xs">روابط</button>
-                    <button onClick={() => runWithGuide('social', () => runSocial.mutate())} className="px-3 py-2 rounded-xl bg-sky-500/20 border border-sky-500/30 text-sky-200 text-xs">سوشيال</button>
-                    <button onClick={() => runWithGuide('quality', () => runQuality.mutate())} className="px-3 py-2 rounded-xl bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs">جودة</button>
-                    <button onClick={() => runWithGuide('audience_test', () => runAudienceSimulation.mutate())} className="px-3 py-2 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-100 text-xs">
+                    <button disabled={isEditorActionPending} onClick={() => runWithGuide('verify', () => runVerifier.mutate())} className="px-3 py-2 rounded-xl bg-cyan-500/20 border border-cyan-500/30 text-cyan-200 text-xs flex items-center gap-2 disabled:opacity-60"><SearchCheck className="w-4 h-4" />تحقق</button>
+                    <button disabled={isEditorActionPending} onClick={() => runWithGuide('improve', () => rewrite.mutate())} className="px-3 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-2 disabled:opacity-60"><Sparkles className="w-4 h-4" />تحسين</button>
+                    <button disabled={isEditorActionPending} onClick={() => runWithGuide('headlines', () => runHeadlines.mutate())} className="px-3 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-200 text-xs disabled:opacity-60">عناوين</button>
+                    <button disabled={isEditorActionPending} onClick={() => runWithGuide('seo', () => runSeo.mutate())} className="px-3 py-2 rounded-xl bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-200 text-xs disabled:opacity-60">SEO</button>
+                    <button disabled={isEditorActionPending} onClick={() => runWithGuide('links', () => runLinks.mutate())} className="px-3 py-2 rounded-xl bg-teal-500/20 border border-teal-500/30 text-teal-200 text-xs disabled:opacity-60">روابط</button>
+                    <button disabled={isEditorActionPending} onClick={() => runWithGuide('social', () => runSocial.mutate())} className="px-3 py-2 rounded-xl bg-sky-500/20 border border-sky-500/30 text-sky-200 text-xs disabled:opacity-60">سوشيال</button>
+                    <button disabled={isEditorActionPending} onClick={() => runWithGuide('quality', () => runQuality.mutate())} className="px-3 py-2 rounded-xl bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs disabled:opacity-60">جودة</button>
+                    <button disabled={isEditorActionPending || runAudienceSimulation.isPending} onClick={() => runWithGuide('audience_test', () => runAudienceSimulation.mutate())} className="px-3 py-2 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-100 text-xs disabled:opacity-60">
                         محاكي الجمهور
                     </button>
-                    <button onClick={() => runWithGuide('publish_gate', () => runReadiness.mutate())} className="px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-200 text-xs">بوابة النشر</button>
-                    <button onClick={() => runWithGuide('apply', () => applyToArticle.mutate())} className="px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs">إرسال لاعتماد رئيس التحرير</button>
-                    <button onClick={() => runWithGuide('save', () => { setSaveState('saving'); autosave.mutate(); })} className="px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs flex items-center gap-2"><Save className="w-4 h-4" />حفظ</button>
+                    <button disabled={isEditorActionPending} onClick={() => runWithGuide('publish_gate', () => runReadiness.mutate())} className="px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-200 text-xs disabled:opacity-60">بوابة النشر</button>
+                    <button disabled={isEditorActionPending} onClick={() => runWithGuide('apply', () => applyToArticle.mutate())} className="px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs disabled:opacity-60">إرسال لاعتماد رئيس التحرير</button>
+                    <button disabled={isEditorActionPending || autosave.isPending} onClick={() => runWithGuide('save', () => { setSaveState('saving'); autosave.mutate(); })} className="px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs flex items-center gap-2 disabled:opacity-60"><Save className="w-4 h-4" />حفظ</button>
                 </div>
 
                 {(err || ok) && <div className={cn('mt-3 rounded-xl px-3 py-2 text-xs', err ? 'bg-red-500/15 text-red-200 border border-red-500/30' : 'bg-emerald-500/15 text-emerald-200 border border-emerald-500/30')}>{err || ok}</div>}

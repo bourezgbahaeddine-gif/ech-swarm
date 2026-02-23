@@ -168,6 +168,24 @@ export interface PublishedMonitorLatestResponse extends Partial<PublishedMonitor
     correlation_id?: string;
 }
 
+export interface JobStatusResponse {
+    id: string;
+    job_type: string;
+    queue_name: string;
+    entity_id: string | null;
+    status: 'queued' | 'running' | 'completed' | 'failed' | 'dead_lettered' | string;
+    attempt: number;
+    max_attempts: number;
+    error: string | null;
+    result: Record<string, unknown>;
+    payload: Record<string, unknown>;
+    request_id: string | null;
+    correlation_id: string | null;
+    queued_at: string | null;
+    started_at: string | null;
+    finished_at: string | null;
+}
+
 export interface WorkspaceDraft {
     id: number;
     article_id: number;
@@ -470,6 +488,10 @@ export const dashboardApi = {
         api.get<PublishedMonitorLatestResponse>('/dashboard/agents/published-monitor/latest', { params }),
     notifications: (params?: { limit?: number }) =>
         api.get<{ items: DashboardNotification[]; total: number }>('/dashboard/notifications', { params }),
+};
+
+export const jobsApi = {
+    getJob: (jobId: string) => api.get<JobStatusResponse>(`/jobs/${jobId}`),
 };
 
 // ── Auth API ──
