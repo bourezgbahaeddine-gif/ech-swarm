@@ -397,6 +397,33 @@ async def trigger_published_monitor(
 ):
     """Enqueue published-content quality monitor."""
     _assert_newsroom_refresh_permission(current_user)
+    active = await job_queue_service.find_active_job(
+        db,
+        job_type="published_monitor_scan",
+        entity_id="published_monitor",
+        max_age_minutes=max(5, settings.published_monitor_interval_minutes * 2),
+    )
+    if active:
+        ticket = {
+            "job_id": str(active.id),
+            "status": active.status,
+            "job_type": "published_monitor_scan",
+        }
+        if wait:
+            deadline = datetime.utcnow() + timedelta(seconds=wait_timeout_seconds)
+            while datetime.utcnow() < deadline:
+                job = await job_queue_service.get_job(db, str(active.id))
+                if not job:
+                    break
+                if job.status == "completed":
+                    report = ((job.result_json or {}).get("report") or {})
+                    normalized = _normalize_published_monitor_payload(report, status=str(report.get("status") or "ok"))
+                    return {"message": "Published monitor completed.", "report": normalized, **ticket, "status": "completed"}
+                if job.status in {"failed", "dead_lettered"}:
+                    return {"message": "Published monitor failed.", **ticket, "status": job.status, "error": job.error}
+                await asyncio.sleep(1)
+        return {"message": "Published monitor already active.", **ticket}
+
     ticket = await _enqueue_dashboard_job(
         db=db,
         request=request,

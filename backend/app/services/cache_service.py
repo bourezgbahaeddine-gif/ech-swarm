@@ -29,6 +29,12 @@ class CacheService:
     def __init__(self):
         self._client: Optional[redis.Redis] = None
 
+    async def _ensure_client(self) -> Optional[redis.Redis]:
+        """Lazily connect Redis in any process (API/worker)."""
+        if self._client is None:
+            await self.connect()
+        return self._client
+
     async def connect(self):
         """Initialize Redis connection."""
         try:
@@ -56,19 +62,21 @@ class CacheService:
 
     async def is_url_processed(self, url_hash: str) -> bool:
         """Check if a URL has been processed in the last 24 hours."""
-        if not self._client:
+        client = await self._ensure_client()
+        if not client:
             return False
         try:
-            return await self._client.exists(f"url:{url_hash}") > 0
+            return await client.exists(f"url:{url_hash}") > 0
         except Exception:
             return False
 
     async def mark_url_processed(self, url_hash: str, article_id: int = 0):
         """Mark a URL as processed with 24h TTL."""
-        if not self._client:
+        client = await self._ensure_client()
+        if not client:
             return
         try:
-            await self._client.setex(
+            await client.setex(
                 f"url:{url_hash}",
                 URL_CACHE_TTL,
                 str(article_id),
@@ -80,21 +88,23 @@ class CacheService:
 
     async def get_recent_titles(self, limit: int = 50) -> list[str]:
         """Get the last N article titles for fuzzy matching."""
-        if not self._client:
+        client = await self._ensure_client()
+        if not client:
             return []
         try:
-            titles = await self._client.lrange("recent_titles", 0, limit - 1)
+            titles = await client.lrange("recent_titles", 0, limit - 1)
             return titles
         except Exception:
             return []
 
     async def add_recent_title(self, title: str):
         """Add a title to the recent titles list (FIFO, max 200)."""
-        if not self._client:
+        client = await self._ensure_client()
+        if not client:
             return
         try:
-            await self._client.lpush("recent_titles", title)
-            await self._client.ltrim("recent_titles", 0, 199)
+            await client.lpush("recent_titles", title)
+            await client.ltrim("recent_titles", 0, 199)
         except Exception as e:
             logger.warning("cache_title_error", error=str(e))
 
@@ -102,22 +112,24 @@ class CacheService:
 
     async def get(self, key: str) -> Optional[str]:
         """Get a value from cache."""
-        if not self._client:
+        client = await self._ensure_client()
+        if not client:
             return None
         try:
-            return await self._client.get(key)
+            return await client.get(key)
         except Exception:
             return None
 
     async def set(self, key: str, value: str, ttl: timedelta = None):
         """Set a value in cache with optional TTL."""
-        if not self._client:
+        client = await self._ensure_client()
+        if not client:
             return
         try:
             if ttl:
-                await self._client.setex(key, ttl, value)
+                await client.setex(key, ttl, value)
             else:
-                await self._client.set(key, value)
+                await client.set(key, value)
         except Exception as e:
             logger.warning("cache_set_error", error=str(e))
 
@@ -139,22 +151,24 @@ class CacheService:
 
     async def increment_counter(self, key: str) -> int:
         """Increment a counter (for tracking AI calls, etc.)."""
-        if not self._client:
+        client = await self._ensure_client()
+        if not client:
             return 0
         try:
-            count = await self._client.incr(f"counter:{key}")
+            count = await client.incr(f"counter:{key}")
             # Auto-expire counters daily
-            await self._client.expire(f"counter:{key}", 86400)
+            await client.expire(f"counter:{key}", 86400)
             return count
         except Exception:
             return 0
 
     async def get_counter(self, key: str) -> int:
         """Get current counter value."""
-        if not self._client:
+        client = await self._ensure_client()
+        if not client:
             return 0
         try:
-            val = await self._client.get(f"counter:{key}")
+            val = await client.get(f"counter:{key}")
             return int(val) if val else 0
         except Exception:
             return 0
