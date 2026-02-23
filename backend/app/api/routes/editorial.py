@@ -339,9 +339,18 @@ async def _enqueue_editorial_ai_job(
             180,
         ),
     )
-    # Smart editor interactive actions should always return a completed/failed
-    # result when possible (not a queued ticket).
-    if operation in {"claims", "quality", "rewrite"}:
+    # Smart editor interactive actions should return completed/failed payloads
+    # whenever possible so the UI can update deterministically.
+    if operation in {
+        "rewrite",
+        "headlines",
+        "seo",
+        "links_suggest",
+        "social",
+        "claims",
+        "quality",
+        "apply_suggestion",
+    }:
         wait_for_result = True
 
     active = await job_queue_service.find_active_job(
