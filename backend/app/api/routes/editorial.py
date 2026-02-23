@@ -339,6 +339,10 @@ async def _enqueue_editorial_ai_job(
             180,
         ),
     )
+    # Smart editor interactive actions should always return a completed/failed
+    # result when possible (not a queued ticket).
+    if operation in {"claims", "quality", "rewrite"}:
+        wait_for_result = True
 
     active = await job_queue_service.find_active_job(
         db,
