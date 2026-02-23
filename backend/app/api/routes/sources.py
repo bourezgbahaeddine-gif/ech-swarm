@@ -7,18 +7,113 @@ CRUD operations for RSS/news sources.
 from datetime import datetime, timedelta
 from typing import Optional
 from urllib.parse import urlparse
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import case, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.routes.auth import get_current_user
 from app.core.config import get_settings
 from app.core.database import get_db
+from app.models.audit import SettingsAudit
 from app.models import Article, NewsStatus, Source
+from app.models.settings import ApiSetting
+from app.models.user import User, UserRole
 from app.schemas import SourceCreate, SourceResponse, SourceUpdate
 from app.services.cache_service import cache_service
+from app.services.settings_service import settings_service
 
 router = APIRouter(prefix="/sources", tags=["Sources"])
 settings = get_settings()
+POLICY_KEY_BLOCKED = "SCOUT_BLOCKED_DOMAINS"
+POLICY_KEY_FRESHRSS_CAP = "SCOUT_FRESHRSS_MAX_PER_SOURCE_PER_RUN"
+
+
+def _ensure_director(user: User) -> None:
+    if user.role != UserRole.director:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+
+def _normalize_domains_input(values: list[str] | None) -> list[str]:
+    normalized = []
+    seen = set()
+    for value in values or []:
+        domain = _normalize_domain(value)
+        if not domain:
+            continue
+        if domain in seen:
+            continue
+        seen.add(domain)
+        normalized.append(domain)
+    return normalized
+
+
+def _split_csv_domains(value: str | None) -> list[str]:
+    items = []
+    for part in (value or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        items.append(part)
+    return _normalize_domains_input(items)
+
+
+async def _read_policy_values() -> dict:
+    blocked_csv = await settings_service.get_value(
+        POLICY_KEY_BLOCKED,
+        settings.scout_blocked_domains,
+    )
+    freshrss_cap_raw = await settings_service.get_value(
+        POLICY_KEY_FRESHRSS_CAP,
+        str(settings.scout_freshrss_max_per_source_per_run),
+    )
+    try:
+        freshrss_cap = int(freshrss_cap_raw or settings.scout_freshrss_max_per_source_per_run)
+    except (TypeError, ValueError):
+        freshrss_cap = settings.scout_freshrss_max_per_source_per_run
+    freshrss_cap = max(1, min(freshrss_cap, 100))
+    return {
+        "blocked_domains": _split_csv_domains(blocked_csv),
+        "freshrss_max_per_source_per_run": freshrss_cap,
+    }
+
+
+async def _upsert_setting(
+    db: AsyncSession,
+    *,
+    key: str,
+    value: str,
+    actor: str,
+    description: str,
+) -> None:
+    result = await db.execute(select(ApiSetting).where(ApiSetting.key == key))
+    row = result.scalar_one_or_none()
+    old_value = row.value if row else None
+    if row is None:
+        row = ApiSetting(
+            key=key,
+            value=value,
+            description=description,
+            is_secret=False,
+            updated_at=datetime.utcnow(),
+        )
+        db.add(row)
+        action = "create"
+    else:
+        row.value = value
+        row.description = description
+        row.is_secret = False
+        row.updated_at = datetime.utcnow()
+        action = "update"
+    db.add(
+        SettingsAudit(
+            key=key,
+            action=action,
+            old_value=old_value,
+            new_value=value,
+            actor=actor,
+        )
+    )
+    await settings_service.set_value(key, value)
 
 
 def _normalize_domain(value: str | None) -> str:
@@ -127,6 +222,7 @@ async def _compute_sources_health(
     hours: int,
     include_disabled: bool,
 ) -> dict:
+    policy = await _read_policy_values()
     since = datetime.utcnow() - timedelta(hours=hours)
 
     source_query = select(Source).order_by(Source.priority.desc(), Source.id.asc())
@@ -157,7 +253,7 @@ async def _compute_sources_health(
         for row in article_rows_result.all()
     ]
 
-    blocked_domains = sorted(settings.scout_blocked_domains_set)
+    blocked_domains = sorted(policy["blocked_domains"])
 
     items = []
     now = datetime.utcnow()
@@ -323,6 +419,60 @@ async def sources_stats(db: AsyncSession = Depends(get_db)):
     return stats
 
 
+@router.get("/policy")
+async def get_sources_policy(
+    current_user: User = Depends(get_current_user),
+):
+    """Get source ingestion policy values."""
+    _ensure_director(current_user)
+    policy = await _read_policy_values()
+    return policy
+
+
+@router.put("/policy")
+async def update_sources_policy(
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update source ingestion policy (blocked domains and FreshRSS source cap)."""
+    _ensure_director(current_user)
+
+    blocked_domains = _normalize_domains_input(payload.get("blocked_domains"))
+    if not blocked_domains:
+        blocked_domains = _split_csv_domains(settings.scout_blocked_domains)
+
+    freshrss_cap = payload.get("freshrss_max_per_source_per_run", settings.scout_freshrss_max_per_source_per_run)
+    try:
+        freshrss_cap = int(freshrss_cap)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid freshrss_max_per_source_per_run")
+    freshrss_cap = max(1, min(freshrss_cap, 100))
+
+    await _upsert_setting(
+        db,
+        key=POLICY_KEY_BLOCKED,
+        value=",".join(blocked_domains),
+        actor=current_user.username,
+        description="CSV domains blocked from scout ingestion.",
+    )
+    await _upsert_setting(
+        db,
+        key=POLICY_KEY_FRESHRSS_CAP,
+        value=str(freshrss_cap),
+        actor=current_user.username,
+        description="Max new FreshRSS entries per source per run.",
+    )
+    await db.commit()
+
+    return {
+        "blocked_domains": blocked_domains,
+        "freshrss_max_per_source_per_run": freshrss_cap,
+        "updated_by": current_user.username,
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+
+
 @router.get("/health")
 async def sources_health(
     hours: int = 48,
@@ -340,15 +490,15 @@ async def sources_health(
 
 @router.post("/health/apply")
 async def apply_sources_health_actions(
-    hours: int = 48,
+    hours: int = Query(default=48, ge=6, le=168),
     include_disabled: bool = True,
     dry_run: bool = True,
-    max_changes: int = 100,
+    max_changes: int = Query(default=100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Apply source tuning actions derived from health score."""
-    hours = max(6, min(hours, 168))
-    max_changes = max(1, min(max_changes, 500))
+    _ensure_director(current_user)
     report = await _compute_sources_health(
         db,
         hours=hours,

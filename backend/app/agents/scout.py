@@ -32,6 +32,7 @@ from app.services.news_knowledge_service import news_knowledge_service
 from app.utils.hashing import generate_unique_hash, generate_trace_id
 from app.utils.text_processing import sanitize_input, truncate_text
 from app.services.cache_service import cache_service
+from app.services.settings_service import settings_service
 
 logger = get_logger("agent.scout")
 settings = get_settings()
@@ -68,6 +69,8 @@ class ScoutAgent:
         max_new_per_run = settings.scout_max_new_per_run
 
         try:
+            self._blocked_domains = await self._load_blocked_domains()
+            self._freshrss_per_source_cap = await self._load_freshrss_source_cap()
             connector = aiohttp.TCPConnector(ssl=_aiohttp_ssl_context())
             async with aiohttp.ClientSession(connector=connector) as session:
                 if settings.scout_use_freshrss:
@@ -141,6 +144,29 @@ class ScoutAgent:
 
         return stats
 
+    async def _load_blocked_domains(self) -> set[str]:
+        raw = await settings_service.get_value(
+            "SCOUT_BLOCKED_DOMAINS",
+            settings.scout_blocked_domains,
+        )
+        blocked: set[str] = set()
+        for part in (raw or "").split(","):
+            host = self._normalized_host(part.strip())
+            if host:
+                blocked.add(host)
+        return blocked
+
+    async def _load_freshrss_source_cap(self) -> int:
+        raw = await settings_service.get_value(
+            "SCOUT_FRESHRSS_MAX_PER_SOURCE_PER_RUN",
+            str(settings.scout_freshrss_max_per_source_per_run),
+        )
+        try:
+            cap = int(raw or settings.scout_freshrss_max_per_source_per_run)
+        except (TypeError, ValueError):
+            cap = settings.scout_freshrss_max_per_source_per_run
+        return max(1, min(cap, 100))
+
     async def _fetch_from_freshrss(
         self,
         db: AsyncSession,
@@ -156,7 +182,7 @@ class ScoutAgent:
 
         logger.info("freshrss_fetch_started", entries=len(feed.entries), feed_url=feed_url)
         max_new_per_run = settings.scout_max_new_per_run
-        per_source_cap = max(1, settings.scout_freshrss_max_per_source_per_run)
+        per_source_cap = max(1, getattr(self, "_freshrss_per_source_cap", settings.scout_freshrss_max_per_source_per_run))
         source_new_counts: dict[str, int] = {}
         for entry in feed.entries:
             if stats["new"] >= max_new_per_run:
@@ -196,7 +222,7 @@ class ScoutAgent:
         return host
 
     def _is_blocked_source_entry(self, source_name: str, link: str) -> bool:
-        blocked_domains = settings.scout_blocked_domains_set
+        blocked_domains = getattr(self, "_blocked_domains", None) or settings.scout_blocked_domains_set
         if not blocked_domains:
             return False
         source_host = self._normalized_host(source_name)

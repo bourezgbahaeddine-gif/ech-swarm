@@ -30,6 +30,58 @@ export interface Source {
     created_at: string;
 }
 
+export interface SourcePolicy {
+    blocked_domains: string[];
+    freshrss_max_per_source_per_run: number;
+}
+
+export interface SourceHealthItem {
+    source_id: number;
+    name: string;
+    domain: string | null;
+    enabled: boolean;
+    priority: number;
+    trust_score: number;
+    error_count: number;
+    window_hours: number;
+    ingested_count: number;
+    candidate_count: number;
+    breaking_count: number;
+    candidate_rate: number;
+    breaking_rate: number;
+    last_seen_at: string | null;
+    last_seen_hours: number | null;
+    health_score: number;
+    health_band: 'excellent' | 'good' | 'review' | 'weak' | string;
+    actions: string[];
+}
+
+export interface SourceHealthReport {
+    window_hours: number;
+    blocked_domains: string[];
+    total_sources: number;
+    weak_sources: number;
+    items: SourceHealthItem[];
+}
+
+export interface SourceHealthApplyChange {
+    source_id: number;
+    name: string;
+    actions: string[];
+    before: { enabled: boolean; priority: number };
+    after: { enabled: boolean; priority: number };
+    health_score: number;
+    health_band: string;
+}
+
+export interface SourceHealthApplyResponse {
+    dry_run: boolean;
+    hours: number;
+    candidate_changes: number;
+    applied_changes: number;
+    items: SourceHealthApplyChange[];
+}
+
 export interface ArticleBrief {
     id: number;
     title_ar: string | null;
@@ -361,6 +413,16 @@ export const sourcesApi = {
     update: (id: number, data: Partial<Source>) => api.put<Source>(`/sources/${id}`, data),
     delete: (id: number) => api.delete(`/sources/${id}`),
     stats: () => api.get('/sources/stats'),
+    health: (params?: { hours?: number; include_disabled?: boolean }) =>
+        api.get<SourceHealthReport>('/sources/health', { params }),
+    applyHealth: (params?: {
+        hours?: number;
+        include_disabled?: boolean;
+        dry_run?: boolean;
+        max_changes?: number;
+    }) => api.post<SourceHealthApplyResponse>('/sources/health/apply', undefined, { params }),
+    getPolicy: () => api.get<SourcePolicy>('/sources/policy'),
+    updatePolicy: (payload: SourcePolicy) => api.put<SourcePolicy>('/sources/policy', payload),
 };
 
 export const editorialApi = {
