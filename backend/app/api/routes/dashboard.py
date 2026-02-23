@@ -406,6 +406,40 @@ async def trigger_published_monitor(
     return {"message": "Published monitor queued.", **ticket}
 
 
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_published_monitor_payload(payload: dict | None, status: str = "ok") -> dict:
+    now_iso = datetime.utcnow().isoformat()
+    payload = payload or {}
+    executed_at = str(payload.get("executed_at") or now_iso)
+    items = payload.get("items")
+    if not isinstance(items, list):
+        items = []
+    return {
+        "feed_url": str(payload.get("feed_url") or settings.published_monitor_feed_url),
+        "executed_at": executed_at,
+        "interval_minutes": _safe_int(payload.get("interval_minutes"), settings.published_monitor_interval_minutes),
+        "total_items": _safe_int(payload.get("total_items"), len(items)),
+        "average_score": round(_safe_float(payload.get("average_score"), 0.0), 2),
+        "weak_items_count": _safe_int(payload.get("weak_items_count"), 0),
+        "issues_count": _safe_int(payload.get("issues_count"), 0),
+        "status": str(payload.get("status") or status),
+        "items": items,
+    }
+
+
 @router.get("/agents/published-monitor/latest")
 async def get_latest_published_monitor(
     request: Request,
@@ -418,7 +452,7 @@ async def get_latest_published_monitor(
     _assert_newsroom_refresh_permission(current_user)
     payload = await published_content_monitor_agent.latest()
     if payload:
-        return payload
+        return _normalize_published_monitor_payload(payload, status="ok")
 
     if refresh_if_empty:
         ticket = await _enqueue_dashboard_job(
@@ -430,9 +464,10 @@ async def get_latest_published_monitor(
             payload={"feed_url": settings.published_monitor_feed_url, "limit": limit},
             entity_id="published_monitor",
         )
-        return {"status": "refresh_queued", "items": [], **ticket}
+        normalized = _normalize_published_monitor_payload({"status": "refresh_queued"}, status="refresh_queued")
+        return {**normalized, **ticket}
 
-    return {"status": "empty", "items": []}
+    return _normalize_published_monitor_payload({"status": "empty"}, status="empty")
 
 
 @router.get("/agents/status")
