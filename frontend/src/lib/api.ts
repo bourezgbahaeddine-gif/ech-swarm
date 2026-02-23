@@ -159,6 +159,15 @@ export interface PublishedMonitorReport {
     items: PublishedMonitorItem[];
 }
 
+export interface PublishedMonitorLatestResponse extends Partial<PublishedMonitorReport> {
+    status?: 'ok' | 'alert' | 'empty' | 'queued' | 'refresh_queued' | 'refresh_running' | 'stale_refresh_queued' | string;
+    job_id?: string;
+    job_type?: string;
+    queue_name?: string;
+    request_id?: string;
+    correlation_id?: string;
+}
+
 export interface WorkspaceDraft {
     id: number;
     article_id: number;
@@ -458,7 +467,7 @@ export const dashboardApi = {
     triggerPublishedMonitor: (params?: { feed_url?: string; limit?: number; wait?: boolean }) =>
         api.post<{ message: string; report?: PublishedMonitorReport }>('/dashboard/agents/published-monitor/run', null, { params }),
     latestPublishedMonitor: (params?: { refresh_if_empty?: boolean; limit?: number }) =>
-        api.get<PublishedMonitorReport>('/dashboard/agents/published-monitor/latest', { params }),
+        api.get<PublishedMonitorLatestResponse>('/dashboard/agents/published-monitor/latest', { params }),
     notifications: (params?: { limit?: number }) =>
         api.get<{ items: DashboardNotification[]; total: number }>('/dashboard/notifications', { params }),
 };

@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bell, Search, LogOut, User, Shield, FileText, Sparkles, Loader2, Clipboard, X, Radar, AlertTriangle, Moon, Sun } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
-import { dashboardApi, type DashboardNotification, type PublishedMonitorReport } from '@/lib/api';
+import { dashboardApi, type DashboardNotification, type PublishedMonitorLatestResponse } from '@/lib/api';
 import { journalistServicesApi } from '@/lib/journalist-services-api';
 
 const roleLabels: Record<string, string> = {
@@ -374,6 +374,15 @@ function scoreColor(score: number): string {
     return 'text-red-300 border-red-500/40 bg-red-500/10';
 }
 
+function formatPublishedMonitorDate(value?: string): string {
+    if (!value) return '-';
+    const withMillis = value.replace(/(\.\d{3})\d+/, '$1');
+    const normalized = /[zZ]$|[+\-]\d{2}:\d{2}$/.test(withMillis) ? withMillis : `${withMillis}Z`;
+    const date = new Date(normalized);
+    if (Number.isNaN(date.getTime())) return '-';
+    return date.toLocaleString('ar-DZ');
+}
+
 function PublishedMonitorDrawer({
     theme,
     onClose,
@@ -386,7 +395,14 @@ function PublishedMonitorDrawer({
     const { data, isLoading, refetch } = useQuery({
         queryKey: ['published-monitor-latest'],
         queryFn: () => dashboardApi.latestPublishedMonitor({ refresh_if_empty: true, limit: 12 }),
-        refetchInterval: 900000,
+        refetchInterval: (query) => {
+            const payload = (query.state.data as { data?: PublishedMonitorLatestResponse } | undefined)?.data;
+            const status = payload?.status;
+            if (status === 'queued' || status === 'refresh_queued' || status === 'refresh_running' || status === 'stale_refresh_queued') {
+                return 5000;
+            }
+            return 900000;
+        },
     });
 
     const runNow = useMutation({
@@ -401,8 +417,15 @@ function PublishedMonitorDrawer({
     });
     if (typeof document === 'undefined') return null;
 
-    const report = data?.data as PublishedMonitorReport | undefined;
-    const items = report?.items || [];
+    const report = data?.data as PublishedMonitorLatestResponse | undefined;
+    const items = Array.isArray(report?.items) ? report.items : [];
+    const monitorStatus = report?.status;
+    const hasSummary = typeof report?.average_score === 'number' && typeof report?.total_items === 'number' && typeof report?.weak_items_count === 'number';
+    const showQueuedState =
+        monitorStatus === 'queued' ||
+        monitorStatus === 'refresh_queued' ||
+        monitorStatus === 'refresh_running' ||
+        monitorStatus === 'stale_refresh_queued';
 
     return createPortal(
         <div className="fixed inset-0 z-[130] bg-black/70 flex justify-end app-theme-shell">
@@ -437,26 +460,32 @@ function PublishedMonitorDrawer({
                     <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-gray-300">لا يوجد تقرير بعد.</div>
                 ) : (
                     <>
+                        {showQueuedState && (
+                            <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3 text-sm text-cyan-200">
+                                جاري تجهيز تقرير المراقبة... سيتم التحديث تلقائياً.
+                            </div>
+                        )}
+
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                             <div className="rounded-xl border border-white/15 bg-white/[0.03] p-3">
                                 <p className="text-[11px] text-gray-400">المعدل العام</p>
-                                <p className="text-lg text-white font-semibold">{report.average_score}/100</p>
+                                <p className="text-lg text-white font-semibold">{hasSummary ? `${report.average_score}/100` : '-'}</p>
                             </div>
                             <div className="rounded-xl border border-white/15 bg-white/[0.03] p-3">
                                 <p className="text-[11px] text-gray-400">عناصر مفحوصة</p>
-                                <p className="text-lg text-white font-semibold">{report.total_items}</p>
+                                <p className="text-lg text-white font-semibold">{hasSummary ? report.total_items : '-'}</p>
                             </div>
                             <div className="rounded-xl border border-white/15 bg-white/[0.03] p-3">
                                 <p className="text-[11px] text-gray-400">تحتاج مراجعة</p>
-                                <p className="text-lg text-white font-semibold">{report.weak_items_count}</p>
+                                <p className="text-lg text-white font-semibold">{hasSummary ? report.weak_items_count : '-'}</p>
                             </div>
                             <div className="rounded-xl border border-white/15 bg-white/[0.03] p-3">
                                 <p className="text-[11px] text-gray-400">آخر تشغيل</p>
-                                <p className="text-sm text-white font-semibold">{new Date(report.executed_at).toLocaleString('ar-DZ')}</p>
+                                <p className="text-sm text-white font-semibold">{formatPublishedMonitorDate(report.executed_at)}</p>
                             </div>
                         </div>
 
-                        {report.weak_items_count > 0 && (
+                        {hasSummary && report.weak_items_count! > 0 && (
                             <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200 flex items-center gap-2">
                                 <AlertTriangle className="w-4 h-4" />
                                 تم رصد مشاكل جودة وتم إرسال تنبيه إلى تيليغرام.
