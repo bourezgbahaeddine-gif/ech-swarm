@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import traceback
 import hashlib
 import re
 from typing import Any, Literal, Optional
@@ -414,6 +415,41 @@ async def _enqueue_editorial_ai_job(
         max_attempts=max_attempts,
     )
     try:
+        if wait_for_result and operation in {
+            "rewrite",
+            "headlines",
+            "seo",
+            "links_suggest",
+            "social",
+            "claims",
+            "quality",
+            "apply_suggestion",
+        }:
+            # Execute interactive smart-editor jobs inline so UI actions are deterministic
+            # even when queue scheduling is delayed.
+            from app.queue.tasks.ai_tasks import _execute_editorial_ai_job, _mark_completed, _mark_failed_or_dlq
+
+            try:
+                result_payload = await _execute_editorial_ai_job(str(job.id))
+                await _mark_completed(str(job.id), result_payload)
+                return {
+                    "job_id": str(job.id),
+                    "status": "completed",
+                    "work_id": work_id,
+                    "operation": operation,
+                    **(result_payload or {}),
+                }
+            except Exception as exc:  # noqa: BLE001
+                err = str(exc)
+                await _mark_failed_or_dlq(str(job.id), err, traceback.format_exc(), True)
+                return {
+                    "job_id": str(job.id),
+                    "status": "failed",
+                    "work_id": work_id,
+                    "operation": operation,
+                    "error": err,
+                }
+
         await job_queue_service.enqueue_by_job_type(job_type=job_type, job_id=str(job.id))
     except Exception as exc:  # noqa: BLE001
         logger.error(
