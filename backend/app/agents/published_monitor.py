@@ -391,6 +391,8 @@ class PublishedContentMonitorAgent:
         if llm_checks:
             metrics["llm_checks"] = llm_checks
 
+        suggestions = self._practical_suggestions(issues, suggestions)
+
         return {
             "title": title_clean,
             "url": url,
@@ -401,6 +403,47 @@ class PublishedContentMonitorAgent:
             "suggestions": suggestions,
             "metrics": metrics,
         }
+
+    @staticmethod
+    def _practical_suggestions(issues: list[str], suggestions: list[str]) -> list[str]:
+        practical: list[str] = []
+
+        def add(value: str) -> None:
+            clean = re.sub(r"\s+", " ", (value or "").strip())
+            if not clean or clean in practical:
+                return
+            practical.append(clean)
+
+        for issue in issues:
+            normalized = (issue or "").lower()
+            if "clickbait" in normalized or "تهويل" in normalized:
+                add("استبدل صياغة الإثارة بمعلومة مباشرة تتضمن الجهة والنتيجة.")
+            if "إملائ" in normalized or "املائ" in normalized or "spelling" in normalized:
+                add("طبّق تدقيقًا إملائيًا نهائيًا وصحّح الكلمات المشار إليها قبل النشر.")
+            if "العنوان قصير" in normalized:
+                add("وسّع العنوان إلى 35-75 حرفًا بإضافة الفاعل والأثر المباشر.")
+            if "العنوان طويل" in normalized:
+                add("اختصر العنوان واحذف الحشو مع الإبقاء على الفاعل والفعل الرئيسيين.")
+            if "المحتوى قصير" in normalized:
+                add("أضف فقرة خلفية وفقرة أرقام/تصريحات موثقة من مصدر رسمي.")
+            if "الهرم" in normalized:
+                add("أعد صياغة المقدمة لتتضمن: من/ماذا/أين/متى في أول جملة.")
+            if "الكلمات المفتاحية" in normalized:
+                add("أدرج مصطلحين خبريين دقيقين في العنوان والفقرة الأولى دون تهويل.")
+
+        vague_markers = {"تحسين", "جودة", "أفضل", "بشكل عام", "صياغة جيدة", "راجع النص"}
+        for suggestion in suggestions:
+            normalized = (suggestion or "").strip().lower()
+            if not normalized:
+                continue
+            if any(marker in normalized for marker in vague_markers) and len(normalized.split()) < 7:
+                continue
+            add(suggestion)
+
+        if not practical:
+            add("نفّذ مراجعة تحريرية سريعة للعنوان والمقدمة والإسناد قبل إعادة النشر.")
+
+        return practical[:6]
 
     @staticmethod
     def _first_chunk(body_text: str, summary: str) -> str:

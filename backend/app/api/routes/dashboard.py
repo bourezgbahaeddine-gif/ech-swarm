@@ -2,17 +2,18 @@
 Echorouk Editorial OS - Dashboard & Agent Control API.
 """
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import select, func, and_, update
+from sqlalchemy import select, func, and_, update, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.config import get_settings
 from app.core.correlation import get_correlation_id, get_request_id
 from app.core.logging import get_logger
-from app.models import Article, Source, PipelineRun, FailedJob, NewsStatus, UrgencyLevel
+from app.models import Article, Source, PipelineRun, FailedJob, NewsStatus, UrgencyLevel, JobRun
 from app.models.user import User, UserRole
 from app.api.routes.auth import get_current_user
 from app.schemas import DashboardStats, PipelineRunResponse
@@ -390,6 +391,8 @@ async def trigger_published_monitor(
     db: AsyncSession = Depends(get_db),
     feed_url: str | None = Query(default=None),
     limit: int | None = Query(default=None, ge=1, le=30),
+    wait: bool = Query(default=False),
+    wait_timeout_seconds: int = Query(default=35, ge=5, le=90),
     current_user: User = Depends(get_current_user),
 ):
     """Enqueue published-content quality monitor."""
@@ -403,6 +406,19 @@ async def trigger_published_monitor(
         payload={"feed_url": feed_url, "limit": limit},
         entity_id="published_monitor",
     )
+    if wait and ticket.get("job_id"):
+        deadline = datetime.utcnow() + timedelta(seconds=wait_timeout_seconds)
+        while datetime.utcnow() < deadline:
+            job = await job_queue_service.get_job(db, ticket["job_id"])
+            if not job:
+                break
+            if job.status == "completed":
+                report = ((job.result_json or {}).get("report") or {})
+                normalized = _normalize_published_monitor_payload(report, status=str(report.get("status") or "ok"))
+                return {"message": "Published monitor completed.", "report": normalized, **ticket, "status": "completed"}
+            if job.status in {"failed", "dead_lettered"}:
+                return {"message": "Published monitor failed.", **ticket, "status": job.status, "error": job.error}
+            await asyncio.sleep(1)
     return {"message": "Published monitor queued.", **ticket}
 
 
@@ -461,6 +477,26 @@ def _normalize_published_monitor_payload(payload: dict | None, status: str = "ok
     }
 
 
+async def _latest_published_monitor_from_jobs(db: AsyncSession) -> dict | None:
+    row = await db.execute(
+        select(JobRun)
+        .where(
+            JobRun.job_type == "published_monitor_scan",
+            JobRun.status == "completed",
+            JobRun.result_json.is_not(None),
+        )
+        .order_by(desc(JobRun.finished_at), desc(JobRun.queued_at))
+        .limit(1)
+    )
+    job = row.scalar_one_or_none()
+    if not job:
+        return None
+    report = (job.result_json or {}).get("report")
+    if isinstance(report, dict):
+        return report
+    return None
+
+
 @router.get("/agents/published-monitor/latest")
 async def get_latest_published_monitor(
     request: Request,
@@ -472,10 +508,21 @@ async def get_latest_published_monitor(
     """Get latest published-content quality report."""
     _assert_newsroom_refresh_permission(current_user)
     payload = await published_content_monitor_agent.latest()
+    if not payload:
+        payload = await _latest_published_monitor_from_jobs(db)
     if payload:
         return _normalize_published_monitor_payload(payload, status="ok")
 
     if refresh_if_empty:
+        active = await job_queue_service.find_active_job(
+            db,
+            job_type="published_monitor_scan",
+            entity_id="published_monitor",
+            max_age_minutes=max(5, settings.published_monitor_interval_minutes * 2),
+        )
+        if active:
+            normalized = _normalize_published_monitor_payload({"status": "refresh_running"}, status="refresh_running")
+            return {**normalized, "job_id": str(active.id), "job_type": "published_monitor_scan", "status": "refresh_running"}
         ticket = await _enqueue_dashboard_job(
             db=db,
             request=request,
@@ -640,6 +687,8 @@ async def dashboard_notifications(
         )
 
     monitor_payload = await published_content_monitor_agent.latest()
+    if not monitor_payload:
+        monitor_payload = await _latest_published_monitor_from_jobs(db)
     if monitor_payload:
         weak_items = int(monitor_payload.get("weak_items_count", 0))
         average_score = monitor_payload.get("average_score", 0)

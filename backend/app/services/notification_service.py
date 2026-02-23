@@ -8,6 +8,7 @@ import html
 import re
 from datetime import timedelta
 from typing import Optional
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
 
@@ -33,6 +34,29 @@ class NotificationService:
     @staticmethod
     def _normalize_for_signature(value: str) -> str:
         return re.sub(r"\s+", " ", (value or "").strip().lower())
+
+    @staticmethod
+    def _normalize_url_for_signature(url: str) -> str:
+        raw = (url or "").strip()
+        if not raw:
+            return ""
+        try:
+            parsed = urlparse(raw)
+            filtered_query = [
+                (k, v)
+                for k, v in parse_qsl(parsed.query, keep_blank_values=False)
+                if not k.lower().startswith("utm_")
+                and k.lower() not in {"fbclid", "gclid", "igshid", "oc", "hl", "gl", "ceid"}
+            ]
+            normalized = parsed._replace(
+                scheme=(parsed.scheme or "https").lower(),
+                netloc=parsed.netloc.lower(),
+                query=urlencode(filtered_query, doseq=True),
+                fragment="",
+            )
+            return urlunparse(normalized).rstrip("/")
+        except Exception:
+            return raw.lower().rstrip("/")
 
     @staticmethod
     def _topic_signature(title: str) -> str:
@@ -243,7 +267,7 @@ class NotificationService:
         topic_ttl = timedelta(hours=8)
         new_weak_items: list[dict] = []
         for item in weak_items:
-            normalized_url = self._normalize_for_signature(item.get("url", ""))
+            normalized_url = self._normalize_url_for_signature(item.get("url", ""))
             normalized_title = self._normalize_for_signature(item.get("title", ""))
             signature_raw = f"{normalized_url}|{normalized_title}"
             signature_hash = hashlib.sha1(signature_raw.encode("utf-8")).hexdigest()
