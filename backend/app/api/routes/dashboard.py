@@ -2,7 +2,7 @@
 Echorouk Editorial OS - Dashboard & Agent Control API.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, func, and_, update
@@ -420,10 +420,31 @@ def _safe_float(value, default: float = 0.0) -> float:
         return default
 
 
+def _normalize_iso_datetime(value) -> str:
+    now = datetime.now(timezone.utc)
+    if isinstance(value, datetime):
+        dt = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+    raw = str(value or "").strip()
+    if not raw:
+        return now.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+    candidate = raw
+    if raw.endswith("Z"):
+        candidate = raw[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(candidate)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    except ValueError:
+        return now.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
 def _normalize_published_monitor_payload(payload: dict | None, status: str = "ok") -> dict:
-    now_iso = datetime.utcnow().isoformat()
     payload = payload or {}
-    executed_at = str(payload.get("executed_at") or now_iso)
+    executed_at = _normalize_iso_datetime(payload.get("executed_at"))
     items = payload.get("items")
     if not isinstance(items, list):
         items = []
