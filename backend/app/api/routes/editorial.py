@@ -5,7 +5,7 @@ from typing import Any, Literal, Optional
 from uuid import uuid4
 
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -310,6 +310,8 @@ async def _enqueue_editorial_ai_job(
     queue_name: str = "ai_quality",
     payload: dict[str, Any] | None = None,
     max_attempts: int = 5,
+    wait_for_result_override: bool | None = None,
+    wait_timeout_seconds_override: int | None = None,
 ) -> dict[str, Any]:
     def _coerce_bool(raw: str | None, default: bool) -> bool:
         if raw is None:
@@ -323,8 +325,20 @@ async def _enqueue_editorial_ai_job(
             value = default
         return max(5, min(value, 180))
 
-    wait_for_result = _coerce_bool(request.query_params.get("wait"), True)
-    wait_timeout_seconds = _coerce_wait_timeout(request.query_params.get("wait_timeout_seconds"), 90)
+    wait_for_result = (
+        bool(wait_for_result_override)
+        if wait_for_result_override is not None
+        else _coerce_bool(request.query_params.get("wait"), True)
+    )
+    wait_timeout_seconds = max(
+        5,
+        min(
+            int(wait_timeout_seconds_override) if wait_timeout_seconds_override is not None else _coerce_wait_timeout(
+                request.query_params.get("wait_timeout_seconds"), 90
+            ),
+            180,
+        ),
+    )
 
     active = await job_queue_service.find_active_job(
         db,
@@ -1572,6 +1586,8 @@ async def workspace_ai_rewrite(
     work_id: str,
     payload: RewriteSuggestionRequest,
     request: Request,
+    wait: bool = Query(default=True),
+    wait_timeout_seconds: int = Query(default=90, ge=5, le=180),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1586,6 +1602,8 @@ async def workspace_ai_rewrite(
         operation="rewrite",
         queue_name="ai_quality",
         payload={"mode": payload.mode, "instruction": payload.instruction or ""},
+        wait_for_result_override=wait,
+        wait_timeout_seconds_override=wait_timeout_seconds,
     )
 
 
@@ -1771,6 +1789,8 @@ async def workspace_verify_claims(
     work_id: str,
     payload: ClaimVerifyRequest,
     request: Request,
+    wait: bool = Query(default=True),
+    wait_timeout_seconds: int = Query(default=90, ge=5, le=180),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1785,6 +1805,8 @@ async def workspace_verify_claims(
         operation="claims",
         queue_name="ai_quality",
         payload={"threshold": payload.threshold},
+        wait_for_result_override=wait,
+        wait_timeout_seconds_override=wait_timeout_seconds,
     )
 
 
@@ -1792,6 +1814,8 @@ async def workspace_verify_claims(
 async def workspace_quality_score(
     work_id: str,
     request: Request,
+    wait: bool = Query(default=True),
+    wait_timeout_seconds: int = Query(default=90, ge=5, le=180),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1805,6 +1829,8 @@ async def workspace_quality_score(
         job_type="editorial_quality",
         operation="quality",
         queue_name="ai_quality",
+        wait_for_result_override=wait,
+        wait_timeout_seconds_override=wait_timeout_seconds,
     )
 
 
