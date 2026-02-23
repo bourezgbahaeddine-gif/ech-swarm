@@ -231,16 +231,17 @@ async def _compute_sources_health(
     source_result = await db.execute(source_query)
     sources = source_result.scalars().all()
 
+    source_name_expr = func.lower(func.coalesce(Article.source_name, ""))
     article_rows_result = await db.execute(
         select(
-            func.lower(func.coalesce(Article.source_name, "")).label("source_name"),
+            source_name_expr.label("source_name"),
             func.count(Article.id).label("ingested_count"),
             func.sum(case((Article.status.in_(_candidate_statuses()), 1), else_=0)).label("candidate_count"),
             func.sum(case((Article.is_breaking == True, 1), else_=0)).label("breaking_count"),
             func.max(Article.created_at).label("last_seen_at"),
         )
         .where(Article.created_at >= since)
-        .group_by(func.lower(func.coalesce(Article.source_name, "")))
+        .group_by(source_name_expr)
     )
     source_rows = [
         {
