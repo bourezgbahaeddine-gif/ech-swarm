@@ -364,7 +364,7 @@ async def create_source(data: SourceCreate, db: AsyncSession = Depends(get_db)):
     return SourceResponse.model_validate(source)
 
 
-@router.put("/{source_id}", response_model=SourceResponse)
+@router.put("/{source_id:int}", response_model=SourceResponse)
 async def update_source(source_id: int, data: SourceUpdate, db: AsyncSession = Depends(get_db)):
     """Update a news source."""
     result = await db.execute(select(Source).where(Source.id == source_id))
@@ -381,7 +381,7 @@ async def update_source(source_id: int, data: SourceUpdate, db: AsyncSession = D
     return SourceResponse.model_validate(source)
 
 
-@router.delete("/{source_id}")
+@router.delete("/{source_id:int}")
 async def delete_source(source_id: int, db: AsyncSession = Depends(get_db)):
     """Delete a news source."""
     result = await db.execute(select(Source).where(Source.id == source_id))
