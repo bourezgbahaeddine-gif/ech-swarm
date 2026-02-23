@@ -155,12 +155,31 @@ class ScoutAgent:
             return
 
         logger.info("freshrss_fetch_started", entries=len(feed.entries), feed_url=feed_url)
+        max_new_per_run = settings.scout_max_new_per_run
+        per_source_cap = max(1, settings.scout_freshrss_max_per_source_per_run)
+        source_new_counts: dict[str, int] = {}
         for entry in feed.entries:
+            if stats["new"] >= max_new_per_run:
+                logger.info("freshrss_run_cap_reached", max_new=max_new_per_run)
+                break
             stats["total"] += 1
             source_name = self._entry_source_name(entry)
+            source_key = source_name.strip().lower()
+            source_count = source_new_counts.get(source_key, 0)
+            if source_count >= per_source_cap:
+                stats["duplicates"] += 1
+                logger.info(
+                    "freshrss_entry_skipped_diversity_cap",
+                    source=source_name,
+                    per_source_cap=per_source_cap,
+                )
+                continue
             pseudo_source = SimpleNamespace(id=None, name=source_name)
+            before_new = stats["new"]
             try:
                 await self._process_entry(db, entry, pseudo_source, stats)
+                if stats["new"] > before_new:
+                    source_new_counts[source_key] = source_count + 1
             except Exception as e:
                 stats["errors"] += 1
                 logger.warning("freshrss_entry_process_error", source=source_name, error=str(e))

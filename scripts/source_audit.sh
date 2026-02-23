@@ -24,8 +24,13 @@ curl -fsS "$BASE_URL/api/v1/sources/stats" \
   -H "Authorization: Bearer $TOKEN"
 echo
 
-echo "[4/4] source health"
+echo "[4/5] source health"
 curl -fsS "$BASE_URL/api/v1/sources/health?hours=$HOURS&include_disabled=true" \
+  -H "Authorization: Bearer $TOKEN"
+echo
+
+echo "[5/5] source health apply (dry run)"
+curl -fsS -X POST "$BASE_URL/api/v1/sources/health/apply?hours=$HOURS&dry_run=true&include_disabled=true" \
   -H "Authorization: Bearer $TOKEN"
 echo
 

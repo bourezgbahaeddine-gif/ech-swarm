@@ -108,6 +108,132 @@ def _health_actions(
     return actions
 
 
+def _candidate_statuses() -> list[NewsStatus]:
+    return [
+        NewsStatus.CANDIDATE,
+        NewsStatus.APPROVED,
+        NewsStatus.APPROVED_HANDOFF,
+        NewsStatus.DRAFT_GENERATED,
+        NewsStatus.READY_FOR_CHIEF_APPROVAL,
+        NewsStatus.APPROVAL_REQUEST_WITH_RESERVATIONS,
+        NewsStatus.READY_FOR_MANUAL_PUBLISH,
+        NewsStatus.PUBLISHED,
+    ]
+
+
+async def _compute_sources_health(
+    db: AsyncSession,
+    *,
+    hours: int,
+    include_disabled: bool,
+) -> dict:
+    since = datetime.utcnow() - timedelta(hours=hours)
+
+    source_query = select(Source).order_by(Source.priority.desc(), Source.id.asc())
+    if not include_disabled:
+        source_query = source_query.where(Source.enabled == True)
+    source_result = await db.execute(source_query)
+    sources = source_result.scalars().all()
+
+    article_rows_result = await db.execute(
+        select(
+            func.lower(func.coalesce(Article.source_name, "")).label("source_name"),
+            func.count(Article.id).label("ingested_count"),
+            func.sum(case((Article.status.in_(_candidate_statuses()), 1), else_=0)).label("candidate_count"),
+            func.sum(case((Article.is_breaking == True, 1), else_=0)).label("breaking_count"),
+            func.max(Article.created_at).label("last_seen_at"),
+        )
+        .where(Article.created_at >= since)
+        .group_by(func.lower(func.coalesce(Article.source_name, "")))
+    )
+    source_rows = [
+        {
+            "source_name": (row.source_name or "").strip().lower(),
+            "ingested_count": int(row.ingested_count or 0),
+            "candidate_count": int(row.candidate_count or 0),
+            "breaking_count": int(row.breaking_count or 0),
+            "last_seen_at": row.last_seen_at,
+        }
+        for row in article_rows_result.all()
+    ]
+
+    blocked_domains = sorted(settings.scout_blocked_domains_set)
+
+    items = []
+    now = datetime.utcnow()
+    for source in sources:
+        aliases = _source_aliases(source)
+        matched = []
+        for row in source_rows:
+            row_name = row["source_name"]
+            if not row_name:
+                continue
+            if any(alias in row_name or row_name in alias for alias in aliases):
+                matched.append(row)
+
+        ingested_count = sum(x["ingested_count"] for x in matched)
+        candidate_count = sum(x["candidate_count"] for x in matched)
+        breaking_count = sum(x["breaking_count"] for x in matched)
+        latest_seen = max((x["last_seen_at"] for x in matched if x["last_seen_at"] is not None), default=None)
+        candidate_rate = _safe_ratio(candidate_count, ingested_count)
+        breaking_rate = _safe_ratio(breaking_count, ingested_count)
+
+        last_seen_hours = None
+        if latest_seen is not None:
+            last_seen_hours = round((now - latest_seen).total_seconds() / 3600.0, 2)
+
+        score = _health_score(
+            trust_score=float(source.trust_score or 0.0),
+            error_count=int(source.error_count or 0),
+            ingested_count=ingested_count,
+            candidate_rate=candidate_rate,
+            breaking_rate=breaking_rate,
+            last_seen_hours=last_seen_hours,
+        )
+        actions = _health_actions(
+            source=source,
+            score=score,
+            ingested_count=ingested_count,
+            candidate_rate=candidate_rate,
+            last_seen_hours=last_seen_hours,
+        )
+        source_domain = _normalize_domain(source.url)
+        if source_domain and source_domain in blocked_domains:
+            actions.append("blocked_by_policy")
+
+        items.append(
+            {
+                "source_id": source.id,
+                "name": source.name,
+                "domain": source_domain,
+                "enabled": bool(source.enabled),
+                "priority": int(source.priority or 0),
+                "trust_score": round(float(source.trust_score or 0.0), 3),
+                "error_count": int(source.error_count or 0),
+                "window_hours": hours,
+                "ingested_count": ingested_count,
+                "candidate_count": candidate_count,
+                "breaking_count": breaking_count,
+                "candidate_rate": candidate_rate,
+                "breaking_rate": breaking_rate,
+                "last_seen_at": latest_seen.isoformat() if latest_seen else None,
+                "last_seen_hours": last_seen_hours,
+                "health_score": score,
+                "health_band": _score_band(score),
+                "actions": actions,
+            }
+        )
+
+    items.sort(key=lambda x: (x["health_score"], -x["ingested_count"], x["name"].lower()))
+    return {
+        "window_hours": hours,
+        "blocked_domains": blocked_domains,
+        "total_sources": len(items),
+        "weak_sources": sum(1 for x in items if x["health_band"] in {"weak", "review"}),
+        "items": items,
+    }
+
+
 @router.get("/", response_model=list[SourceResponse])
 async def list_sources(
     enabled: Optional[bool] = None,
@@ -205,119 +331,80 @@ async def sources_health(
 ):
     """Return operational quality metrics per source with actionable recommendations."""
     hours = max(6, min(hours, 168))
-    since = datetime.utcnow() - timedelta(hours=hours)
-
-    source_query = select(Source).order_by(Source.priority.desc(), Source.id.asc())
-    if not include_disabled:
-        source_query = source_query.where(Source.enabled == True)
-    source_result = await db.execute(source_query)
-    sources = source_result.scalars().all()
-
-    candidate_statuses = [
-        NewsStatus.CANDIDATE,
-        NewsStatus.APPROVED,
-        NewsStatus.APPROVED_HANDOFF,
-        NewsStatus.DRAFT_GENERATED,
-        NewsStatus.READY_FOR_CHIEF_APPROVAL,
-        NewsStatus.APPROVAL_REQUEST_WITH_RESERVATIONS,
-        NewsStatus.READY_FOR_MANUAL_PUBLISH,
-        NewsStatus.PUBLISHED,
-    ]
-    article_rows_result = await db.execute(
-        select(
-            func.lower(func.coalesce(Article.source_name, "")).label("source_name"),
-            func.count(Article.id).label("ingested_count"),
-            func.sum(case((Article.status.in_(candidate_statuses), 1), else_=0)).label("candidate_count"),
-            func.sum(case((Article.is_breaking == True, 1), else_=0)).label("breaking_count"),
-            func.max(Article.created_at).label("last_seen_at"),
-        )
-        .where(Article.created_at >= since)
-        .group_by(func.lower(func.coalesce(Article.source_name, "")))
+    return await _compute_sources_health(
+        db,
+        hours=hours,
+        include_disabled=include_disabled,
     )
-    source_rows = [
-        {
-            "source_name": (row.source_name or "").strip().lower(),
-            "ingested_count": int(row.ingested_count or 0),
-            "candidate_count": int(row.candidate_count or 0),
-            "breaking_count": int(row.breaking_count or 0),
-            "last_seen_at": row.last_seen_at,
-        }
-        for row in article_rows_result.all()
-    ]
 
-    blocked_domains = sorted(settings.scout_blocked_domains_set)
 
-    items = []
-    now = datetime.utcnow()
-    for source in sources:
-        aliases = _source_aliases(source)
-        matched = []
-        for row in source_rows:
-            row_name = row["source_name"]
-            if not row_name:
-                continue
-            if any(alias in row_name or row_name in alias for alias in aliases):
-                matched.append(row)
+@router.post("/health/apply")
+async def apply_sources_health_actions(
+    hours: int = 48,
+    include_disabled: bool = True,
+    dry_run: bool = True,
+    max_changes: int = 100,
+    db: AsyncSession = Depends(get_db),
+):
+    """Apply source tuning actions derived from health score."""
+    hours = max(6, min(hours, 168))
+    max_changes = max(1, min(max_changes, 500))
+    report = await _compute_sources_health(
+        db,
+        hours=hours,
+        include_disabled=include_disabled,
+    )
 
-        ingested_count = sum(x["ingested_count"] for x in matched)
-        candidate_count = sum(x["candidate_count"] for x in matched)
-        breaking_count = sum(x["breaking_count"] for x in matched)
-        latest_seen = max((x["last_seen_at"] for x in matched if x["last_seen_at"] is not None), default=None)
-        candidate_rate = _safe_ratio(candidate_count, ingested_count)
-        breaking_rate = _safe_ratio(breaking_count, ingested_count)
+    result = await db.execute(select(Source))
+    source_map = {s.id: s for s in result.scalars().all()}
 
-        last_seen_hours = None
-        if latest_seen is not None:
-            last_seen_hours = round((now - latest_seen).total_seconds() / 3600.0, 2)
+    changed = []
+    for item in report["items"]:
+        if len(changed) >= max_changes:
+            break
+        source = source_map.get(item["source_id"])
+        if not source:
+            continue
+        before_enabled = bool(source.enabled)
+        before_priority = int(source.priority or 0)
+        after_enabled = before_enabled
+        after_priority = before_priority
 
-        score = _health_score(
-            trust_score=float(source.trust_score or 0.0),
-            error_count=int(source.error_count or 0),
-            ingested_count=ingested_count,
-            candidate_rate=candidate_rate,
-            breaking_rate=breaking_rate,
-            last_seen_hours=last_seen_hours,
-        )
-        actions = _health_actions(
-            source=source,
-            score=score,
-            ingested_count=ingested_count,
-            candidate_rate=candidate_rate,
-            last_seen_hours=last_seen_hours,
-        )
-        source_domain = _normalize_domain(source.url)
-        if source_domain and source_domain in blocked_domains:
-            actions.append("blocked_by_policy")
+        for action in item["actions"]:
+            if action == "disable_temporarily":
+                after_enabled = False
+            elif action == "re_enable":
+                after_enabled = True
+            elif action == "decrease_priority":
+                after_priority = max(1, after_priority - 1)
+            elif action == "increase_priority":
+                after_priority = min(10, after_priority + 1)
 
-        items.append(
+        if after_enabled == before_enabled and after_priority == before_priority:
+            continue
+
+        changed.append(
             {
                 "source_id": source.id,
                 "name": source.name,
-                "domain": source_domain,
-                "enabled": bool(source.enabled),
-                "priority": int(source.priority or 0),
-                "trust_score": round(float(source.trust_score or 0.0), 3),
-                "error_count": int(source.error_count or 0),
-                "window_hours": hours,
-                "ingested_count": ingested_count,
-                "candidate_count": candidate_count,
-                "breaking_count": breaking_count,
-                "candidate_rate": candidate_rate,
-                "breaking_rate": breaking_rate,
-                "last_seen_at": latest_seen.isoformat() if latest_seen else None,
-                "last_seen_hours": last_seen_hours,
-                "health_score": score,
-                "health_band": _score_band(score),
-                "actions": actions,
+                "actions": item["actions"],
+                "before": {"enabled": before_enabled, "priority": before_priority},
+                "after": {"enabled": after_enabled, "priority": after_priority},
+                "health_score": item["health_score"],
+                "health_band": item["health_band"],
             }
         )
+        if not dry_run:
+            source.enabled = after_enabled
+            source.priority = after_priority
 
-    items.sort(key=lambda x: (x["health_score"], -x["ingested_count"], x["name"].lower()))
+    if not dry_run and changed:
+        await db.commit()
 
     return {
-        "window_hours": hours,
-        "blocked_domains": blocked_domains,
-        "total_sources": len(items),
-        "weak_sources": sum(1 for x in items if x["health_band"] in {"weak", "review"}),
-        "items": items,
+        "dry_run": dry_run,
+        "hours": hours,
+        "candidate_changes": len(changed),
+        "applied_changes": 0 if dry_run else len(changed),
+        "items": changed,
     }
