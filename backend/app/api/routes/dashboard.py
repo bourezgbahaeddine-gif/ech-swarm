@@ -392,7 +392,7 @@ async def trigger_published_monitor(
     feed_url: str | None = Query(default=None),
     limit: int | None = Query(default=None, ge=1, le=30),
     wait: bool = Query(default=False),
-    wait_timeout_seconds: int = Query(default=35, ge=5, le=90),
+    wait_timeout_seconds: int = Query(default=90, ge=5, le=180),
     current_user: User = Depends(get_current_user),
 ):
     """Enqueue published-content quality monitor."""
@@ -549,7 +549,13 @@ async def get_latest_published_monitor(
         )
         if active:
             normalized = _normalize_published_monitor_payload({"status": "refresh_running"}, status="refresh_running")
-            return {**normalized, "job_id": str(active.id), "job_type": "published_monitor_scan", "status": "refresh_running"}
+            return {
+                "job_id": str(active.id),
+                "job_type": "published_monitor_scan",
+                "job_status": active.status,
+                **normalized,
+                "status": "refresh_running",
+            }
         ticket = await _enqueue_dashboard_job(
             db=db,
             request=request,
@@ -560,7 +566,12 @@ async def get_latest_published_monitor(
             entity_id="published_monitor",
         )
         normalized = _normalize_published_monitor_payload({"status": "refresh_queued"}, status="refresh_queued")
-        return {**normalized, **ticket}
+        return {
+            **ticket,
+            **normalized,
+            "job_status": ticket.get("status"),
+            "status": "refresh_queued",
+        }
 
     return _normalize_published_monitor_payload({"status": "empty"}, status="empty")
 
