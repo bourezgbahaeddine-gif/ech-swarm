@@ -345,7 +345,8 @@ async def _enqueue_editorial_ai_job(
         while datetime.utcnow() < deadline:
             current = await job_queue_service.get_job(db, str(active.id))
             if not current:
-                break
+                await asyncio.sleep(1)
+                continue
             if current.status == "completed":
                 result_payload = current.result_json or {}
                 return {
@@ -415,7 +416,8 @@ async def _enqueue_editorial_ai_job(
     while datetime.utcnow() < deadline:
         current = await job_queue_service.get_job(db, str(job.id))
         if not current:
-            break
+            await asyncio.sleep(1)
+            continue
         if current.status == "completed":
             result_payload = current.result_json or {}
             return {

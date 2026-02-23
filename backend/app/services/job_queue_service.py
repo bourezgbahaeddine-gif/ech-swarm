@@ -170,7 +170,11 @@ class JobQueueService:
             job_uuid = UUID(job_id)
         except Exception:  # noqa: BLE001
             return None
-        row = await db.execute(select(JobRun).where(JobRun.id == job_uuid))
+        # Force a fresh read to avoid returning stale ORM identity-map values
+        # while another worker updates the same row.
+        row = await db.execute(
+            select(JobRun).where(JobRun.id == job_uuid).execution_options(populate_existing=True)
+        )
         return row.scalar_one_or_none()
 
     async def list_jobs(
