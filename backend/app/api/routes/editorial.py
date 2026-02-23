@@ -402,7 +402,7 @@ async def _enqueue_editorial_ai_job(
             "operation": operation,
             "message": "Queue is temporarily unavailable. You can continue editing and retry.",
         }
-    return {
+    ticket = {
         "job_id": str(job.id),
         "status": "queued",
         "work_id": work_id,
