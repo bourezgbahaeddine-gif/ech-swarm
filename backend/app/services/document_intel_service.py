@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 
+from app.core.config import get_settings
 from app.core.logging import get_logger
 
 logger = get_logger("document_intel.service")
@@ -103,7 +104,11 @@ class _ExtractionChunk:
 
 class DocumentIntelService:
     max_upload_bytes = 45 * 1024 * 1024  # 45MB
-    docling_timeout_seconds = 45
+
+    def __init__(self) -> None:
+        settings = get_settings()
+        self.docling_timeout_seconds = max(10, int(settings.document_intel_docling_timeout_seconds))
+        self.docling_max_bytes = max(1, int(settings.document_intel_docling_max_size_mb)) * 1024 * 1024
 
     async def extract_pdf(
         self,
@@ -122,19 +127,41 @@ class DocumentIntelService:
         if not safe_name.lower().endswith(".pdf"):
             raise ValueError("Only PDF files are supported in this phase")
 
-        try:
-            docling_chunk = await asyncio.wait_for(
-                asyncio.to_thread(self._extract_with_docling, payload, safe_name),
-                timeout=self.docling_timeout_seconds,
-            )
-        except asyncio.TimeoutError:
+        if len(payload) > self.docling_max_bytes:
             docling_chunk = _ExtractionChunk(
                 text="",
                 markdown="",
                 pages=None,
-                parser="docling_timeout",
-                warning=f"Docling timed out after {self.docling_timeout_seconds}s; using fallback parser.",
+                parser="docling_skipped_large_file",
+                warning=(
+                    f"File is larger than {int(self.docling_max_bytes / (1024 * 1024))}MB; "
+                    "skipping Docling and using fallback parser."
+                ),
             )
+        else:
+            try:
+                docling_chunk = await asyncio.wait_for(
+                    asyncio.to_thread(self._extract_with_docling, payload, safe_name),
+                    timeout=self.docling_timeout_seconds,
+                )
+            except asyncio.TimeoutError:
+                docling_chunk = _ExtractionChunk(
+                    text="",
+                    markdown="",
+                    pages=None,
+                    parser="docling_timeout",
+                    warning=f"Docling timed out after {self.docling_timeout_seconds}s; using fallback parser.",
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("docling_unexpected_error", error=str(exc))
+                docling_chunk = _ExtractionChunk(
+                    text="",
+                    markdown="",
+                    pages=None,
+                    parser="docling_error",
+                    warning="Docling failed unexpectedly; using fallback parser.",
+                    error=str(exc),
+                )
         warnings: list[str] = []
         if docling_chunk.warning:
             warnings.append(docling_chunk.warning)

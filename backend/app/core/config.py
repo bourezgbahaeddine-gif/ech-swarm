@@ -159,6 +159,10 @@ class Settings(BaseSettings):
     tts_rate: str = "+0%"
     tts_pitch: str = "+0Hz"
 
+    # Document Intelligence
+    document_intel_docling_timeout_seconds: int = 45
+    document_intel_docling_max_size_mb: int = 8
+
     # CORS
     cors_origins: str = "http://localhost:3000,http://localhost:8000"
 

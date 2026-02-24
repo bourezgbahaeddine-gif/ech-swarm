@@ -27,6 +27,10 @@
   - Set env: `INSTALL_DOCLING=true`
   - rebuild backend/worker images
   - Docker build now supports `INSTALL_DOCLING` arg from `docker-compose.yml`
+- Runtime controls:
+  - `ECHOROUK_OS_DOCUMENT_INTEL_DOCLING_TIMEOUT_SECONDS` (default `45`)
+  - `ECHOROUK_OS_DOCUMENT_INTEL_DOCLING_MAX_SIZE_MB` (default `8`)
+  - For large files, system skips Docling and uses `pypdf` directly.
 
 ## Multilingual extraction update
 - News candidate scoring now supports:
