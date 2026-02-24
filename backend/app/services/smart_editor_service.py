@@ -189,6 +189,91 @@ class SmartEditorService:
         removed = sum(1 for line in diff_lines if line.startswith("-") and not line.startswith("---"))
         return DiffResult(diff="\n".join(diff_lines), added=added, removed=removed)
 
+    @staticmethod
+    def _local_proofread_text(text: str) -> tuple[str, list[dict[str, Any]]]:
+        fixed = text or ""
+        issues: list[dict[str, Any]] = []
+
+        double_space_matches = re.findall(r"[ \t]{2,}", fixed)
+        if double_space_matches:
+            issues.append(
+                {
+                    "kind": "spacing",
+                    "message": "تم رصد مسافات زائدة داخل النص.",
+                    "count": len(double_space_matches),
+                }
+            )
+            fixed = re.sub(r"[ \t]{2,}", " ", fixed)
+
+        space_before_punct = re.findall(r"\s+[،؛:,.!?؟]", fixed)
+        if space_before_punct:
+            issues.append(
+                {
+                    "kind": "punctuation",
+                    "message": "تم رصد مسافة قبل علامات الترقيم.",
+                    "count": len(space_before_punct),
+                }
+            )
+            fixed = re.sub(r"\s+([،؛:,.!?؟])", r"\1", fixed)
+
+        missing_space_after_punct = re.findall(r"([،؛:,.!?؟])([^\s\n])", fixed)
+        if missing_space_after_punct:
+            issues.append(
+                {
+                    "kind": "punctuation",
+                    "message": "تم رصد غياب مسافة بعد بعض علامات الترقيم.",
+                    "count": len(missing_space_after_punct),
+                }
+            )
+            fixed = re.sub(r"([،؛:,.!?؟])([^\s\n])", r"\1 \2", fixed)
+
+        latin_comma_matches = re.findall(r"(?<=[\u0600-\u06FF]),(?=[\u0600-\u06FF])", fixed)
+        if latin_comma_matches:
+            issues.append(
+                {
+                    "kind": "spelling",
+                    "message": "تم رصد استخدام فاصلة لاتينية داخل سياق عربي.",
+                    "count": len(latin_comma_matches),
+                }
+            )
+            fixed = re.sub(r"(?<=[\u0600-\u06FF]),(?=[\u0600-\u06FF])", "،", fixed)
+
+        repeated_punct = re.findall(r"([،؛:,.!?؟]){2,}", fixed)
+        if repeated_punct:
+            issues.append(
+                {
+                    "kind": "punctuation",
+                    "message": "تم رصد تكرار علامات ترقيم متتالية.",
+                    "count": len(repeated_punct),
+                }
+            )
+            fixed = re.sub(r"([،؛:,.!?؟]){2,}", r"\1", fixed)
+
+        fixed = re.sub(r"[ \t]+\n", "\n", fixed)
+        fixed = re.sub(r"\n[ \t]+", "\n", fixed)
+        fixed = re.sub(r"\n{3,}", "\n\n", fixed).strip()
+        return fixed, issues
+
+    @staticmethod
+    def _normalize_proofread_issues(value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        out: list[dict[str, Any]] = []
+        for item in value:
+            if isinstance(item, dict):
+                out.append(
+                    {
+                        "kind": str(item.get("kind") or "language").strip()[:40],
+                        "message": str(item.get("message") or item.get("issue") or "").strip()[:280],
+                        "before": str(item.get("before") or "").strip()[:280],
+                        "after": str(item.get("after") or "").strip()[:280],
+                        "count": item.get("count"),
+                    }
+                )
+            elif isinstance(item, str):
+                out.append({"kind": "language", "message": item.strip()[:280], "before": "", "after": "", "count": None})
+        return [x for x in out if x.get("message")]
+
     async def rewrite_suggestion(
         self,
         *,
@@ -250,6 +335,80 @@ title, body_html, note
             "diff_stats": {"added": diff_text.added, "removed": diff_text.removed},
             "preview": {
                 "before_text": before_text[:1400],
+                "after_text": after_text[:1400],
+            },
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+
+    async def proofread_suggestion(
+        self,
+        *,
+        source_text: str,
+        draft_title: str,
+        draft_html: str,
+    ) -> dict[str, Any]:
+        plain_before = self.html_to_text(draft_html)
+        local_after_text, local_issues = self._local_proofread_text(plain_before)
+        local_html = self._text_to_html(draft_title or "نسخة منقحة", local_after_text) if local_after_text else draft_html
+
+        prompt = f"""
+أنت مدقق لغوي وصحفي في غرفة أخبار.
+المطلوب: تدقيق إملائي ونحوي وترقيمي لنص عربي جاهز للنشر.
+
+أعد JSON فقط بالمفاتيح:
+title, body_html, note, issues
+
+شروط إلزامية:
+- body_html يجب أن يكون HTML صالحاً مع H1 واحد وفقرة/فقرات واضحة.
+- لا تضف معلومات جديدة غير موجودة في النص الأصلي.
+- أصلح فقط: الإملاء، النحو، الترقيم، وضوح الصياغة.
+- issues يجب أن تكون قائمة مختصرة بعناصر من الشكل:
+  kind, message, before, after
+- ممنوع أي شروحات خارج JSON.
+
+العنوان الحالي:
+{draft_title}
+
+النص الحالي:
+{draft_html[:10000]}
+
+السياق:
+{source_text[:4000]}
+"""
+        ai = self._get_ai_service()
+        data = await ai.generate_json(prompt) if ai else {}
+        title = str(data.get("title") or draft_title or "").strip() or "نسخة منقحة"
+        candidate = str(data.get("body_html") or "").strip()
+        note = str(data.get("note") or "proofread").strip()
+
+        if not candidate:
+            candidate = local_html
+        candidate = self._strip_side_comments(candidate)
+        if not self._contains_html(candidate):
+            candidate = self._text_to_html(title, candidate)
+        if "<h1" not in candidate.lower():
+            candidate = f"<h1>{title}</h1>\n{candidate}"
+
+        sanitized = self.sanitize_html(candidate)
+        after_text = self.html_to_text(sanitized)
+
+        issues = self._normalize_proofread_issues(data.get("issues"))
+        if not issues:
+            issues = local_issues
+
+        diff_text = self.build_diff(plain_before, after_text)
+        diff_html = self.build_diff(draft_html, sanitized)
+        return {
+            "title": title,
+            "body_html": sanitized,
+            "body_text": after_text,
+            "note": note,
+            "issues": issues,
+            "diff": diff_text.diff,
+            "diff_html": diff_html.diff,
+            "diff_stats": {"added": diff_text.added, "removed": diff_text.removed},
+            "preview": {
+                "before_text": plain_before[:1400],
                 "after_text": after_text[:1400],
             },
             "generated_at": datetime.utcnow().isoformat(),

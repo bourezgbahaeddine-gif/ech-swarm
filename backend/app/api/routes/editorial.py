@@ -343,6 +343,7 @@ async def _enqueue_editorial_ai_job(
     # Smart editor interactive actions should return completed/failed payloads
     # whenever possible so the UI can update deterministically.
     if operation in {
+        "proofread",
         "rewrite",
         "headlines",
         "seo",
@@ -416,6 +417,7 @@ async def _enqueue_editorial_ai_job(
     )
     try:
         if wait_for_result and operation in {
+            "proofread",
             "rewrite",
             "headlines",
             "seo",
@@ -1651,6 +1653,30 @@ async def workspace_ai_rewrite(
         operation="rewrite",
         queue_name="ai_quality",
         payload={"mode": payload.mode, "instruction": payload.instruction or ""},
+        wait_for_result_override=wait,
+        wait_timeout_seconds_override=wait_timeout_seconds,
+    )
+
+
+@router.post("/workspace/drafts/{work_id}/ai/proofread")
+async def workspace_ai_proofread(
+    work_id: str,
+    request: Request,
+    wait: bool = Query(default=True),
+    wait_timeout_seconds: int = Query(default=90, ge=5, le=180),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(current_user, NEWSROOM_ROLES)
+    await _get_latest_draft_or_404(db, work_id)
+    return await _enqueue_editorial_ai_job(
+        db=db,
+        request=request,
+        current_user=current_user,
+        work_id=work_id,
+        job_type="editorial_proofread",
+        operation="proofread",
+        queue_name="ai_quality",
         wait_for_result_override=wait,
         wait_timeout_seconds_override=wait_timeout_seconds,
     )

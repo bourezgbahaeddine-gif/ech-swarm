@@ -489,6 +489,8 @@ export const editorialApi = {
         api.post(`/editorial/workspace/drafts/${workId}/restore/${version}`),
     aiRewriteSuggestion: (workId: string, data: { mode: 'formal' | 'breaking' | 'analysis' | 'simple'; instruction?: string }) =>
         api.post(`/editorial/workspace/drafts/${workId}/ai/rewrite`, data),
+    aiProofreadSuggestion: (workId: string) =>
+        api.post(`/editorial/workspace/drafts/${workId}/ai/proofread`),
     aiHeadlineSuggestion: (workId: string, count = 5) =>
         api.post(`/editorial/workspace/drafts/${workId}/ai/headlines`, { count }),
     aiSeoSuggestion: (workId: string) =>

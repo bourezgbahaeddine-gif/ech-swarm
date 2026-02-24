@@ -152,6 +152,14 @@ async def _execute_editorial_ai_job(
         draft_title = latest.title or article.title_ar or article.original_title
         draft_html = latest.body or ""
 
+        if op == "proofread":
+            suggestion = await smart_editor_service.proofread_suggestion(
+                source_text=source_text,
+                draft_title=draft_title,
+                draft_html=draft_html,
+            )
+            return {"work_id": work_id, "base_version": latest.version, "tool": "proofread", "suggestion": suggestion}
+
         if op == "rewrite":
             suggestion = await smart_editor_service.rewrite_suggestion(
                 source_text=source_text,

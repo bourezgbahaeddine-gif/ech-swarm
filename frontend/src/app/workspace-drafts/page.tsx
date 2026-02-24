@@ -29,12 +29,13 @@ import { useAuth } from '@/lib/auth';
 import { cn, formatRelativeTime, truncate } from '@/lib/utils';
 
 type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
-type RightTab = 'evidence' | 'quality' | 'seo' | 'social' | 'context' | 'msi' | 'simulator' | 'xray';
+type RightTab = 'evidence' | 'proofread' | 'quality' | 'seo' | 'social' | 'context' | 'msi' | 'simulator' | 'xray';
 type GuideType = 'welcome' | 'action';
-type ActionId = 'quick_check' | 'verify' | 'improve' | 'headlines' | 'seo' | 'links' | 'social' | 'quality' | 'publish_gate' | 'apply' | 'save' | 'manual_draft' | 'audience_test';
+type ActionId = 'quick_check' | 'verify' | 'proofread' | 'improve' | 'headlines' | 'seo' | 'links' | 'social' | 'quality' | 'publish_gate' | 'apply' | 'save' | 'manual_draft' | 'audience_test';
 
 const TABS: Array<{ id: RightTab; label: string }> = [
     { id: 'evidence', label: 'التحقق والأدلة' },
+    { id: 'proofread', label: 'تدقيق لغوي' },
     { id: 'quality', label: 'تقييم الجودة' },
     { id: 'seo', label: 'أدوات SEO' },
     { id: 'social', label: 'نسخ السوشيال' },
@@ -50,6 +51,7 @@ const ACTION_HELP_PREFIX = 'smart_editor_action_help_seen_v1_';
 const ACTION_HELP: Record<ActionId, { title: string; description: string }> = {
     quick_check: { title: 'زر الفحص السريع', description: 'يشغل التحقق + الجودة + بوابة النشر دفعة واحدة ليعطيك حالة جاهزية سريعة.' },
     verify: { title: 'زر التحقق', description: 'يستخرج الادعاءات ويعرض درجة الثقة قبل النشر.' },
+    proofread: { title: 'زر التدقيق اللغوي', description: 'يصحح الإملاء والنحو والترقيم ويعرض الفروقات قبل اعتماد النسخة.' },
     improve: { title: 'زر التحسين', description: 'يولد اقتراح تحسين كفرق (Diff) قابل للقبول أو الرفض.' },
     headlines: { title: 'زر العناوين', description: 'يولد 5 عناوين متنوعة للاستخدام التحريري.' },
     seo: { title: 'زر SEO', description: 'يولد عنوان SEO والوصف والكلمات المفتاحية والوسوم.' },
@@ -152,6 +154,7 @@ function WorkspaceDraftsPageContent() {
     const [err, setErr] = useState<string | null>(null);
     const [ok, setOk] = useState<string | null>(null);
     const [claims, setClaims] = useState<any[]>([]);
+    const [proofread, setProofread] = useState<any | null>(null);
     const [quality, setQuality] = useState<any | null>(null);
     const [seoPack, setSeoPack] = useState<any | null>(null);
     const [linkMode, setLinkMode] = useState<'internal' | 'external' | 'mixed'>('mixed');
@@ -279,7 +282,7 @@ function WorkspaceDraftsPageContent() {
         content: '',
         immediatelyRender: false,
         editorProps: {
-            attributes: { class: 'smart-editor-content min-h-[520px] p-6 text-[15px] leading-8 text-white focus:outline-none', dir: 'rtl' },
+            attributes: { class: 'smart-editor-content min-h-[360px] md:min-h-[520px] p-4 md:p-6 text-[14px] md:text-[15px] leading-7 md:leading-8 text-white focus:outline-none', dir: 'rtl' },
         },
         onUpdate({ editor: ed }) {
             setBodyHtml(ed.getHTML());
@@ -297,6 +300,7 @@ function WorkspaceDraftsPageContent() {
         setSaveState('saved');
         lastSavedRef.current = { title: cleanText(draft.title || ''), body: draft.body || '' };
         setSuggestion(null);
+        setProofread(null);
         setSimResult(null);
     }, [context?.draft?.id, editor]);
 
@@ -366,6 +370,14 @@ function WorkspaceDraftsPageContent() {
         },
         onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر تشغيل تحسين النص'),
     });
+    const runProofread = useMutation({
+        mutationFn: () => runEditorialActionWithPolling(() => editorialApi.aiProofreadSuggestion(workId!), 'التدقيق اللغوي'),
+        onSuccess: (data) => {
+            setProofread(data?.suggestion || null);
+            setActiveTab('proofread');
+        },
+        onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر تشغيل التدقيق اللغوي'),
+    });
     const applySuggestion = useMutation({
         mutationFn: () => runEditorialActionWithPolling(() => editorialApi.applyAiSuggestion(workId!, {
             title: suggestion?.title,
@@ -387,6 +399,27 @@ function WorkspaceDraftsPageContent() {
             queryClient.invalidateQueries({ queryKey: ['smart-editor-versions', workId] });
         },
         onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر تطبيق الاقتراح'),
+    });
+    const applyProofread = useMutation({
+        mutationFn: () => runEditorialActionWithPolling(() => editorialApi.applyAiSuggestion(workId!, {
+            title: proofread?.title || title,
+            body: proofread?.body_html || '',
+            based_on_version: baseVersion,
+            suggestion_tool: 'proofread',
+        }), 'تطبيق التدقيق اللغوي'),
+        onSuccess: (data) => {
+            const d = data?.draft;
+            if (d && editor) {
+                setTitle(cleanText(d.title || ''));
+                setBodyHtml(d.body || '');
+                editor.commands.setContent(d.body || '<p></p>', { emitUpdate: false });
+                setBaseVersion(d.version);
+            }
+            setProofread(null);
+            queryClient.invalidateQueries({ queryKey: ['smart-editor-context', workId] });
+            queryClient.invalidateQueries({ queryKey: ['smart-editor-versions', workId] });
+        },
+        onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر تطبيق نتيجة التدقيق اللغوي'),
     });
 
     const runVerifier = useMutation({
@@ -726,20 +759,20 @@ function WorkspaceDraftsPageContent() {
                         <h1 className="text-xl font-semibold text-white">المحرر الذكي لغرفة الشروق</h1>
                         <p className="text-xs text-gray-400">كتابة عربية احترافية + اقتراحات AI + تحقق + بوابة نشر</p>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex w-full sm:w-auto flex-wrap items-center justify-start sm:justify-end gap-2">
                         <NextLink
                             href="/services/multimedia"
-                            className="inline-flex items-center gap-1 rounded-xl border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-xs text-violet-200"
+                            className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-xs text-violet-200"
                         >
                             أدوات الوسائط
                         </NextLink>
                         <button
                             onClick={() => runWithGuide('manual_draft', () => setNewDraftOpen(true))}
-                            className="inline-flex items-center gap-1 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200"
+                            className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200"
                         >
                             مسودة جديدة
                         </button>
-                        <button onClick={openWelcomeGuide} className="inline-flex items-center gap-1 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-200"><CircleHelp className="w-4 h-4" />دليل الاستخدام</button>
+                        <button onClick={openWelcomeGuide} className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-200"><CircleHelp className="w-4 h-4" />دليل الاستخدام</button>
                         <div className="text-xs">{saveNode}</div>
                     </div>
                 </div>
@@ -753,59 +786,36 @@ function WorkspaceDraftsPageContent() {
                     </div>
                 </div>
 
-                <div className="mt-3 flex flex-wrap gap-2">
+                <div className="mt-3 flex gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible">
                     <button
                         onClick={() => runWithGuide('quick_check', () => runQuickCheck.mutate())}
                         disabled={runQuickCheck.isPending}
-                        className="px-3 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-100 text-xs flex items-center gap-2 disabled:opacity-60"
+                        className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-100 text-xs flex items-center gap-2 disabled:opacity-60"
                     >
                         <ShieldCheck className="w-4 h-4" />
                         {runQuickCheck.isPending ? 'جاري الفحص...' : 'فحص سريع'}
                     </button>
-                    <button disabled={runVerifier.isPending} onClick={() => runWithGuide('verify', () => runVerifier.mutate())} className="px-3 py-2 rounded-xl bg-cyan-500/20 border border-cyan-500/30 text-cyan-200 text-xs flex items-center gap-2 disabled:opacity-60"><SearchCheck className="w-4 h-4" />{runVerifier.isPending ? 'جاري التحقق...' : 'تحقق'}</button>
-                    <button disabled={rewrite.isPending} onClick={() => runWithGuide('improve', () => rewrite.mutate())} className="px-3 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-2 disabled:opacity-60"><Sparkles className="w-4 h-4" />{rewrite.isPending ? 'جاري التحسين...' : 'تحسين'}</button>
-                    <button disabled={runHeadlines.isPending} onClick={() => runWithGuide('headlines', () => runHeadlines.mutate())} className="px-3 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-200 text-xs disabled:opacity-60">{runHeadlines.isPending ? 'جاري التوليد...' : 'عناوين'}</button>
-                    <button disabled={runSeo.isPending} onClick={() => runWithGuide('seo', () => runSeo.mutate())} className="px-3 py-2 rounded-xl bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-200 text-xs disabled:opacity-60">{runSeo.isPending ? 'جاري التحليل...' : 'SEO'}</button>
-                    <button disabled={runLinks.isPending} onClick={() => runWithGuide('links', () => runLinks.mutate())} className="px-3 py-2 rounded-xl bg-teal-500/20 border border-teal-500/30 text-teal-200 text-xs disabled:opacity-60">{runLinks.isPending ? 'جاري جلب الروابط...' : 'روابط'}</button>
-                    <button disabled={runSocial.isPending} onClick={() => runWithGuide('social', () => runSocial.mutate())} className="px-3 py-2 rounded-xl bg-sky-500/20 border border-sky-500/30 text-sky-200 text-xs disabled:opacity-60">{runSocial.isPending ? 'جاري التوليد...' : 'سوشيال'}</button>
-                    <button disabled={runQuality.isPending} onClick={() => runWithGuide('quality', () => runQuality.mutate())} className="px-3 py-2 rounded-xl bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs disabled:opacity-60">{runQuality.isPending ? 'جاري التقييم...' : 'جودة'}</button>
-                    <button disabled={runAudienceSimulation.isPending} onClick={() => runWithGuide('audience_test', () => runAudienceSimulation.mutate())} className="px-3 py-2 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-100 text-xs disabled:opacity-60">
+                    <button disabled={runVerifier.isPending} onClick={() => runWithGuide('verify', () => runVerifier.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-cyan-500/20 border border-cyan-500/30 text-cyan-200 text-xs flex items-center gap-2 disabled:opacity-60"><SearchCheck className="w-4 h-4" />{runVerifier.isPending ? 'جاري التحقق...' : 'تحقق'}</button>
+                    <button disabled={runProofread.isPending} onClick={() => runWithGuide('proofread', () => runProofread.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-lime-500/20 border border-lime-500/30 text-lime-200 text-xs disabled:opacity-60">{runProofread.isPending ? 'جاري التدقيق...' : 'تدقيق لغوي'}</button>
+                    <button disabled={rewrite.isPending} onClick={() => runWithGuide('improve', () => rewrite.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-2 disabled:opacity-60"><Sparkles className="w-4 h-4" />{rewrite.isPending ? 'جاري التحسين...' : 'تحسين'}</button>
+                    <button disabled={runHeadlines.isPending} onClick={() => runWithGuide('headlines', () => runHeadlines.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-200 text-xs disabled:opacity-60">{runHeadlines.isPending ? 'جاري التوليد...' : 'عناوين'}</button>
+                    <button disabled={runSeo.isPending} onClick={() => runWithGuide('seo', () => runSeo.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-200 text-xs disabled:opacity-60">{runSeo.isPending ? 'جاري التحليل...' : 'SEO'}</button>
+                    <button disabled={runLinks.isPending} onClick={() => runWithGuide('links', () => runLinks.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-teal-500/20 border border-teal-500/30 text-teal-200 text-xs disabled:opacity-60">{runLinks.isPending ? 'جاري جلب الروابط...' : 'روابط'}</button>
+                    <button disabled={runSocial.isPending} onClick={() => runWithGuide('social', () => runSocial.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-sky-500/20 border border-sky-500/30 text-sky-200 text-xs disabled:opacity-60">{runSocial.isPending ? 'جاري التوليد...' : 'سوشيال'}</button>
+                    <button disabled={runQuality.isPending} onClick={() => runWithGuide('quality', () => runQuality.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs disabled:opacity-60">{runQuality.isPending ? 'جاري التقييم...' : 'جودة'}</button>
+                    <button disabled={runAudienceSimulation.isPending} onClick={() => runWithGuide('audience_test', () => runAudienceSimulation.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-100 text-xs disabled:opacity-60">
                         محاكي الجمهور
                     </button>
-                    <button disabled={runReadiness.isPending} onClick={() => runWithGuide('publish_gate', () => runReadiness.mutate())} className="px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-200 text-xs disabled:opacity-60">{runReadiness.isPending ? 'جاري الفحص...' : 'بوابة النشر'}</button>
-                    <button disabled={applyToArticle.isPending} onClick={() => runWithGuide('apply', () => applyToArticle.mutate())} className="px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs disabled:opacity-60">{applyToArticle.isPending ? 'جاري الإرسال...' : 'إرسال لاعتماد رئيس التحرير'}</button>
-                    <button disabled={autosave.isPending} onClick={() => runWithGuide('save', () => { setSaveState('saving'); autosave.mutate(); })} className="px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs flex items-center gap-2 disabled:opacity-60"><Save className="w-4 h-4" />حفظ</button>
+                    <button disabled={runReadiness.isPending} onClick={() => runWithGuide('publish_gate', () => runReadiness.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-200 text-xs disabled:opacity-60">{runReadiness.isPending ? 'جاري الفحص...' : 'بوابة النشر'}</button>
+                    <button disabled={applyToArticle.isPending} onClick={() => runWithGuide('apply', () => applyToArticle.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs disabled:opacity-60">{applyToArticle.isPending ? 'جاري الإرسال...' : 'إرسال لاعتماد رئيس التحرير'}</button>
+                    <button disabled={autosave.isPending} onClick={() => runWithGuide('save', () => { setSaveState('saving'); autosave.mutate(); })} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs flex items-center gap-2 disabled:opacity-60"><Save className="w-4 h-4" />حفظ</button>
                 </div>
 
                 {(err || ok) && <div className={cn('mt-3 rounded-xl px-3 py-2 text-xs', err ? 'bg-red-500/15 text-red-200 border border-red-500/30' : 'bg-emerald-500/15 text-emerald-200 border border-emerald-500/30')}>{err || ok}</div>}
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
-                <aside className="xl:col-span-3 space-y-4">
-                    <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4">
-                        <h2 className="text-sm text-white mb-2">المسودات</h2>
-                        <div className="space-y-2 max-h-[260px] overflow-auto">
-                            {drafts.map((d) => (
-                                <button key={`${d.work_id}-${d.id}`} onClick={() => setWorkId(d.work_id)} className={cn('w-full text-right rounded-xl border p-2', workId === d.work_id ? 'border-emerald-400/40 bg-emerald-500/10' : 'border-white/10 bg-white/5')}>
-                                    <div className="text-xs text-gray-200">{truncate(cleanText(d.title || 'بدون عنوان'), 58)}</div>
-                                    <div className="text-[10px] text-gray-500 mt-1">{formatRelativeTime(d.updated_at)}</div>
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                    <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4">
-                        <h2 className="text-sm text-white mb-2">المصدر والبيانات</h2>
-                        {contextLoading ? <p className="text-xs text-gray-500">جاري التحميل...</p> : (
-                            <div className="text-xs space-y-2" dir="rtl">
-                                <p className="text-gray-200">{cleanText(context?.article?.original_title || 'لا يوجد عنوان مصدر')}</p>
-                                <p className="text-gray-400">{cleanText(context?.article?.router_rationale || 'لا يوجد تفسير توجيه')}</p>
-                                <div className="rounded-xl border border-white/10 bg-black/25 p-2 text-gray-300 max-h-56 overflow-auto">{cleanText(context?.article?.summary || context?.article?.original_content || 'لا يوجد نص مصدر متاح')}</div>
-                            </div>
-                        )}
-                    </div>
-                </aside>
-
-                <main className="xl:col-span-6 space-y-4">
+                <main className="order-1 xl:order-2 xl:col-span-6 space-y-4">
                     <div className="rounded-2xl border border-white/10 bg-gray-900/50 overflow-hidden">
                         <div className="border-b border-white/10 p-4">
                             <input value={title} onChange={(e) => { setTitle(cleanText(e.target.value)); setSaveState('unsaved'); }} className="w-full rounded-xl bg-white/5 border border-white/15 px-3 py-2 text-white text-lg" dir="rtl" />
@@ -863,11 +873,35 @@ function WorkspaceDraftsPageContent() {
                     )}
                 </main>
 
-                <aside className="xl:col-span-3 space-y-4">
+                <aside className="order-2 xl:order-1 xl:col-span-3 space-y-4">
                     <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4">
-                        <div className="flex flex-wrap gap-2">
+                        <h2 className="text-sm text-white mb-2">المسودات</h2>
+                        <div className="space-y-2 max-h-[260px] overflow-auto">
+                            {drafts.map((d) => (
+                                <button key={`${d.work_id}-${d.id}`} onClick={() => setWorkId(d.work_id)} className={cn('w-full text-right rounded-xl border p-2', workId === d.work_id ? 'border-emerald-400/40 bg-emerald-500/10' : 'border-white/10 bg-white/5')}>
+                                    <div className="text-xs text-gray-200">{truncate(cleanText(d.title || 'بدون عنوان'), 58)}</div>
+                                    <div className="text-[10px] text-gray-500 mt-1">{formatRelativeTime(d.updated_at)}</div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4">
+                        <h2 className="text-sm text-white mb-2">المصدر والبيانات</h2>
+                        {contextLoading ? <p className="text-xs text-gray-500">جاري التحميل...</p> : (
+                            <div className="text-xs space-y-2" dir="rtl">
+                                <p className="text-gray-200">{cleanText(context?.article?.original_title || 'لا يوجد عنوان مصدر')}</p>
+                                <p className="text-gray-400">{cleanText(context?.article?.router_rationale || 'لا يوجد تفسير توجيه')}</p>
+                                <div className="rounded-xl border border-white/10 bg-black/25 p-2 text-gray-300 max-h-56 overflow-auto">{cleanText(context?.article?.summary || context?.article?.original_content || 'لا يوجد نص مصدر متاح')}</div>
+                            </div>
+                        )}
+                    </div>
+                </aside>
+
+                <aside className="order-3 xl:order-3 xl:col-span-3 space-y-4">
+                    <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4">
+                        <div className="flex gap-2 overflow-x-auto pb-1 xl:flex-wrap xl:overflow-visible">
                             {visibleTabs.map((t) => (
-                                <button key={t.id} onClick={() => setActiveTab(t.id)} className={cn('px-2 py-1 rounded-lg text-[11px]', activeTab === t.id ? 'bg-emerald-500/20 text-emerald-200' : 'bg-white/10 text-gray-300')}>{t.label}</button>
+                                <button key={t.id} onClick={() => setActiveTab(t.id)} className={cn('shrink-0 min-h-9 px-2 py-1 rounded-lg text-[11px]', activeTab === t.id ? 'bg-emerald-500/20 text-emerald-200' : 'bg-white/10 text-gray-300')}>{t.label}</button>
                             ))}
                         </div>
                     </div>
@@ -875,6 +909,58 @@ function WorkspaceDraftsPageContent() {
                     {activeTab === 'evidence' && (
                         <Panel title="نتائج التحقق">
                             {claims.length ? claims.map((c) => <Row key={c.id} text={cleanText(c.text || '')} danger={c.blocking} title={`${Math.round((c.confidence || 0) * 100)}% ثقة`} />) : <Empty text="اضغط زر «تحقق» لعرض الادعاءات." />}
+                        </Panel>
+                    )}
+
+                    {activeTab === 'proofread' && (
+                        <Panel title="نتائج التدقيق اللغوي">
+                            {proofread ? (
+                                <div className="space-y-2 text-xs text-gray-200">
+                                    <div className="rounded-xl border border-lime-500/30 bg-lime-500/10 p-2 text-lime-100">
+                                        <p>العنوان المقترح: {cleanText(proofread?.title || title || 'بدون عنوان')}</p>
+                                        <p>التعديل: +{proofread?.diff_stats?.added || 0} / -{proofread?.diff_stats?.removed || 0}</p>
+                                    </div>
+                                    <div className="rounded-xl border border-white/10 bg-black/20 p-2">
+                                        <p className="text-gray-400 mb-1">قبل التدقيق</p>
+                                        <p className="text-gray-200 whitespace-pre-wrap max-h-40 overflow-auto">
+                                            {cleanText(proofread?.preview?.before_text || htmlToReadableText(bodyHtml))}
+                                        </p>
+                                    </div>
+                                    <div className="rounded-xl border border-lime-500/30 bg-lime-500/10 p-2">
+                                        <p className="text-lime-100 mb-1">بعد التدقيق</p>
+                                        <p className="text-lime-50 whitespace-pre-wrap max-h-40 overflow-auto">
+                                            {cleanText(proofread?.preview?.after_text || proofread?.body_text || htmlToReadableText(proofread?.body_html || ''))}
+                                        </p>
+                                    </div>
+                                    <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-gray-300">
+                                        <p className="text-gray-400 mb-1">ملاحظات التدقيق</p>
+                                        {(proofread?.issues || []).length ? (
+                                            (proofread.issues || []).slice(0, 12).map((issue: any, idx: number) => (
+                                                <p key={`${issue?.kind || 'issue'}-${idx}`}>
+                                                    - [{cleanText(issue?.kind || 'language')}] {cleanText(issue?.message || '')}
+                                                </p>
+                                            ))
+                                        ) : (
+                                            <p>لا توجد ملاحظات إضافية.</p>
+                                        )}
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        <button
+                                            onClick={() => applyProofread.mutate()}
+                                            disabled={applyProofread.isPending}
+                                            className="px-3 py-2 rounded-xl bg-emerald-500/30 text-emerald-100 text-xs disabled:opacity-60"
+                                        >
+                                            {applyProofread.isPending ? 'جاري التطبيق...' : 'تطبيق كنسخة جديدة'}
+                                        </button>
+                                        <button
+                                            onClick={() => setProofread(null)}
+                                            className="px-3 py-2 rounded-xl bg-white/10 text-gray-300 text-xs"
+                                        >
+                                            تجاهل
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : <Empty text="اضغط زر «تدقيق لغوي» لعرض التصحيحات." />}
                         </Panel>
                     )}
 
@@ -1188,7 +1274,7 @@ function WorkspaceDraftsPageContent() {
                             className="w-full min-h-[220px] rounded-xl bg-white/5 border border-white/15 px-3 py-2 text-white"
                             placeholder="متن المسودة الأولي"
                         />
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                             <select value={manualCategory} onChange={(e) => setManualCategory(e.target.value)} className="rounded-xl bg-white/10 px-3 py-2 text-sm text-gray-100">
                                 <option value="local_algeria">محلي الجزائر</option>
                                 <option value="politics">سياسة</option>
@@ -1230,7 +1316,7 @@ function WorkspaceDraftsPageContent() {
 }
 
 function Panel({ title, children }: { title: string; children: ReactNode }) {
-    return <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-2"><h3 className="text-sm text-white">{title}</h3>{children}</div>;
+    return <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-3 sm:p-4 space-y-2"><h3 className="text-sm text-white">{title}</h3>{children}</div>;
 }
 
 function Empty({ text }: { text: string }) {

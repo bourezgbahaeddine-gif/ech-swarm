@@ -34,6 +34,7 @@ JOB_TASK_MAP: dict[str, tuple[str, str]] = {
     "msi_run": ("app.queue.tasks.pipeline_tasks.run_msi_job", "ai_msi"),
     "simulator_run": ("app.queue.tasks.pipeline_tasks.run_simulator_job", "ai_simulator"),
     "editorial_rewrite": ("app.queue.tasks.ai_tasks.run_editorial_ai_job", "ai_quality"),
+    "editorial_proofread": ("app.queue.tasks.ai_tasks.run_editorial_ai_job", "ai_quality"),
     "editorial_headlines": ("app.queue.tasks.ai_tasks.run_editorial_ai_job", "ai_quality"),
     "editorial_seo": ("app.queue.tasks.ai_tasks.run_editorial_ai_job", "ai_quality"),
     "editorial_social": ("app.queue.tasks.ai_tasks.run_editorial_ai_job", "ai_quality"),
