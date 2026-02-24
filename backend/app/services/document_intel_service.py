@@ -103,6 +103,7 @@ class _ExtractionChunk:
 
 class DocumentIntelService:
     max_upload_bytes = 45 * 1024 * 1024  # 45MB
+    docling_timeout_seconds = 45
 
     async def extract_pdf(
         self,
@@ -121,7 +122,19 @@ class DocumentIntelService:
         if not safe_name.lower().endswith(".pdf"):
             raise ValueError("Only PDF files are supported in this phase")
 
-        docling_chunk = await asyncio.to_thread(self._extract_with_docling, payload, safe_name)
+        try:
+            docling_chunk = await asyncio.wait_for(
+                asyncio.to_thread(self._extract_with_docling, payload, safe_name),
+                timeout=self.docling_timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            docling_chunk = _ExtractionChunk(
+                text="",
+                markdown="",
+                pages=None,
+                parser="docling_timeout",
+                warning=f"Docling timed out after {self.docling_timeout_seconds}s; using fallback parser.",
+            )
         warnings: list[str] = []
         if docling_chunk.warning:
             warnings.append(docling_chunk.warning)
@@ -277,7 +290,7 @@ print(json.dumps({"text": text, "markdown": markdown, "pages": pages}, ensure_as
                     [sys.executable, "-c", script, str(temp_path)],
                     capture_output=True,
                     text=True,
-                    timeout=240,
+                    timeout=self.docling_timeout_seconds,
                     check=False,
                 )
                 if proc.returncode != 0:

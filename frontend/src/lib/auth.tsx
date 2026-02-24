@@ -4,8 +4,7 @@ import {
     createContext,
     useContext,
     useEffect,
-    useMemo,
-    useState,
+    useReducer,
     type ReactNode,
 } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
@@ -27,6 +26,17 @@ interface AuthContextType {
     login: (token: string, user: AuthUser) => void;
     logout: () => void;
 }
+
+type AuthState = {
+    user: AuthUser | null;
+    token: string | null;
+    isLoading: boolean;
+};
+
+type AuthAction =
+    | { type: 'hydrate'; payload: { token: string | null; user: AuthUser | null } }
+    | { type: 'login'; payload: { token: string; user: AuthUser } }
+    | { type: 'logout' };
 
 const AuthContext = createContext<AuthContextType>({
     user: null,
@@ -69,25 +79,58 @@ function readStoredAuth(): { token: string | null; user: AuthUser | null } {
 
 export const useAuth = () => useContext(AuthContext);
 
+function authReducer(state: AuthState, action: AuthAction): AuthState {
+    switch (action.type) {
+        case 'hydrate':
+            return {
+                token: action.payload.token,
+                user: action.payload.user,
+                isLoading: false,
+            };
+        case 'login':
+            return {
+                token: action.payload.token,
+                user: action.payload.user,
+                isLoading: false,
+            };
+        case 'logout':
+            return {
+                token: null,
+                user: null,
+                isLoading: false,
+            };
+        default:
+            return state;
+    }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
     const router = useRouter();
     const pathname = usePathname();
 
-    const initial = useMemo(() => readStoredAuth(), []);
-    const [user, setUser] = useState<AuthUser | null>(initial.user);
-    const [token, setToken] = useState<string | null>(initial.token);
+    const [authState, dispatch] = useReducer(authReducer, {
+        user: null,
+        token: null,
+        isLoading: true,
+    });
+    const { user, token, isLoading } = authState;
 
     useEffect(() => {
+        const initial = readStoredAuth();
+        dispatch({ type: 'hydrate', payload: initial });
+    }, []);
+
+    useEffect(() => {
+        if (isLoading) return;
         if (PUBLIC_PATHS.includes(pathname)) return;
         if (!user) router.push('/login');
-    }, [pathname, router, user]);
+    }, [isLoading, pathname, router, user]);
 
     const login = (newToken: string, newUser: AuthUser) => {
         window.localStorage.setItem('echorouk_token', newToken);
         window.localStorage.setItem('echorouk_user', JSON.stringify(newUser));
         api.defaults.headers.common.Authorization = `Bearer ${newToken}`;
-        setToken(newToken);
-        setUser(newUser);
+        dispatch({ type: 'login', payload: { token: newToken, user: newUser } });
         router.push(getHomePathByRole(newUser.role));
     };
 
@@ -101,13 +144,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         window.localStorage.removeItem('echorouk_token');
         window.localStorage.removeItem('echorouk_user');
         delete api.defaults.headers.common.Authorization;
-        setToken(null);
-        setUser(null);
+        dispatch({ type: 'logout' });
         router.push('/login');
     };
 
     return (
-        <AuthContext.Provider value={{ user, token, isLoading: false, login, logout }}>
+        <AuthContext.Provider value={{ user, token, isLoading, login, logout }}>
             {children}
         </AuthContext.Provider>
     );
