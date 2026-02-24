@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle, FileText } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
 import { constitutionApi } from '@/lib/constitution-api';
@@ -18,6 +19,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     const isPublic = PUBLIC_PATHS.includes(pathname);
     const [ack, setAck] = useState(false);
     const [ackDismissed, setAckDismissed] = useState(false);
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+    const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
     const [theme, setTheme] = useState<'light' | 'dark'>(() => {
         if (typeof window === 'undefined') return 'light';
         return localStorage.getItem('ech_theme') === 'dark' ? 'dark' : 'light';
@@ -72,10 +75,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
     return (
         <div className="flex app-theme-shell">
-            <Sidebar />
-            <main className="flex-1 mr-[260px] min-h-screen transition-all duration-300">
-                <TopBar theme={theme} onToggleTheme={toggleTheme} />
-                <div className="p-6 mesh-gradient min-h-[calc(100vh-64px)]">{children}</div>
+            <Sidebar
+                collapsed={sidebarCollapsed}
+                onToggleCollapsed={() => setSidebarCollapsed((prev) => !prev)}
+                mobileOpen={mobileSidebarOpen}
+                onCloseMobile={() => setMobileSidebarOpen(false)}
+            />
+            <main
+                className={cn(
+                    'flex-1 min-h-screen transition-all duration-300',
+                    sidebarCollapsed ? 'md:mr-[72px]' : 'md:mr-[260px]'
+                )}
+            >
+                <TopBar theme={theme} onToggleTheme={toggleTheme} onOpenSidebar={() => setMobileSidebarOpen(true)} />
+                <div className="p-3 md:p-6 mesh-gradient min-h-[calc(100vh-64px)]">{children}</div>
             </main>
 
             {shouldShowConstitutionGate && (

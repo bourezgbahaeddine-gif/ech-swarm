@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bell, Search, LogOut, User, Shield, FileText, Sparkles, Loader2, Clipboard, X, Radar, AlertTriangle, Moon, Sun } from 'lucide-react';
+import { Bell, Search, LogOut, User, Shield, FileText, Sparkles, Loader2, Clipboard, X, Radar, AlertTriangle, Moon, Sun, Menu } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { dashboardApi, type DashboardNotification, type PublishedMonitorLatestResponse } from '@/lib/api';
 import { journalistServicesApi } from '@/lib/journalist-services-api';
@@ -29,7 +29,15 @@ function cleanServiceOutput(value: string): string {
         .trim();
 }
 
-export default function TopBar({ theme, onToggleTheme }: { theme: 'light' | 'dark'; onToggleTheme: () => void }) {
+export default function TopBar({
+    theme,
+    onToggleTheme,
+    onOpenSidebar,
+}: {
+    theme: 'light' | 'dark';
+    onToggleTheme: () => void;
+    onOpenSidebar: () => void;
+}) {
     const { user, logout } = useAuth();
     const queryClient = useQueryClient();
     const [searchQuery, setSearchQuery] = useState('');
@@ -51,7 +59,20 @@ export default function TopBar({ theme, onToggleTheme }: { theme: 'light' | 'dar
         <header className={`sticky top-0 z-30 backdrop-blur-xl border-b ${theme === 'dark' ? 'bg-gray-900/80 border-white/5' : 'app-surface border-[var(--border-primary)]'}`}>
             <div className="h-16">
                 <div className="flex items-center justify-between h-full px-6">
-                    <div className="relative w-full max-w-md">
+                    <div className="flex items-center gap-2 w-full max-w-md">
+                        <button
+                            type="button"
+                            onClick={onOpenSidebar}
+                            className={`md:hidden h-10 w-10 rounded-xl border flex items-center justify-center ${
+                                theme === 'dark'
+                                    ? 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-300 hover:text-white'
+                                    : 'bg-white hover:bg-gray-100 border-gray-300 text-gray-600 hover:text-gray-900'
+                            }`}
+                            aria-label="Open navigation menu"
+                        >
+                            <Menu className="w-4 h-4" />
+                        </button>
+                        <div className="relative w-full">
                         <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
                         <input
                             type="text"
@@ -65,6 +86,7 @@ export default function TopBar({ theme, onToggleTheme }: { theme: 'light' | 'dar
                             }`}
                             dir="rtl"
                         />
+                        </div>
                     </div>
 
                     <div className="flex items-center gap-2 mr-4">
