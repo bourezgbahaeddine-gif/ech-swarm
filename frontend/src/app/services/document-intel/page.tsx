@@ -3,12 +3,19 @@
 import { useMemo, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
+import { useRouter } from 'next/navigation';
 import { FileUp, FileText, Loader2, Newspaper, Sigma, Sparkles } from 'lucide-react';
 
-import { documentIntelApi, type DocumentIntelExtractResult } from '@/lib/api';
+import {
+    documentIntelApi,
+    editorialApi,
+    type DocumentIntelExtractResult,
+    type DocumentIntelNewsItem,
+} from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 
 const RUN_ROLES = new Set(['director', 'editor_chief', 'journalist', 'social_media', 'print_editor']);
+const CREATE_DRAFT_ROLES = new Set(['director', 'editor_chief', 'journalist', 'print_editor']);
 
 function apiError(error: unknown, fallback: string): string {
     if (isAxiosError(error)) {
@@ -19,9 +26,11 @@ function apiError(error: unknown, fallback: string): string {
 }
 
 export default function DocumentIntelPage() {
+    const router = useRouter();
     const { user } = useAuth();
     const role = (user?.role || '').toLowerCase();
     const canRun = RUN_ROLES.has(role);
+    const canCreateDraft = CREATE_DRAFT_ROLES.has(role);
 
     const [file, setFile] = useState<File | null>(null);
     const [languageHint, setLanguageHint] = useState<'ar' | 'fr' | 'en' | 'auto'>('ar');
@@ -29,6 +38,7 @@ export default function DocumentIntelPage() {
     const [maxDataPoints, setMaxDataPoints] = useState(30);
     const [error, setError] = useState<string | null>(null);
     const [result, setResult] = useState<DocumentIntelExtractResult | null>(null);
+    const [createdWorkId, setCreatedWorkId] = useState<string | null>(null);
 
     const runExtract = useMutation({
         mutationFn: () =>
@@ -41,8 +51,32 @@ export default function DocumentIntelPage() {
         onSuccess: (res) => {
             setResult(res.data);
             setError(null);
+            setCreatedWorkId(null);
         },
         onError: (err) => setError(apiError(err, 'فشل تحليل الملف.')),
+    });
+
+    const createDraftFromCandidate = useMutation({
+        mutationFn: (candidate: DocumentIntelNewsItem) =>
+            editorialApi.createManualWorkspaceDraft({
+                title: candidate.headline,
+                summary: candidate.summary,
+                body: `${candidate.summary}\n\n${candidate.evidence}`,
+                category: 'international',
+                urgency: 'normal',
+                source_action: 'document_intel_pdf',
+            }),
+        onSuccess: (res) => {
+            const workId = (res.data as { work_id?: string })?.work_id;
+            if (!workId) {
+                setError('تم إنشاء المسودة لكن لم يتم إرجاع Work ID.');
+                return;
+            }
+            setCreatedWorkId(workId);
+            setError(null);
+            router.push(`/workspace-drafts?work_id=${encodeURIComponent(workId)}`);
+        },
+        onError: (err) => setError(apiError(err, 'تعذر إنشاء مسودة من الخبر المرشح.')),
     });
 
     const stats = result?.stats;
@@ -148,6 +182,11 @@ export default function DocumentIntelPage() {
                                 {result.warnings.join(' | ')}
                             </div>
                         )}
+                        {createdWorkId && (
+                            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+                                تم إنشاء مسودة جديدة: {createdWorkId}
+                            </div>
+                        )}
                     </section>
 
                     <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -167,6 +206,15 @@ export default function DocumentIntelPage() {
                                             <p className="text-sm text-gray-300 leading-6 mt-1">{item.summary}</p>
                                             {item.entities.length > 0 && (
                                                 <p className="text-xs text-gray-400 mt-2">كيانات: {item.entities.join('، ')}</p>
+                                            )}
+                                            {canCreateDraft && (
+                                                <button
+                                                    onClick={() => createDraftFromCandidate.mutate(item)}
+                                                    disabled={createDraftFromCandidate.isPending}
+                                                    className="mt-3 h-9 px-3 rounded-lg border border-emerald-500/30 bg-emerald-500/20 text-emerald-200 text-xs disabled:opacity-50"
+                                                >
+                                                    {createDraftFromCandidate.isPending ? 'جاري الإنشاء...' : 'إنشاء Draft في المحرر الذكي'}
+                                                </button>
                                             )}
                                         </article>
                                     ))

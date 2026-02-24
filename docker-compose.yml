@@ -5,6 +5,8 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      args:
+        INSTALL_DOCLING: ${INSTALL_DOCLING:-false}
     container_name: ech-backend
     env_file:
       - .env
@@ -32,6 +34,8 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      args:
+        INSTALL_DOCLING: ${INSTALL_DOCLING:-false}
     container_name: ech-worker
     command: >
       celery -A app.queue.celery_app:celery_app worker
@@ -59,6 +63,8 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      args:
+        INSTALL_DOCLING: ${INSTALL_DOCLING:-false}
     container_name: ech-flower
     command: celery -A app.queue.celery_app:celery_app flower --port=5555
     env_file:

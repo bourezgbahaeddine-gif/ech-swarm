@@ -24,9 +24,18 @@
 ## Optional Docling activation
 - Base system works without Docling (uses pypdf fallback).
 - To enable Docling in backend runtime:
-  - install optional deps from `backend/requirements-docling.txt`
+  - Set env: `INSTALL_DOCLING=true`
+  - rebuild backend/worker images
+  - Docker build now supports `INSTALL_DOCLING` arg from `docker-compose.yml`
+
+## Multilingual extraction update
+- News candidate scoring now supports:
+  - Arabic keywords
+  - English keywords (press release / announced / confirmed / official / etc.)
+  - French keywords (communiqué / a annoncé / gouvernement / etc.)
+- Language detection now returns `ar|en|fr|mixed|unknown`.
 
 ## Next integration step (recommended)
-- Add action button in Document Intelligence page:
-  - `Create draft from candidate`
-  - Call existing endpoint: `POST /api/v1/editorial/workspace/manual-drafts`
+- Done: action button in Document Intelligence page:
+  - `إنشاء Draft في المحرر الذكي`
+  - Uses endpoint: `POST /api/v1/editorial/workspace/manual-drafts`

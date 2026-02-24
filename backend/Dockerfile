@@ -13,7 +13,10 @@ WORKDIR /app
 
 # Install Python dependencies
 COPY backend/requirements.txt ./requirements.txt
+COPY backend/requirements-docling.txt ./requirements-docling.txt
 RUN pip install --no-cache-dir -r requirements.txt
+ARG INSTALL_DOCLING=false
+RUN if [ "$INSTALL_DOCLING" = "true" ]; then pip install --no-cache-dir -r requirements-docling.txt; fi
 
 # Copy application code
 COPY backend/ .

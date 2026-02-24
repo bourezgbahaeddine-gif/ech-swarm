@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 import tempfile
+import unicodedata
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -13,24 +14,60 @@ from app.core.logging import get_logger
 
 logger = get_logger("document_intel.service")
 
-_NEWS_KEYWORDS = (
-    "اعلن",
-    "أكد",
-    "اكد",
-    "صرح",
-    "قررت",
-    "قرر",
-    "كشف",
-    "وقع",
-    "اجتماع",
-    "مرسوم",
-    "الجريدة الرسمية",
-    "وزارة",
-    "الحكومة",
-    "رئاسة",
-    "البرلمان",
-    "مجلس",
-)
+_NEWS_KEYWORDS_BY_LANG = {
+    "ar": (
+        "اعلن",
+        "أكد",
+        "اكد",
+        "صرح",
+        "قررت",
+        "قرر",
+        "كشف",
+        "وقع",
+        "اجتماع",
+        "مرسوم",
+        "الجريدة الرسمية",
+        "وزارة",
+        "الحكومة",
+        "رئاسة",
+        "البرلمان",
+        "مجلس",
+        "بيان",
+        "تقرير",
+    ),
+    "en": (
+        "press release",
+        "announced",
+        "confirmed",
+        "stated",
+        "said",
+        "meeting",
+        "agreement",
+        "launch",
+        "scheduled",
+        "official",
+        "government",
+        "minister",
+        "president",
+        "report",
+        "decision",
+    ),
+    "fr": (
+        "communique",
+        "a annonce",
+        "a confirme",
+        "a declare",
+        "reunion",
+        "accord",
+        "officiel",
+        "gouvernement",
+        "ministere",
+        "president",
+        "rapport",
+        "decision",
+        "publication",
+    ),
+}
 
 _ENTITY_PATTERNS = (
     r"(وزارة\s+[^\n،,.]{2,40})",
@@ -38,6 +75,13 @@ _ENTITY_PATTERNS = (
     r"(البرلمان\s+[^\n،,.]{2,40})",
     r"(مجلس\s+[^\n،,.]{2,40})",
     r"(الحكومة\s+[^\n،,.]{2,40})",
+    r"(Ministry\s+of\s+[^\n,.;]{2,50})",
+    r"(Government\s+of\s+[^\n,.;]{2,50})",
+    r"(President\s+of\s+[^\n,.;]{2,50})",
+    r"(Association\s+of\s+[^\n,.;]{2,50})",
+    r"(Minist[eè]re\s+(?:de|du|des)\s+[^\n,.;]{2,50})",
+    r"(Gouvernement\s+(?:de|du|des)\s+[^\n,.;]{2,50})",
+    r"(Pr[eé]sident\s+(?:de|du|des)\s+[^\n,.;]{2,50})",
 )
 
 _NUMBER_PATTERN = re.compile(r"\d[\d,.\u0660-\u0669]*%?")
@@ -88,16 +132,22 @@ class DocumentIntelService:
         normalized_text = self._normalize_text(extraction.text)
         if not normalized_text:
             warnings.append("No selectable text found in PDF. OCR pipeline is required for scanned documents.")
+        detected_language = self._detect_language(normalized_text)
         headings = self._extract_headings(extraction.markdown, normalized_text)
         paragraphs = self._split_paragraphs(normalized_text)
-        news_candidates = self._extract_news_candidates(paragraphs, max_news_items=max_news_items)
+        news_candidates = self._extract_news_candidates(
+            paragraphs,
+            max_news_items=max_news_items,
+            detected_language=detected_language,
+            language_hint=self._normalize_lang(language_hint),
+        )
         data_points = self._extract_data_points(paragraphs, max_data_points=max_data_points)
 
         return {
             "filename": safe_name,
             "parser_used": extraction.parser,
             "language_hint": self._normalize_lang(language_hint),
-            "detected_language": self._detect_language(normalized_text),
+            "detected_language": detected_language,
             "stats": {
                 "pages": extraction.pages,
                 "characters": len(normalized_text),
@@ -239,34 +289,37 @@ class DocumentIntelService:
             headings.append(stripped)
         return self._uniq(headings, 12)
 
-    def _extract_news_candidates(self, paragraphs: list[str], *, max_news_items: int) -> list[dict]:
-        scored: list[tuple[float, str]] = []
+    def _extract_news_candidates(
+        self,
+        paragraphs: list[str],
+        *,
+        max_news_items: int,
+        detected_language: str,
+        language_hint: str,
+    ) -> list[dict]:
+        effective_lang = self._resolve_language(detected_language, language_hint)
+        scored: list[tuple[float, str, str]] = []
         for para in paragraphs:
-            para_norm = self._normalize_ar(para.lower())
-            score = 0.0
-
-            for keyword in _NEWS_KEYWORDS:
-                if self._normalize_ar(keyword) in para_norm:
-                    score += 0.8
-
-            if _NUMBER_PATTERN.search(para):
-                score += 0.7
-            if _DATE_PATTERN.search(para):
-                score += 0.7
-            if len(para) > 260:
-                score += 0.2
-            if len(para) < 70:
-                score -= 0.5
-
-            if score >= 1.6:
-                scored.append((score, para))
+            para_lang = effective_lang
+            if effective_lang in {"mixed", "unknown"}:
+                para_lang = self._detect_language(para)
+            score = self._score_news_paragraph(para, para_lang)
+            scored.append((score, para, para_lang))
 
         scored.sort(key=lambda item: item[0], reverse=True)
+        selected = [item for item in scored if item[0] >= 1.6]
+        if not selected:
+            selected = [item for item in scored if item[0] >= 1.0][:max(2, min(4, max_news_items))]
 
         items: list[dict] = []
+        dedupe: set[str] = set()
         rank = 1
-        for score, para in scored:
+        for score, para, para_lang in selected:
             headline = self._headline_from_paragraph(para)
+            headline_key = headline.strip().lower()
+            if headline_key in dedupe:
+                continue
+            dedupe.add(headline_key)
             summary = para[:320]
             entities = self._extract_entities(para)
             items.append(
@@ -275,7 +328,7 @@ class DocumentIntelService:
                     "headline": headline,
                     "summary": summary,
                     "evidence": para[:700],
-                    "confidence": round(min(0.96, 0.35 + score * 0.15), 2),
+                    "confidence": round(min(0.96, 0.35 + score * 0.14), 2),
                     "entities": entities,
                 }
             )
@@ -283,6 +336,37 @@ class DocumentIntelService:
             if len(items) >= max_news_items:
                 break
         return items
+
+    def _score_news_paragraph(self, paragraph: str, lang: str) -> float:
+        score = 0.0
+        normalized = self._normalize_for_lang(paragraph, lang)
+        keywords = _NEWS_KEYWORDS_BY_LANG.get(lang, _NEWS_KEYWORDS_BY_LANG["en"])
+
+        for keyword in keywords:
+            if self._contains_keyword(normalized, keyword, lang):
+                score += 0.65
+
+        if _NUMBER_PATTERN.search(paragraph):
+            score += 0.55
+        if _DATE_PATTERN.search(paragraph):
+            score += 0.75
+        if self._extract_entities(paragraph):
+            score += 0.55
+        if '"' in paragraph or "“" in paragraph or "”" in paragraph or "«" in paragraph:
+            score += 0.2
+
+        length = len(paragraph)
+        if 80 <= length <= 700:
+            score += 0.35
+        elif length < 55:
+            score -= 0.45
+        elif length > 1200:
+            score -= 0.3
+
+        if paragraph.strip().isupper() and length < 140:
+            score -= 0.4
+
+        return score
 
     def _extract_data_points(self, paragraphs: list[str], *, max_data_points: int) -> list[dict]:
         items: list[dict] = []
@@ -348,6 +432,23 @@ class DocumentIntelService:
         if arabic_chars > latin_chars * 1.1:
             return "ar"
         if latin_chars > arabic_chars * 1.1:
+            sample_norm = DocumentIntelService._normalize_latin(sample).lower()
+            french_markers = (
+                " le ",
+                " la ",
+                " les ",
+                " des ",
+                " avec ",
+                " pour ",
+                " nous ",
+                " est ",
+                " communique ",
+                " gouvernement ",
+                " ministere ",
+            )
+            marker_hits = sum(1 for marker in french_markers if marker in f" {sample_norm} ")
+            if marker_hits >= 2 or bool(re.search(r"[àâçéèêëîïôûùüÿœæ]", sample.lower())):
+                return "fr"
             return "en"
         return "mixed"
 
@@ -363,6 +464,34 @@ class DocumentIntelService:
         text = value.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
         text = text.replace("ة", "ه").replace("ى", "ي")
         return re.sub(r"[\u064b-\u065f\u0670]", "", text)
+
+    @staticmethod
+    def _normalize_latin(value: str) -> str:
+        text = unicodedata.normalize("NFKD", value or "")
+        return "".join(ch for ch in text if not unicodedata.combining(ch))
+
+    def _normalize_for_lang(self, value: str, lang: str) -> str:
+        if lang == "ar":
+            return self._normalize_ar((value or "").lower())
+        return self._normalize_latin((value or "").lower())
+
+    def _contains_keyword(self, normalized_text: str, keyword: str, lang: str) -> bool:
+        if lang == "ar":
+            return self._normalize_ar(keyword) in normalized_text
+        keyword_norm = self._normalize_latin(keyword.lower()).strip()
+        if not keyword_norm:
+            return False
+        if " " in keyword_norm:
+            return keyword_norm in normalized_text
+        return bool(re.search(rf"\b{re.escape(keyword_norm)}\b", normalized_text))
+
+    @staticmethod
+    def _resolve_language(detected_language: str, language_hint: str) -> str:
+        if detected_language in {"ar", "en", "fr"}:
+            return detected_language
+        if language_hint in {"ar", "en", "fr"}:
+            return language_hint
+        return "mixed"
 
     @staticmethod
     def _safe_filename(filename: str) -> str:
