@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
+import subprocess
+import sys
 import tempfile
 import unicodedata
 from dataclasses import dataclass
@@ -95,6 +98,7 @@ class _ExtractionChunk:
     pages: int | None
     parser: str
     warning: str | None = None
+    error: str | None = None
 
 
 class DocumentIntelService:
@@ -164,13 +168,19 @@ class DocumentIntelService:
     def _extract_with_docling(self, payload: bytes, filename: str) -> _ExtractionChunk:
         try:
             from docling.document_converter import DocumentConverter
-        except Exception:
+        except Exception as exc:
+            # Some environments fail importing docling in-process (e.g. numpy loader issues).
+            # Retry extraction in a clean subprocess before falling back to pypdf.
+            subprocess_result = self._extract_with_docling_subprocess(payload, filename)
+            if subprocess_result.text.strip():
+                return subprocess_result
             return _ExtractionChunk(
                 text="",
                 markdown="",
                 pages=None,
                 parser="docling_unavailable",
-                warning="Docling is not installed; using fallback parser.",
+                warning=f"Docling unavailable in-process ({type(exc).__name__}); using fallback parser.",
+                error=str(exc),
             )
 
         try:
@@ -215,12 +225,104 @@ class DocumentIntelService:
                 )
         except Exception as exc:  # noqa: BLE001
             logger.warning("docling_parse_failed", error=str(exc))
+            subprocess_result = self._extract_with_docling_subprocess(payload, filename)
+            if subprocess_result.text.strip():
+                return subprocess_result
             return _ExtractionChunk(
                 text="",
                 markdown="",
                 pages=None,
                 parser="docling_failed",
                 warning=f"Docling parse failed: {exc}",
+                error=str(exc),
+            )
+
+    def _extract_with_docling_subprocess(self, payload: bytes, filename: str) -> _ExtractionChunk:
+        script = r"""
+import json
+import sys
+from docling.document_converter import DocumentConverter
+
+path = sys.argv[1]
+converter = DocumentConverter()
+result = converter.convert(path)
+document_obj = getattr(result, "document", result)
+markdown = ""
+text = ""
+pages = None
+
+if hasattr(document_obj, "export_to_markdown"):
+    markdown = str(document_obj.export_to_markdown() or "")
+elif hasattr(result, "export_to_markdown"):
+    markdown = str(result.export_to_markdown() or "")
+
+if hasattr(document_obj, "export_to_text"):
+    text = str(document_obj.export_to_text() or "")
+elif hasattr(result, "text"):
+    text = str(getattr(result, "text", "") or "")
+
+if isinstance(getattr(document_obj, "pages", None), list):
+    pages = len(getattr(document_obj, "pages"))
+elif hasattr(document_obj, "page_count"):
+    raw_pages = getattr(document_obj, "page_count")
+    pages = int(raw_pages) if raw_pages is not None else None
+
+print(json.dumps({"text": text, "markdown": markdown, "pages": pages}, ensure_ascii=False))
+"""
+        try:
+            with tempfile.TemporaryDirectory(prefix="doc-intel-sub-") as temp_dir:
+                temp_path = Path(temp_dir) / filename
+                temp_path.write_bytes(payload)
+                proc = subprocess.run(
+                    [sys.executable, "-c", script, str(temp_path)],
+                    capture_output=True,
+                    text=True,
+                    timeout=240,
+                    check=False,
+                )
+                if proc.returncode != 0:
+                    logger.warning(
+                        "docling_subprocess_failed",
+                        returncode=proc.returncode,
+                        stderr=(proc.stderr or "")[:1000],
+                    )
+                    return _ExtractionChunk(
+                        text="",
+                        markdown="",
+                        pages=None,
+                        parser="docling_subprocess_failed",
+                        warning="Docling subprocess failed; using fallback parser.",
+                        error=(proc.stderr or "")[:1000],
+                    )
+
+                raw = (proc.stdout or "").strip()
+                if not raw:
+                    return _ExtractionChunk(
+                        text="",
+                        markdown="",
+                        pages=None,
+                        parser="docling_subprocess_empty",
+                        warning="Docling subprocess produced empty output; using fallback parser.",
+                    )
+                data = json.loads(raw)
+                text = str(data.get("text") or "")
+                markdown = str(data.get("markdown") or "")
+                pages = data.get("pages")
+                return _ExtractionChunk(
+                    text=text or self._markdown_to_text(markdown),
+                    markdown=markdown,
+                    pages=int(pages) if isinstance(pages, int) else None,
+                    parser="docling_subprocess",
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("docling_subprocess_exception", error=str(exc))
+            return _ExtractionChunk(
+                text="",
+                markdown="",
+                pages=None,
+                parser="docling_subprocess_exception",
+                warning="Docling subprocess exception; using fallback parser.",
+                error=str(exc),
             )
 
     def _extract_with_pypdf(self, payload: bytes) -> _ExtractionChunk:
