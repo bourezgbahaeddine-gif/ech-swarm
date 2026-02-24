@@ -846,6 +846,42 @@ export interface MediaLoggerAskResponse {
     context: MediaLoggerSegment[];
 }
 
+export interface DocumentIntelStats {
+    pages?: number | null;
+    characters: number;
+    paragraphs: number;
+    headings: number;
+}
+
+export interface DocumentIntelNewsItem {
+    rank: number;
+    headline: string;
+    summary: string;
+    evidence: string;
+    confidence: number;
+    entities: string[];
+}
+
+export interface DocumentIntelDataPoint {
+    rank: number;
+    category: string;
+    value_tokens: string[];
+    context: string;
+}
+
+export interface DocumentIntelExtractResult {
+    filename: string;
+    parser_used: string;
+    language_hint: string;
+    detected_language: string;
+    stats: DocumentIntelStats;
+    headings: string[];
+    news_candidates: DocumentIntelNewsItem[];
+    data_points: DocumentIntelDataPoint[];
+    warnings: string[];
+    preview_text: string;
+}
+
 export interface CompetitorXraySource {
     id: number;
     name: string;
@@ -1037,6 +1073,25 @@ export const mediaLoggerApi = {
     ask: (payload: { run_id: string; question: string }) => api.post<MediaLoggerAskResponse>('/media-logger/ask', payload),
     recentRuns: (params?: { limit?: number; status_filter?: string }) =>
         api.get<{ items: MediaLoggerRecentRun[]; total: number }>('/media-logger/runs', { params }),
+};
+
+export const documentIntelApi = {
+    extractFromUpload: (payload: {
+        file: File;
+        language_hint?: 'ar' | 'fr' | 'en' | 'auto';
+        max_news_items?: number;
+        max_data_points?: number;
+    }) => {
+        const form = new FormData();
+        form.append('file', payload.file);
+        form.append('language_hint', payload.language_hint || 'ar');
+        if (payload.max_news_items) form.append('max_news_items', String(payload.max_news_items));
+        if (payload.max_data_points) form.append('max_data_points', String(payload.max_data_points));
+        return api.post<DocumentIntelExtractResult>('/document-intel/extract', form, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+            timeout: 180000,
+        });
+    },
 };
 
 export const competitorXrayApi = {

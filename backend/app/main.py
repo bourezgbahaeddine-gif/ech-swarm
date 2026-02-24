@@ -48,6 +48,7 @@ from app.api.routes.memory import router as memory_router
 from app.api.routes.msi import router as msi_router
 from app.api.routes.simulator import router as simulator_router
 from app.api.routes.media_logger import router as media_logger_router
+from app.api.routes.document_intel import router as document_intel_router
 from app.api.routes.competitor_xray import router as competitor_xray_router
 from app.api.routes.jobs import router as jobs_router
 from app.msi.scheduler import start_msi_scheduler, stop_msi_scheduler
@@ -390,6 +391,7 @@ app.include_router(memory_router, prefix="/api/v1")
 app.include_router(msi_router, prefix="/api/v1")
 app.include_router(simulator_router, prefix="/api/v1")
 app.include_router(media_logger_router, prefix="/api/v1")
+app.include_router(document_intel_router, prefix="/api/v1")
 app.include_router(competitor_xray_router, prefix="/api/v1")
 app.include_router(jobs_router, prefix="/api/v1")
 

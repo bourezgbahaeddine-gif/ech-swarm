@@ -24,6 +24,7 @@ import {
     Gauge,
     MessagesSquare,
     Radar,
+    FileSearch,
 } from 'lucide-react';
 
 type Role =
@@ -72,6 +73,7 @@ const navItems = [
     { href: '/memory', label: 'ذاكرة المشروع', icon: BookOpen, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
     { href: '/services/multimedia', label: 'الوسائط', icon: Film, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
     { href: '/services/media-logger', label: 'مفرّغ الندوات', icon: Mic2, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
+    { href: '/services/document-intel', label: 'محلل الوثائق', icon: FileSearch, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
     { href: '/team', label: 'فريق التحرير', icon: Users, roles: ['director'] as Role[] },
     { href: '/sources', label: 'المصادر', icon: Rss, roles: ['director'] as Role[] },
     { href: '/agents', label: 'مراقبة النظام', icon: Activity, roles: ['director'] as Role[] },
