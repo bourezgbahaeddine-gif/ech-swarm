@@ -162,6 +162,7 @@ class Settings(BaseSettings):
     # Document Intelligence
     document_intel_docling_timeout_seconds: int = 45
     document_intel_docling_max_size_mb: int = 8
+    document_intel_max_upload_mb: int = 80
 
     # CORS
     cors_origins: str = "http://localhost:3000,http://localhost:8000"

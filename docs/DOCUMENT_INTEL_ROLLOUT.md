@@ -30,6 +30,7 @@
 - Runtime controls:
   - `ECHOROUK_OS_DOCUMENT_INTEL_DOCLING_TIMEOUT_SECONDS` (default `45`)
   - `ECHOROUK_OS_DOCUMENT_INTEL_DOCLING_MAX_SIZE_MB` (default `8`)
+  - `ECHOROUK_OS_DOCUMENT_INTEL_MAX_UPLOAD_MB` (default `80`)
   - For large files, system skips Docling and uses `pypdf` directly.
 
 ## Multilingual extraction update

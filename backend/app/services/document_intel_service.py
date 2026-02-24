@@ -38,6 +38,16 @@ _NEWS_KEYWORDS_BY_LANG = {
         "مجلس",
         "بيان",
         "تقرير",
+        "المادة",
+        "القانون",
+        "مرسوم تنفيذي",
+        "قرار وزاري",
+        "يحدد",
+        "يتضمن",
+        "يلغى",
+        "يعين",
+        "يعدل",
+        "يتعلق",
     ),
     "en": (
         "press release",
@@ -103,10 +113,9 @@ class _ExtractionChunk:
 
 
 class DocumentIntelService:
-    max_upload_bytes = 45 * 1024 * 1024  # 45MB
-
     def __init__(self) -> None:
         settings = get_settings()
+        self.max_upload_bytes = max(10, int(settings.document_intel_max_upload_mb)) * 1024 * 1024
         self.docling_timeout_seconds = max(10, int(settings.document_intel_docling_timeout_seconds))
         self.docling_max_bytes = max(1, int(settings.document_intel_docling_max_size_mb)) * 1024 * 1024
 
@@ -123,7 +132,9 @@ class DocumentIntelService:
         if not payload:
             raise ValueError("Uploaded file is empty")
         if len(payload) > self.max_upload_bytes:
-            raise ValueError("File exceeds 45MB limit")
+            raise ValueError(
+                f"File exceeds {int(self.max_upload_bytes / (1024 * 1024))}MB limit"
+            )
         if not safe_name.lower().endswith(".pdf"):
             raise ValueError("Only PDF files are supported in this phase")
 
@@ -408,7 +419,33 @@ print(json.dumps({"text": text, "markdown": markdown, "pages": pages}, ensure_as
             if len(cleaned) < 40:
                 continue
             output.append(cleaned)
+        if len(output) < 3 and len(text) > 400:
+            merged = DocumentIntelService._merge_lines_to_blocks(text)
+            if merged:
+                output = merged
         return output
+
+    @staticmethod
+    def _merge_lines_to_blocks(text: str) -> list[str]:
+        lines = [re.sub(r"\s+", " ", line).strip(" -•\t") for line in text.splitlines()]
+        lines = [line for line in lines if line]
+        blocks: list[str] = []
+        buffer: list[str] = []
+        size = 0
+        for line in lines:
+            buffer.append(line)
+            size += len(line)
+            if size >= 180 or line.endswith((".", "؟", "!", "؛", ":")):
+                joined = " ".join(buffer).strip()
+                if len(joined) >= 60:
+                    blocks.append(joined)
+                buffer = []
+                size = 0
+        if buffer:
+            joined = " ".join(buffer).strip()
+            if len(joined) >= 60:
+                blocks.append(joined)
+        return blocks[:120]
 
     def _extract_headings(self, markdown: str, text: str) -> list[str]:
         headings: list[str] = []
@@ -452,6 +489,8 @@ print(json.dumps({"text": text, "markdown": markdown, "pages": pages}, ensure_as
         selected = [item for item in scored if item[0] >= 1.6]
         if not selected:
             selected = [item for item in scored if item[0] >= 1.0][:max(2, min(4, max_news_items))]
+        if not selected:
+            selected = [item for item in scored if len(item[1]) >= 80][: max(1, min(3, max_news_items))]
 
         items: list[dict] = []
         dedupe: set[str] = set()
