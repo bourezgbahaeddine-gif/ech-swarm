@@ -58,8 +58,8 @@ export default function TopBar({
     return (
         <header className={`sticky top-0 z-30 backdrop-blur-xl border-b ${theme === 'dark' ? 'bg-gray-900/80 border-white/5' : 'app-surface border-[var(--border-primary)]'}`}>
             <div className="h-16">
-                <div className="flex items-center justify-between h-full px-6">
-                    <div className="flex items-center gap-2 w-full max-w-md">
+                <div className="flex items-center justify-between h-full px-3 md:px-6 gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
                         <button
                             type="button"
                             onClick={onOpenSidebar}
@@ -72,7 +72,7 @@ export default function TopBar({
                         >
                             <Menu className="w-4 h-4" />
                         </button>
-                        <div className="relative w-full">
+                        <div className="relative w-full max-w-md hidden sm:block">
                         <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
                         <input
                             type="text"
@@ -89,7 +89,7 @@ export default function TopBar({
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-2 mr-4">
+                    <div className="flex items-center gap-1 md:gap-2 mr-0 md:mr-4 shrink-0">
                         <button
                             onClick={onToggleTheme}
                             className={`h-10 w-10 rounded-xl border flex items-center justify-center ${
@@ -104,7 +104,7 @@ export default function TopBar({
                         {canUseQuickTasks && (
                             <button
                                 onClick={() => setShowQuickTools(true)}
-                                className={`h-10 px-3 rounded-xl border text-xs flex items-center gap-1.5 ${
+                                className={`hidden md:flex h-10 px-3 rounded-xl border text-xs items-center gap-1.5 ${
                                     theme === 'dark'
                                         ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20'
                                         : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100'
@@ -116,7 +116,7 @@ export default function TopBar({
                         )}
                         <button
                             onClick={() => setShowPublishedMonitor(true)}
-                            className={`h-10 px-3 rounded-xl border text-xs flex items-center gap-1.5 ${
+                            className={`hidden md:flex h-10 px-3 rounded-xl border text-xs items-center gap-1.5 ${
                                 theme === 'dark'
                                     ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-200 hover:bg-cyan-500/20'
                                     : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100'
@@ -139,7 +139,7 @@ export default function TopBar({
                                 )}
                             </button>
                             {showNotifications && (
-                                <div className="absolute left-0 top-full mt-2 w-[360px] rounded-xl bg-gray-900 border border-white/10 shadow-xl overflow-hidden z-50">
+                                <div className="absolute left-0 top-full mt-2 w-[min(92vw,360px)] rounded-xl bg-gray-900 border border-white/10 shadow-xl overflow-hidden z-50">
                                     <div className="px-3 py-2 border-b border-white/10 text-sm text-white">التنبيهات</div>
                                     <div className="max-h-[360px] overflow-auto">
                                         {notificationsLoading ? (
@@ -219,8 +219,8 @@ export default function TopBar({
                 </div>
             </div>
 
-            <div className={`px-6 py-2 border-t ${theme === 'dark' ? 'border-white/5 bg-white/[0.02]' : 'border-[var(--border-primary)] bg-[var(--bg-tertiary)]'}`}>
-                <div className={`flex items-center gap-2 text-xs ${theme === 'dark' ? 'text-gray-300' : 'text-[var(--text-primary)]'}`}>
+            <div className={`px-3 md:px-6 py-2 border-t ${theme === 'dark' ? 'border-white/5 bg-white/[0.02]' : 'border-[var(--border-primary)] bg-[var(--bg-tertiary)]'}`}>
+                <div className={`flex flex-wrap items-center gap-2 text-xs ${theme === 'dark' ? 'text-gray-300' : 'text-[var(--text-primary)]'}`}>
                     <FileText className="w-3.5 h-3.5 text-emerald-400" />
                     <span>الدستور التحريري يعمل كحارس قبل اعتماد النسخة النهائية.</span>
                     <a href="/constitution" className="text-emerald-300 hover:text-emerald-200 underline">
@@ -547,3 +547,4 @@ function PublishedMonitorDrawer({
         document.body
     );
 }
+

@@ -105,7 +105,7 @@ export default function Sidebar({
                 className={cn(
                     'fixed top-0 right-0 h-screen z-50 transition-all duration-300 ease-in-out',
                     'bg-[#0F172A] border-slate-800/70 border-l flex flex-col',
-                    'w-[260px] md:w-auto',
+                    'w-[86vw] max-w-[280px] md:w-auto',
                     collapsed ? 'md:w-[72px]' : 'md:w-[260px]',
                     mobileOpen ? 'translate-x-0' : 'translate-x-full md:translate-x-0'
                 )}
@@ -116,8 +116,8 @@ export default function Sidebar({
                     </div>
                     {!collapsed && (
                         <div className="overflow-hidden">
-                            <h1 className="text-sm font-bold truncate text-white">غرفة الشروق</h1>
-                            <p className="text-[10px] font-medium text-slate-300">النظام الذكي v1.0</p>
+                            <h1 className="text-sm font-bold truncate text-[#F8FAFC]">غرفة الشروق</h1>
+                            <p className="text-[10px] font-medium text-[#CBD5E1]">النظام الذكي v1.0</p>
                         </div>
                     )}
                 </div>
@@ -133,8 +133,8 @@ export default function Sidebar({
                                 className={cn(
                                     'flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group relative',
                                     isActive
-                                        ? 'bg-blue-500/20 text-white shadow-inner'
-                                        : 'text-slate-300 hover:text-white hover:bg-white/8'
+                                        ? 'bg-blue-500/20 text-[#F8FAFC] shadow-inner'
+                                        : 'text-[#CBD5E1] hover:text-[#F8FAFC] hover:bg-white/8'
                                 )}
                             >
                                 {isActive && (
@@ -151,7 +151,7 @@ export default function Sidebar({
                     <div className="px-3 py-3 mx-2 mb-3 rounded-xl border bg-white/[0.03] border-white/10">
                         <div className="flex items-center gap-2">
                             <Activity className="w-4 h-4 text-[#2563EB]" />
-                            <span className="text-xs text-slate-300">النظام يعمل</span>
+                            <span className="text-xs text-[#CBD5E1]">النظام يعمل</span>
                             <span className="w-2 h-2 rounded-full animate-pulse mr-auto bg-[#2563EB]" />
                         </div>
                     </div>
@@ -159,7 +159,7 @@ export default function Sidebar({
 
                 <button
                     onClick={onToggleCollapsed}
-                    className="hidden md:flex items-center justify-center h-10 border-t transition-colors border-white/10 text-slate-400 hover:text-white"
+                    className="hidden md:flex items-center justify-center h-10 border-t transition-colors border-white/10 text-[#94A3B8] hover:text-[#F8FAFC]"
                 >
                     {collapsed ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                 </button>

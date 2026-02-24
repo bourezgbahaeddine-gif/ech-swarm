@@ -74,7 +74,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     };
 
     return (
-        <div className="flex app-theme-shell">
+        <div className="flex app-theme-shell overflow-x-hidden">
             <Sidebar
                 collapsed={sidebarCollapsed}
                 onToggleCollapsed={() => setSidebarCollapsed((prev) => !prev)}
@@ -83,7 +83,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             />
             <main
                 className={cn(
-                    'flex-1 min-h-screen transition-all duration-300',
+                    'flex-1 min-h-screen min-w-0 overflow-x-hidden transition-all duration-300',
                     sidebarCollapsed ? 'md:mr-[72px]' : 'md:mr-[260px]'
                 )}
             >
