@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unicodedata
 from dataclasses import dataclass
 from io import BytesIO
@@ -118,6 +120,11 @@ class DocumentIntelService:
         self.max_upload_bytes = max(10, int(settings.document_intel_max_upload_mb)) * 1024 * 1024
         self.docling_timeout_seconds = max(10, int(settings.document_intel_docling_timeout_seconds))
         self.docling_max_bytes = max(1, int(settings.document_intel_docling_max_size_mb)) * 1024 * 1024
+        self.ocr_enabled = bool(settings.document_intel_ocr_enabled)
+        self.ocr_timeout_seconds = max(30, int(settings.document_intel_ocr_timeout_seconds))
+        self.ocr_max_pages = max(1, int(settings.document_intel_ocr_max_pages))
+        self.ocr_dpi = max(120, int(settings.document_intel_ocr_dpi))
+        self.ocr_trigger_min_chars = max(200, int(settings.document_intel_ocr_trigger_min_chars))
 
     async def extract_pdf(
         self,
@@ -185,11 +192,19 @@ class DocumentIntelService:
             extraction = pypdf_chunk
 
         normalized_text = self._normalize_text(extraction.text)
+        paragraphs = self._split_paragraphs(normalized_text)
+        if self._should_run_ocr(normalized_text, paragraphs):
+            ocr_chunk = await asyncio.to_thread(self._extract_with_ocr, payload, safe_name, language_hint)
+            if ocr_chunk.warning:
+                warnings.append(ocr_chunk.warning)
+            if ocr_chunk.text.strip():
+                extraction = ocr_chunk
+                normalized_text = self._normalize_text(ocr_chunk.text)
+                paragraphs = self._split_paragraphs(normalized_text)
         if not normalized_text:
             warnings.append("No selectable text found in PDF. OCR pipeline is required for scanned documents.")
         detected_language = self._detect_language(normalized_text)
         headings = self._extract_headings(extraction.markdown, normalized_text)
-        paragraphs = self._split_paragraphs(normalized_text)
         news_candidates = self._extract_news_candidates(
             paragraphs,
             max_news_items=max_news_items,
@@ -398,6 +413,135 @@ print(json.dumps({"text": text, "markdown": markdown, "pages": pages}, ensure_as
             )
         except Exception as exc:  # noqa: BLE001
             raise ValueError("Invalid or unreadable PDF file") from exc
+
+    def _should_run_ocr(self, normalized_text: str, paragraphs: list[str]) -> bool:
+        if not self.ocr_enabled:
+            return False
+        if not normalized_text:
+            return True
+        if len(normalized_text) < self.ocr_trigger_min_chars:
+            return True
+        if len(paragraphs) < 3 and len(normalized_text) < (self.ocr_trigger_min_chars * 2):
+            return True
+        return False
+
+    def _extract_with_ocr(self, payload: bytes, filename: str, language_hint: str) -> _ExtractionChunk:
+        missing_tools = [tool for tool in ("pdftoppm", "tesseract") if shutil.which(tool) is None]
+        if missing_tools:
+            return _ExtractionChunk(
+                text="",
+                markdown="",
+                pages=None,
+                parser="ocr_missing_tools",
+                warning=f"OCR skipped: missing tools ({', '.join(missing_tools)}).",
+            )
+
+        lang = self._ocr_lang(language_hint)
+        end_ts = time.monotonic() + self.ocr_timeout_seconds
+        try:
+            with tempfile.TemporaryDirectory(prefix="doc-intel-ocr-") as temp_dir:
+                temp_path = Path(temp_dir) / filename
+                temp_path.write_bytes(payload)
+
+                prefix = Path(temp_dir) / "ocr-page"
+                self._run_subprocess_with_deadline(
+                    [
+                        "pdftoppm",
+                        "-r",
+                        str(self.ocr_dpi),
+                        "-f",
+                        "1",
+                        "-l",
+                        str(self.ocr_max_pages),
+                        "-png",
+                        str(temp_path),
+                        str(prefix),
+                    ],
+                    end_ts=end_ts,
+                )
+
+                images = sorted(Path(temp_dir).glob("ocr-page-*.png"))
+                if not images:
+                    return _ExtractionChunk(
+                        text="",
+                        markdown="",
+                        pages=None,
+                        parser="ocr_no_images",
+                        warning="OCR skipped: no images generated from PDF.",
+                    )
+
+                texts: list[str] = []
+                processed = 0
+                for image in images:
+                    out = self._run_subprocess_with_deadline(
+                        ["tesseract", str(image), "stdout", "-l", lang, "--psm", "6"],
+                        end_ts=end_ts,
+                    )
+                    block = self._normalize_text(out)
+                    if block:
+                        texts.append(block)
+                    processed += 1
+
+                merged = self._normalize_text("\n\n".join(texts))
+                if not merged:
+                    return _ExtractionChunk(
+                        text="",
+                        markdown="",
+                        pages=processed,
+                        parser="ocr_empty",
+                        warning="OCR returned empty text.",
+                    )
+                return _ExtractionChunk(
+                    text=merged,
+                    markdown="",
+                    pages=processed,
+                    parser="ocr_tesseract",
+                    warning=f"OCR used on {processed} page(s).",
+                )
+        except TimeoutError:
+            return _ExtractionChunk(
+                text="",
+                markdown="",
+                pages=None,
+                parser="ocr_timeout",
+                warning=f"OCR timed out after {self.ocr_timeout_seconds}s.",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ocr_extract_failed", error=str(exc))
+            return _ExtractionChunk(
+                text="",
+                markdown="",
+                pages=None,
+                parser="ocr_failed",
+                warning=f"OCR failed: {exc}",
+                error=str(exc),
+            )
+
+    def _run_subprocess_with_deadline(self, cmd: list[str], *, end_ts: float) -> str:
+        remaining = end_ts - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("deadline reached")
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=max(1, int(remaining)),
+            check=False,
+        )
+        if proc.returncode != 0:
+            stderr = (proc.stderr or proc.stdout or "").strip()
+            raise RuntimeError(f"{cmd[0]} failed: {stderr[:400]}")
+        return proc.stdout or ""
+
+    @staticmethod
+    def _ocr_lang(language_hint: str) -> str:
+        mapping = {
+            "ar": "ara",
+            "en": "eng",
+            "fr": "fra",
+            "auto": "ara+eng+fra",
+        }
+        return mapping.get((language_hint or "auto").strip().lower(), "ara+eng")
 
     @staticmethod
     def _normalize_text(text: str) -> str:

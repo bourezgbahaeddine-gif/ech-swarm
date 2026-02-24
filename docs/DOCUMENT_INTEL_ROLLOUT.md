@@ -32,6 +32,18 @@
   - `ECHOROUK_OS_DOCUMENT_INTEL_DOCLING_MAX_SIZE_MB` (default `8`)
   - `ECHOROUK_OS_DOCUMENT_INTEL_MAX_UPLOAD_MB` (default `80`)
   - For large files, system skips Docling and uses `pypdf` directly.
+  - OCR controls:
+    - `ECHOROUK_OS_DOCUMENT_INTEL_OCR_ENABLED` (default `true`)
+    - `ECHOROUK_OS_DOCUMENT_INTEL_OCR_TIMEOUT_SECONDS` (default `180`)
+    - `ECHOROUK_OS_DOCUMENT_INTEL_OCR_MAX_PAGES` (default `24`)
+    - `ECHOROUK_OS_DOCUMENT_INTEL_OCR_DPI` (default `220`)
+    - `ECHOROUK_OS_DOCUMENT_INTEL_OCR_TRIGGER_MIN_CHARS` (default `1200`)
+
+## OCR stage
+- If extracted text is weak/short, backend runs OCR automatically using:
+  - `pdftoppm` (Poppler) to render pages
+  - `tesseract` (`ara`, `eng`, `fra`) for recognition
+- OCR is bounded by timeout and max pages to protect API responsiveness.
 
 ## Multilingual extraction update
 - News candidate scoring now supports:
