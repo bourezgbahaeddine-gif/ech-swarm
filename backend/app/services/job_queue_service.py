@@ -47,6 +47,7 @@ JOB_TASK_MAP: dict[str, tuple[str, str]] = {
     "pipeline_scribe": ("app.queue.tasks.pipeline_tasks.run_scribe_batch", "ai_scribe"),
     "trends_scan": ("app.queue.tasks.pipeline_tasks.run_trends_scan", "ai_trends"),
     "published_monitor_scan": ("app.queue.tasks.pipeline_tasks.run_published_monitor_scan", "ai_quality"),
+    "document_intel_extract": ("app.queue.tasks.pipeline_tasks.run_document_intel_extract_job", "ai_quality"),
 }
 
 

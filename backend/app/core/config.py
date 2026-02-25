@@ -162,7 +162,9 @@ class Settings(BaseSettings):
     # Document Intelligence
     document_intel_docling_timeout_seconds: int = 45
     document_intel_docling_max_size_mb: int = 8
+    document_intel_docling_skip_for_ar: bool = True
     document_intel_max_upload_mb: int = 80
+    document_intel_job_payload_ttl_seconds: int = 3600
     document_intel_ocr_enabled: bool = True
     document_intel_ocr_force: bool = False
     document_intel_ocr_timeout_seconds: int = 180

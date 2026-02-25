@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -39,3 +41,20 @@ class DocumentExtractResponse(BaseModel):
     data_points: list[DocumentExtractDataPoint] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     preview_text: str = ""
+
+
+class DocumentExtractSubmitResponse(BaseModel):
+    job_id: str
+    status: str
+    filename: str
+    message: str | None = None
+
+
+class DocumentExtractJobStatusResponse(BaseModel):
+    job_id: str
+    status: str
+    error: str | None = None
+    result: DocumentExtractResponse | None = None
+    queued_at: datetime | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None

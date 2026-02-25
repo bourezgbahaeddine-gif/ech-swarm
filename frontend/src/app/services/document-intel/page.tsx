@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
 import { useRouter } from 'next/navigation';
 import { FileUp, FileText, Loader2, Newspaper, Sigma, Sparkles } from 'lucide-react';
@@ -9,6 +9,7 @@ import { FileUp, FileText, Loader2, Newspaper, Sigma, Sparkles } from 'lucide-re
 import {
     documentIntelApi,
     editorialApi,
+    type DocumentIntelExtractJobStatus,
     type DocumentIntelExtractResult,
     type DocumentIntelNewsItem,
 } from '@/lib/api';
@@ -37,23 +38,34 @@ export default function DocumentIntelPage() {
     const [maxNewsItems, setMaxNewsItems] = useState(8);
     const [maxDataPoints, setMaxDataPoints] = useState(30);
     const [error, setError] = useState<string | null>(null);
-    const [result, setResult] = useState<DocumentIntelExtractResult | null>(null);
     const [createdWorkId, setCreatedWorkId] = useState<string | null>(null);
+    const [jobId, setJobId] = useState<string | null>(null);
 
     const runExtract = useMutation({
         mutationFn: () =>
-            documentIntelApi.extractFromUpload({
+            documentIntelApi.submitExtractJob({
                 file: file as File,
                 language_hint: languageHint,
                 max_news_items: maxNewsItems,
                 max_data_points: maxDataPoints,
             }),
         onSuccess: (res) => {
-            setResult(res.data);
+            setJobId(res.data.job_id);
             setError(null);
             setCreatedWorkId(null);
         },
-        onError: (err) => setError(apiError(err, 'فشل تحليل الملف.')),
+        onError: (err) => setError(apiError(err, 'Failed to submit document extraction job.')),
+    });
+
+    const extractStatusQuery = useQuery({
+        queryKey: ['document-intel-job', jobId],
+        queryFn: () => documentIntelApi.getExtractJobStatus(jobId as string),
+        enabled: !!jobId,
+        refetchInterval: (q) => {
+            const status = (q.state.data?.data as DocumentIntelExtractJobStatus | undefined)?.status;
+            if (!status || status === 'completed' || status === 'failed' || status === 'dead_lettered') return false;
+            return 1500;
+        },
     });
 
     const createDraftFromCandidate = useMutation({
@@ -79,6 +91,14 @@ export default function DocumentIntelPage() {
         onError: (err) => setError(apiError(err, 'تعذر إنشاء مسودة من الخبر المرشح.')),
     });
 
+    const statusPayload = extractStatusQuery.data?.data;
+    const result: DocumentIntelExtractResult | null =
+        statusPayload?.status === 'completed' && statusPayload.result ? statusPayload.result : null;
+    const derivedError =
+        statusPayload?.status === 'failed' || statusPayload?.status === 'dead_lettered'
+            ? statusPayload.error || 'Document extraction failed.'
+            : null;
+    const effectiveError = error || derivedError;
     const stats = result?.stats;
     const parserBadge = useMemo(() => {
         if (!result) return '--';
@@ -86,6 +106,18 @@ export default function DocumentIntelPage() {
         if (result.parser_used === 'pypdf') return 'pypdf (fallback)';
         return result.parser_used;
     }, [result]);
+    const extractStatus = statusPayload?.status ?? null;
+    const isProcessing = runExtract.isPending || extractStatus === 'queued' || extractStatus === 'running';
+    const extractStatusText =
+        extractStatus === 'queued'
+            ? 'In queue'
+            : extractStatus === 'running'
+              ? 'Processing'
+              : extractStatus === 'completed'
+                ? 'Completed'
+                : extractStatus === 'failed' || extractStatus === 'dead_lettered'
+                  ? 'Failed'
+                  : null;
 
     return (
         <div className="space-y-5 app-theme-shell" dir="rtl">
@@ -99,9 +131,9 @@ export default function DocumentIntelPage() {
                 </p>
             </div>
 
-            {error && (
+            {effectiveError && (
                 <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-                    {error}
+                    {effectiveError}
                 </div>
             )}
 
@@ -157,12 +189,17 @@ export default function DocumentIntelPage() {
 
                 <button
                     onClick={() => runExtract.mutate()}
-                    disabled={!canRun || !file || runExtract.isPending}
+                    disabled={!canRun || !file || isProcessing}
                     className="w-full h-11 rounded-xl border border-emerald-500/30 bg-emerald-500/20 text-emerald-200 text-sm disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                    {runExtract.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                    {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                     تحليل الوثيقة
                 </button>
+                {jobId && (
+                    <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-200">
+                        {extractStatusText ? `${extractStatusText} - ` : ''}Job ID: {jobId}
+                    </div>
+                )}
             </section>
 
             {result && (

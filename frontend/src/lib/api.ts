@@ -882,6 +882,23 @@ export interface DocumentIntelExtractResult {
     preview_text: string;
 }
 
+export interface DocumentIntelExtractSubmitResult {
+    job_id: string;
+    status: string;
+    filename: string;
+    message?: string | null;
+}
+
+export interface DocumentIntelExtractJobStatus {
+    job_id: string;
+    status: 'queued' | 'running' | 'completed' | 'failed' | 'dead_lettered' | string;
+    error?: string | null;
+    result?: DocumentIntelExtractResult | null;
+    queued_at?: string | null;
+    started_at?: string | null;
+    finished_at?: string | null;
+}
+
 export interface CompetitorXraySource {
     id: number;
     name: string;
@@ -1076,6 +1093,23 @@ export const mediaLoggerApi = {
 };
 
 export const documentIntelApi = {
+    submitExtractJob: (payload: {
+        file: File;
+        language_hint?: 'ar' | 'fr' | 'en' | 'auto';
+        max_news_items?: number;
+        max_data_points?: number;
+    }) => {
+        const form = new FormData();
+        form.append('file', payload.file);
+        form.append('language_hint', payload.language_hint || 'ar');
+        if (payload.max_news_items) form.append('max_news_items', String(payload.max_news_items));
+        if (payload.max_data_points) form.append('max_data_points', String(payload.max_data_points));
+        return api.post<DocumentIntelExtractSubmitResult>('/document-intel/extract/submit', form, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+            timeout: 30000,
+        });
+    },
+    getExtractJobStatus: (jobId: string) => api.get<DocumentIntelExtractJobStatus>(`/document-intel/extract/${jobId}`),
     extractFromUpload: (payload: {
         file: File;
         language_hint?: 'ar' | 'fr' | 'en' | 'auto';

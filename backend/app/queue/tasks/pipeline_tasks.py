@@ -20,6 +20,8 @@ from app.models import JobRun
 from app.msi.service import msi_monitor_service
 from app.queue.async_runtime import run_async
 from app.queue.celery_app import celery_app
+from app.services.document_intel_job_storage import document_intel_job_storage
+from app.services.document_intel_service import document_intel_service
 from app.services.job_queue_service import job_queue_service
 from app.simulator.service import audience_simulation_service
 
@@ -125,6 +127,30 @@ async def _run_published_monitor(job_id: str) -> dict:
     return {"report": report}
 
 
+async def _run_document_intel_extract(job_id: str) -> dict:
+    job = await _load_job(job_id)
+    payload = job.payload_json or {}
+    blob_key = str(payload.get("blob_key") or "")
+    if not blob_key:
+        raise RuntimeError("document_intel_blob_key_missing")
+
+    raw_pdf = await document_intel_job_storage.load_payload(blob_key)
+    if not raw_pdf:
+        raise RuntimeError("document_intel_payload_missing_or_expired")
+
+    try:
+        result = await document_intel_service.extract_pdf(
+            filename=str(payload.get("filename") or "document.pdf"),
+            payload=raw_pdf,
+            language_hint=str(payload.get("language_hint") or "ar"),
+            max_news_items=int(payload.get("max_news_items") or 8),
+            max_data_points=int(payload.get("max_data_points") or 30),
+        )
+        return result
+    finally:
+        await document_intel_job_storage.delete_payload(blob_key)
+
+
 @celery_app.task(bind=True, autoretry_for=(TimeoutError, ConnectionError), retry_backoff=True, retry_jitter=True, max_retries=5)
 def run_router_batch(self: Task, job_id: str) -> dict:
     try:
@@ -224,6 +250,21 @@ def run_simulator_job(self: Task, job_id: str) -> dict:
     except Exception as exc:  # noqa: BLE001
         tb = traceback.format_exc()
         final = int(getattr(self.request, "retries", 0)) >= int(getattr(self, "max_retries", 5))
+        run_async(_fail(job_id, str(exc), tb, final))
+        raise
+    finally:
+        structlog.contextvars.clear_contextvars()
+
+
+@celery_app.task(bind=True, autoretry_for=(TimeoutError, ConnectionError), retry_backoff=True, retry_jitter=True, max_retries=2)
+def run_document_intel_extract_job(self: Task, job_id: str) -> dict:
+    try:
+        result = run_async(_run_document_intel_extract(job_id))
+        run_async(_complete(job_id, result))
+        return {"ok": True}
+    except Exception as exc:  # noqa: BLE001
+        tb = traceback.format_exc()
+        final = int(getattr(self.request, "retries", 0)) >= int(getattr(self, "max_retries", 2))
         run_async(_fail(job_id, str(exc), tb, final))
         raise
     finally:

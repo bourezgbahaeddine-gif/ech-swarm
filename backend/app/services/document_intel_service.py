@@ -120,6 +120,7 @@ class DocumentIntelService:
         self.max_upload_bytes = max(10, int(settings.document_intel_max_upload_mb)) * 1024 * 1024
         self.docling_timeout_seconds = max(10, int(settings.document_intel_docling_timeout_seconds))
         self.docling_max_bytes = max(1, int(settings.document_intel_docling_max_size_mb)) * 1024 * 1024
+        self.docling_skip_for_ar = bool(settings.document_intel_docling_skip_for_ar)
         self.ocr_enabled = bool(settings.document_intel_ocr_enabled)
         self.ocr_force = bool(settings.document_intel_ocr_force)
         self.ocr_timeout_seconds = max(30, int(settings.document_intel_ocr_timeout_seconds))
@@ -137,26 +138,21 @@ class DocumentIntelService:
         max_news_items: int = 8,
         max_data_points: int = 30,
     ) -> dict:
-        safe_name = self._safe_filename(filename)
-        if not payload:
-            raise ValueError("Uploaded file is empty")
-        if len(payload) > self.max_upload_bytes:
-            raise ValueError(
-                f"File exceeds {int(self.max_upload_bytes / (1024 * 1024))}MB limit"
-            )
-        if not safe_name.lower().endswith(".pdf"):
-            raise ValueError("Only PDF files are supported in this phase")
+        safe_name = self.validate_upload(filename=filename, payload=payload)
 
-        if len(payload) > self.docling_max_bytes:
+        docling_strategy = self._should_attempt_docling(
+            payload=payload,
+            filename=safe_name,
+            language_hint=language_hint,
+        )
+
+        if not docling_strategy["enabled"]:
             docling_chunk = _ExtractionChunk(
                 text="",
                 markdown="",
                 pages=None,
-                parser="docling_skipped_large_file",
-                warning=(
-                    f"File is larger than {int(self.docling_max_bytes / (1024 * 1024))}MB; "
-                    "skipping Docling and using fallback parser."
-                ),
+                parser=str(docling_strategy["parser"]),
+                warning=str(docling_strategy["warning"]),
             )
         else:
             try:
@@ -232,6 +228,40 @@ class DocumentIntelService:
             "warnings": warnings,
             "preview_text": normalized_text[:2500],
         }
+
+    def validate_upload(self, *, filename: str, payload: bytes) -> str:
+        safe_name = self._safe_filename(filename)
+        if not payload:
+            raise ValueError("Uploaded file is empty")
+        if len(payload) > self.max_upload_bytes:
+            raise ValueError(
+                f"File exceeds {int(self.max_upload_bytes / (1024 * 1024))}MB limit"
+            )
+        if not safe_name.lower().endswith(".pdf"):
+            raise ValueError("Only PDF files are supported in this phase")
+        return safe_name
+
+    def _should_attempt_docling(self, *, payload: bytes, filename: str, language_hint: str) -> dict[str, str | bool]:
+        lang = self._normalize_lang(language_hint)
+        if len(payload) > self.docling_max_bytes:
+            return {
+                "enabled": False,
+                "parser": "docling_skipped_large_file",
+                "warning": (
+                    f"File is larger than {int(self.docling_max_bytes / (1024 * 1024))}MB; "
+                    "skipping Docling and using fallback parser."
+                ),
+            }
+        if self.docling_skip_for_ar and lang == "ar":
+            lower_name = filename.lower()
+            gazette_like = bool(re.search(r"(a20\d{4,}|journal|gazette|official)", lower_name))
+            if gazette_like or len(payload) >= 2 * 1024 * 1024:
+                return {
+                    "enabled": False,
+                    "parser": "docling_skipped_strategy",
+                    "warning": "Docling skipped by strategy for large/scanned Arabic document; using OCR-first fallback.",
+                }
+        return {"enabled": True, "parser": "docling", "warning": ""}
 
     def _extract_with_docling(self, payload: bytes, filename: str) -> _ExtractionChunk:
         try:
