@@ -20,6 +20,9 @@ class _ScalarResult:
     def scalars(self):
         return SimpleNamespace(all=lambda: list(self._scalar_value or []))
 
+    def all(self):
+        return list(self._scalar_value or [])
+
 
 class _SequenceDb:
     def __init__(self, results):
@@ -90,7 +93,7 @@ async def test_create_story_from_article_smoke(monkeypatch):
         return None
 
     async def _fake_create_story(*_args, **_kwargs):
-        return SimpleNamespace(id=77, items=[], updated_by=None)
+        return SimpleNamespace(id=77, story_key="STY-20260225-AAAA1111", title="عنوان عربي", items=[], updated_by=None)
 
     async def _fake_link_article(*_args, **_kwargs):
         return linked_item
@@ -150,7 +153,7 @@ async def test_suggest_stories_returns_ranked_list(monkeypatch):
         updated_at=now,
         items=[SimpleNamespace(article_id=88, draft_id=None)],
     )
-    db = _SequenceDb([article, [relation]])
+    db = _SequenceDb([article, [(1, 0.91), (2, 0.08)], [relation]])
     current_user = SimpleNamespace(id=1, username="editor", full_name_ar="Editor")
 
     async def _fake_list_stories(*_args, **_kwargs):

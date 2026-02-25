@@ -157,10 +157,13 @@ async def create_story_from_article(
         )
         reused_story = reused_row.scalar_one_or_none()
         if reused_story:
+            reloaded_reused_story = await story_repository.get_story_by_id(db, reused_story.id)
+            if not reloaded_reused_story:
+                raise HTTPException(status_code=404, detail="Story not found")
             return success_envelope(
                 {
-                    "story": _story_to_dict(reused_story),
-                    "linked_items_count": len(reused_story.items or []),
+                    "story": _story_to_dict(reloaded_reused_story),
+                    "linked_items_count": len(reloaded_reused_story.items or []),
                     "reused": True,
                 }
             )

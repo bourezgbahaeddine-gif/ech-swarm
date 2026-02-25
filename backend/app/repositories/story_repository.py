@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models import Story, StoryItem, StoryStatus
 
@@ -36,12 +37,20 @@ class StoryRepository:
         return story
 
     async def get_story_by_id(self, db: AsyncSession, story_id: int) -> Story | None:
-        row = await db.execute(select(Story).where(Story.id == story_id))
+        row = await db.execute(
+            select(Story)
+            .options(selectinload(Story.items))
+            .where(Story.id == story_id)
+            .execution_options(populate_existing=True)
+        )
         return row.scalar_one_or_none()
 
     async def list_stories(self, db: AsyncSession, *, limit: int = 100) -> list[Story]:
         rows = await db.execute(
-            select(Story).order_by(Story.updated_at.desc(), Story.id.desc()).limit(max(1, min(limit, 500)))
+            select(Story)
+            .options(selectinload(Story.items))
+            .order_by(Story.updated_at.desc(), Story.id.desc())
+            .limit(max(1, min(limit, 500)))
         )
         return list(rows.scalars().all())
 
@@ -89,4 +98,3 @@ class StoryRepository:
 
 
 story_repository = StoryRepository()
-
