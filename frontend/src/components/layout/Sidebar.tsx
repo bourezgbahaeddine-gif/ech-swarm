@@ -25,6 +25,7 @@ import {
     MessagesSquare,
     Radar,
     FileSearch,
+    Library,
 } from 'lucide-react';
 
 type Role =
@@ -65,6 +66,7 @@ const navItems = [
     { href: '/news', label: 'الأخبار', icon: Newspaper, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor', 'fact_checker'] as Role[] },
     { href: '/editorial', label: 'قسم التحرير', icon: UserCheck, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
     { href: '/workspace-drafts', label: 'المحرر الذكي', icon: FolderGit2, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
+    { href: '/stories', label: 'القصص التحريرية', icon: Library, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
     { href: '/trends', label: 'رادار التراند', icon: TrendingUp, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
     { href: '/constitution', label: 'الدستور', icon: FileText, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor', 'fact_checker'] as Role[] },
     { href: '/msi', label: 'مؤشر MSI', icon: Gauge, roles: ['director'] as Role[] },

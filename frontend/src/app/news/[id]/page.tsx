@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     ArrowRight,
     ExternalLink,
@@ -18,9 +18,12 @@ import {
     Send,
     CircleHelp,
     RotateCcw,
+    Link2,
+    BookOpenText,
+    Loader2,
 } from 'lucide-react';
 import { constitutionApi } from '@/lib/constitution-api';
-import { editorialApi, newsApi } from '@/lib/api';
+import { editorialApi, newsApi, storiesApi, type StoryDossierResponse, type StorySuggestion } from '@/lib/api';
 import { formatDate, formatRelativeTime, getCategoryLabel, getStatusColor, cn } from '@/lib/utils';
 
 type NewsGuideType = 'welcome' | 'action';
@@ -66,12 +69,16 @@ function actionKey(action: NewsActionId): string {
 export default function NewsDetailsPage() {
     const params = useParams<{ id: string }>();
     const router = useRouter();
+    const queryClient = useQueryClient();
     const id = useMemo(() => Number(params?.id || 0), [params?.id]);
 
     const [actionMessage, setActionMessage] = useState<string>('');
     const [toolOutput, setToolOutput] = useState<string>('');
     const [toolLabel, setToolLabel] = useState<string>('');
     const [tipSeed, setTipSeed] = useState(0);
+    const [storyPanelOpen, setStoryPanelOpen] = useState(false);
+    const [activeDossierStoryId, setActiveDossierStoryId] = useState<number | null>(null);
+    const [linkedStoryId, setLinkedStoryId] = useState<number | null>(null);
 
     const [guideOpen, setGuideOpen] = useState(false);
     const [guideType, setGuideType] = useState<NewsGuideType>('welcome');
@@ -117,6 +124,42 @@ export default function NewsDetailsPage() {
             setToolLabel('نتيجة الأداة');
             setToolOutput('تعذر تنفيذ الأداة حالياً.');
         },
+    });
+
+    const createStoryMutation = useMutation({
+        mutationFn: () => storiesApi.createFromArticle(id, { reuse: true }),
+        onSuccess: (res) => {
+            const payload = res.data;
+            setActionMessage(
+                payload.reused
+                    ? `تم استخدام القصة الحالية ${payload.story.story_key} وربط الخبر بها مسبقاً.`
+                    : `تم إنشاء قصة جديدة ${payload.story.story_key} وربط الخبر بها.`,
+            );
+            setLinkedStoryId(payload.story.id);
+            setActiveDossierStoryId(payload.story.id);
+            queryClient.invalidateQueries({ queryKey: ['stories-page-list'] });
+        },
+        onError: () => setActionMessage('تعذر إنشاء القصة من هذا الخبر حالياً.'),
+    });
+
+    const { data: suggestionsData, isFetching: suggestionsLoading } = useQuery({
+        queryKey: ['story-suggestions', id, storyPanelOpen],
+        queryFn: () => storiesApi.suggest(id, { limit: 10 }),
+        enabled: storyPanelOpen && Number.isFinite(id) && id > 0,
+    });
+    const suggestions = (suggestionsData?.data || []) as StorySuggestion[];
+
+    const linkToStoryMutation = useMutation({
+        mutationFn: (storyId: number) => storiesApi.linkArticle(storyId, id),
+        onSuccess: (_res, storyId) => {
+            setActionMessage('تم ربط الخبر بالقصة بنجاح.');
+            setLinkedStoryId(storyId);
+            setActiveDossierStoryId(storyId);
+            setStoryPanelOpen(false);
+            queryClient.invalidateQueries({ queryKey: ['stories-page-list'] });
+            queryClient.invalidateQueries({ queryKey: ['story-suggestions', id, true] });
+        },
+        onError: () => setActionMessage('تعذر ربط الخبر بالقصة المحددة.'),
     });
 
     function openWelcomeGuide() {
@@ -274,6 +317,28 @@ export default function NewsDetailsPage() {
                         </div>
                         <div className="grid grid-cols-1 gap-2">
                             <button
+                                onClick={() => createStoryMutation.mutate()}
+                                disabled={createStoryMutation.isPending}
+                                className="h-10 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-sm text-emerald-200 disabled:opacity-60 inline-flex items-center justify-center gap-2"
+                            >
+                                {createStoryMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookOpenText className="w-4 h-4" />}
+                                إنشاء قصة
+                            </button>
+                            <button
+                                onClick={() => setStoryPanelOpen(true)}
+                                className="h-10 rounded-xl border border-sky-500/30 bg-sky-500/15 text-sm text-sky-200 inline-flex items-center justify-center gap-2"
+                            >
+                                <Link2 className="w-4 h-4" /> ربط مع قصة
+                            </button>
+                            {linkedStoryId && (
+                                <button
+                                    onClick={() => setActiveDossierStoryId(linkedStoryId)}
+                                    className="h-10 rounded-xl border border-cyan-500/30 bg-cyan-500/15 text-sm text-cyan-200 inline-flex items-center justify-center gap-2"
+                                >
+                                    <BookOpenText className="w-4 h-4" /> عرض ملف القصة
+                                </button>
+                            )}
+                            <button
                                 onClick={() => runWithGuide('open_editor', () => router.push(`/workspace-drafts?article_id=${article.id}`))}
                                 className="h-10 rounded-xl border border-emerald-500/30 bg-emerald-500/15 text-sm text-emerald-200 flex items-center justify-center gap-2"
                             >
@@ -355,6 +420,23 @@ export default function NewsDetailsPage() {
                     onConfirm={confirmGuide}
                 />
             )}
+
+            {storyPanelOpen && (
+                <StorySuggestionPanel
+                    suggestions={suggestions}
+                    loading={suggestionsLoading}
+                    onClose={() => setStoryPanelOpen(false)}
+                    onLink={(storyId) => linkToStoryMutation.mutate(storyId)}
+                    linking={linkToStoryMutation.isPending}
+                />
+            )}
+
+            {activeDossierStoryId && (
+                <StoryDossierDrawer
+                    storyId={activeDossierStoryId}
+                    onClose={() => setActiveDossierStoryId(null)}
+                />
+            )}
         </div>
     );
 }
@@ -395,6 +477,128 @@ function NewsGuideModal({
                         {type === 'welcome' ? 'فهمت، ابدأ' : 'فهمت، نفّذ'}
                     </button>
                 </div>
+            </div>
+        </div>
+    );
+}
+
+function StorySuggestionPanel({
+    suggestions,
+    loading,
+    onClose,
+    onLink,
+    linking,
+}: {
+    suggestions: StorySuggestion[];
+    loading: boolean;
+    onClose: () => void;
+    onLink: (storyId: number) => void;
+    linking: boolean;
+}) {
+    return (
+        <div className="fixed inset-0 z-[75] bg-black/70 backdrop-blur-sm flex justify-end" dir="rtl">
+            <div className="w-full max-w-xl h-full overflow-y-auto border-l border-white/10 bg-slate-950 p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-white">اقتراحات ربط القصة</h3>
+                    <button onClick={onClose} className="rounded-lg border border-white/20 px-3 py-1.5 text-xs text-slate-300">إغلاق</button>
+                </div>
+
+                {loading && <p className="text-sm text-slate-400">جاري تحليل القصص المناسبة...</p>}
+
+                {!loading && suggestions.length === 0 && (
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
+                        لا توجد اقتراحات كافية حالياً. يمكنك إنشاء قصة جديدة مباشرة.
+                    </div>
+                )}
+
+                <div className="space-y-2">
+                    {suggestions.map((item) => (
+                        <div key={item.story_id} className="rounded-xl border border-white/10 bg-slate-900/60 p-3 space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                                <div>
+                                    <p className="text-xs text-cyan-300">{item.story_key}</p>
+                                    <p className="text-sm text-white font-medium">{item.title}</p>
+                                </div>
+                                <span className="text-xs rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-emerald-200">
+                                    Score: {item.score}
+                                </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400">
+                                {item.reasons.join(' • ') || 'بدون تفاصيل إضافية'}
+                            </p>
+                            <button
+                                onClick={() => onLink(item.story_id)}
+                                disabled={linking}
+                                className="w-full h-9 rounded-lg border border-sky-500/30 bg-sky-500/15 text-sm text-sky-200 disabled:opacity-60"
+                            >
+                                ربط الخبر بهذه القصة
+                            </button>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function StoryDossierDrawer({
+    storyId,
+    onClose,
+}: {
+    storyId: number;
+    onClose: () => void;
+}) {
+    const { data, isLoading, error } = useQuery({
+        queryKey: ['story-dossier-news-page', storyId],
+        queryFn: () => storiesApi.dossier(storyId, { timeline_limit: 20 }),
+    });
+    const dossier: StoryDossierResponse | undefined = data?.data;
+
+    return (
+        <div className="fixed inset-0 z-[85] bg-black/70 backdrop-blur-sm flex justify-end" dir="rtl">
+            <div className="w-full max-w-2xl h-full overflow-y-auto border-l border-white/10 bg-slate-950 p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-white">ملف القصة</h3>
+                    <button onClick={onClose} className="rounded-lg border border-white/20 px-3 py-1.5 text-xs text-slate-300">إغلاق</button>
+                </div>
+
+                {isLoading && <p className="text-sm text-slate-400">جاري تحميل الملف...</p>}
+                {error && <p className="text-sm text-red-300">تعذر تحميل ملف القصة.</p>}
+
+                {dossier && (
+                    <div className="space-y-4">
+                        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                            <p className="text-xs text-cyan-300">{dossier.story.story_key}</p>
+                            <h4 className="text-xl text-white font-semibold mt-1">{dossier.story.title}</h4>
+                            <p className="text-xs text-slate-400 mt-2">
+                                الحالة: {dossier.story.status} • آخر نشاط: {dossier.stats.last_activity_at ? formatRelativeTime(dossier.stats.last_activity_at) : 'غير متاح'}
+                            </p>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-slate-200">العناصر: {dossier.stats.items_total}</div>
+                            <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-slate-200">الأخبار: {dossier.stats.articles_count}</div>
+                            <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-slate-200">المسودات: {dossier.stats.drafts_count}</div>
+                            <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-slate-200">الملاحظات: {dossier.highlights.notes_count}</div>
+                        </div>
+
+                        <div className="space-y-2">
+                            <h5 className="text-sm font-semibold text-white">الخط الزمني</h5>
+                            <div className="space-y-2">
+                                {dossier.timeline.map((item) => (
+                                    <div key={`${item.type}-${item.id}`} className="rounded-lg border border-white/10 bg-slate-900/60 p-3">
+                                        <p className="text-xs text-cyan-300">{item.type === 'article' ? 'خبر' : 'مسودة'} #{item.id}</p>
+                                        <p className="text-sm text-white mt-1">{item.title}</p>
+                                        <p className="text-[11px] text-slate-400 mt-1">
+                                            {item.source_name ? `${item.source_name} • ` : ''}
+                                            {item.status || 'بدون حالة'}
+                                        </p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );

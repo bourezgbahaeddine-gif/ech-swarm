@@ -166,3 +166,31 @@ Task-level idempotency is implemented via `task_idempotency_keys` and `task_exec
 - Completion/failure updates are stored for replay-safe retries.
 
 This is applied to pipeline and editorial queue workers to avoid duplicate transitions/draft side effects under retry/requeue conditions.
+
+### Story activation flow (MVP)
+
+Stories are now operationally activated from the newsroom workflow:
+
+- `POST /api/v1/stories/from-article/{article_id}`
+  - one-click story creation from an article
+  - creates `stories` + `story_items` in one transaction
+  - optional `reuse=true` returns existing linked story when already linked
+
+- `GET /api/v1/stories/suggest?article_id=...`
+  - read-only linking suggestions (no side effects)
+  - score combines:
+    - title similarity (sequence + token overlap)
+    - entity overlap (article entities vs story text)
+    - relation boost (if related articles are linked to story)
+    - category match boost
+
+- `GET /api/v1/stories/{story_id}/dossier`
+  - unified dossier output for editorial consumption:
+    - linked timeline (`article` + `draft`)
+    - stats (items/articles/drafts/last activity)
+    - highlights (latest titles, top sources, notes count)
+
+Data integrity is enforced at DB level for `story_items`:
+
+- exactly one of `article_id` or `draft_id` must be set
+- `link_type` must match the non-null reference (`article` or `draft`)

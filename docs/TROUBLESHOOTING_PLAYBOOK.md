@@ -330,3 +330,24 @@ LIMIT 30;
 ### Note on downgrade
 - Migration `20260225_story_idempotency_audit` introduces enum `story_status`.
 - Downgrade drops enum with `checkfirst=True`; if another table uses the same enum later, drop may fail by design and should be handled manually.
+
+---
+
+## 18) Story suggestions are empty for an article
+### Symptoms
+- `GET /api/v1/stories/suggest?article_id=...` returns `[]`.
+
+### Most common causes
+- No stories exist yet.
+- Very weak lexical/entity overlap with existing stories.
+- Related article graph (`article_relations`) has no links for this article.
+
+### Checks
+```bash
+curl -sS "http://127.0.0.1:8000/api/v1/stories?limit=20" -H "Authorization: Bearer $TOKEN"
+curl -sS "http://127.0.0.1:8000/api/v1/stories/suggest?article_id=<ARTICLE_ID>&limit=10" -H "Authorization: Bearer $TOKEN"
+```
+
+### Resolution
+- Use `POST /api/v1/stories/from-article/<ARTICLE_ID>?reuse=true` for one-click story activation.
+- Then retry suggestions for nearby articles in the same topic window.

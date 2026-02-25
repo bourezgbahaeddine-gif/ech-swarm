@@ -417,6 +417,82 @@ export interface ChiefPendingItem {
     };
 }
 
+export interface StoryItemLink {
+    id: number;
+    link_type: 'article' | 'draft' | string;
+    article_id?: number | null;
+    draft_id?: number | null;
+    note?: string | null;
+    created_by?: string | null;
+    created_at?: string | null;
+}
+
+export interface StoryRecord {
+    id: number;
+    story_key: string;
+    title: string;
+    summary?: string | null;
+    category?: string | null;
+    geography?: string | null;
+    priority: number;
+    status: string;
+    created_by?: string | null;
+    updated_by?: string | null;
+    created_at?: string | null;
+    updated_at?: string | null;
+    items: StoryItemLink[];
+}
+
+export interface StorySuggestion {
+    story_id: number;
+    story_key: string;
+    title: string;
+    status: string;
+    category?: string | null;
+    geography?: string | null;
+    score: number;
+    reasons: string[];
+    last_updated_at?: string | null;
+}
+
+export interface StoryDossierTimelineItem {
+    type: 'article' | 'draft' | string;
+    id: number;
+    title: string;
+    created_at?: string | null;
+    source_name?: string | null;
+    url?: string | null;
+    status?: string | null;
+    work_id?: string | null;
+    version?: number | null;
+}
+
+export interface StoryDossierResponse {
+    story: {
+        id: number;
+        story_key: string;
+        title: string;
+        status: string;
+        category?: string | null;
+        geography?: string | null;
+        priority: number;
+        created_at?: string | null;
+        updated_at?: string | null;
+    };
+    stats: {
+        items_total: number;
+        articles_count: number;
+        drafts_count: number;
+        last_activity_at?: string | null;
+    };
+    timeline: StoryDossierTimelineItem[];
+    highlights: {
+        latest_titles: string[];
+        sources: Array<{ name: string; count: number }>;
+        notes_count: number;
+    };
+}
+
 export interface SocialApprovedItem {
     article_id: number;
     title: string;
@@ -584,6 +660,19 @@ export const editorialApi = {
         api.get(`/editorial/${articleId}/social/variants`),
     decisions: (articleId: number) => api.get(`/editorial/${articleId}/decisions`),
     generate: (articleId: number) => api.post(`/editorial/${articleId}/generate`),
+};
+
+export const storiesApi = {
+    list: (params?: { limit?: number }) => api.get<StoryRecord[]>('/stories', { params }),
+    get: (storyId: number) => api.get<StoryRecord>(`/stories/${storyId}`),
+    createFromArticle: (articleId: number, params?: { reuse?: boolean }) =>
+        api.post<{ story: StoryRecord; linked_items_count: number; reused: boolean }>(`/stories/from-article/${articleId}`, null, { params }),
+    suggest: (articleId: number, params?: { limit?: number }) =>
+        api.get<StorySuggestion[]>('/stories/suggest', { params: { article_id: articleId, ...(params || {}) } }),
+    linkArticle: (storyId: number, articleId: number, payload?: { note?: string }) =>
+        api.post<{ story_id: number; article_id: number; story_item_id: number }>(`/stories/${storyId}/link/article/${articleId}`, payload || {}),
+    dossier: (storyId: number, params?: { timeline_limit?: number }) =>
+        api.get<StoryDossierResponse>(`/stories/${storyId}/dossier`, { params }),
 };
 
 export const dashboardApi = {
