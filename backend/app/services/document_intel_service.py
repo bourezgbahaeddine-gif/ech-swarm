@@ -123,6 +123,7 @@ class DocumentIntelService:
         self.ocr_enabled = bool(settings.document_intel_ocr_enabled)
         self.ocr_force = bool(settings.document_intel_ocr_force)
         self.ocr_timeout_seconds = max(30, int(settings.document_intel_ocr_timeout_seconds))
+        self.ocr_per_page_timeout_seconds = max(5, int(settings.document_intel_ocr_per_page_timeout_seconds))
         self.ocr_max_pages = max(1, int(settings.document_intel_ocr_max_pages))
         self.ocr_dpi = max(120, int(settings.document_intel_ocr_dpi))
         self.ocr_trigger_min_chars = max(200, int(settings.document_intel_ocr_trigger_min_chars))
@@ -475,11 +476,17 @@ print(json.dumps({"text": text, "markdown": markdown, "pages": pages}, ensure_as
 
                 texts: list[str] = []
                 processed = 0
+                timeout_hit = False
                 for image in images:
-                    out = self._run_subprocess_with_deadline(
-                        ["tesseract", str(image), "stdout", "-l", lang, "--psm", "6"],
-                        end_ts=end_ts,
-                    )
+                    try:
+                        out = self._run_subprocess_with_deadline(
+                            ["tesseract", str(image), "stdout", "-l", lang, "--psm", "6"],
+                            end_ts=end_ts,
+                            per_call_timeout=self.ocr_per_page_timeout_seconds,
+                        )
+                    except TimeoutError:
+                        timeout_hit = True
+                        break
                     block = self._normalize_text(out)
                     if block:
                         texts.append(block)
@@ -492,14 +499,22 @@ print(json.dumps({"text": text, "markdown": markdown, "pages": pages}, ensure_as
                         markdown="",
                         pages=processed,
                         parser="ocr_empty",
-                        warning="OCR returned empty text.",
+                        warning=(
+                            f"OCR returned empty text after {processed} page(s)."
+                            if processed
+                            else "OCR returned empty text."
+                        ),
                     )
                 return _ExtractionChunk(
                     text=merged,
                     markdown="",
                     pages=processed,
-                    parser="ocr_tesseract",
-                    warning=f"OCR used on {processed} page(s).",
+                    parser="ocr_tesseract_partial" if timeout_hit else "ocr_tesseract",
+                    warning=(
+                        f"OCR partially completed on {processed} page(s) due to timeout."
+                        if timeout_hit
+                        else f"OCR used on {processed} page(s)."
+                    ),
                 )
         except TimeoutError:
             return _ExtractionChunk(
@@ -520,17 +535,30 @@ print(json.dumps({"text": text, "markdown": markdown, "pages": pages}, ensure_as
                 error=str(exc),
             )
 
-    def _run_subprocess_with_deadline(self, cmd: list[str], *, end_ts: float) -> str:
+    def _run_subprocess_with_deadline(
+        self,
+        cmd: list[str],
+        *,
+        end_ts: float,
+        per_call_timeout: int | None = None,
+    ) -> str:
         remaining = end_ts - time.monotonic()
-        if remaining <= 0:
+        if remaining <= 1:
             raise TimeoutError("deadline reached")
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=max(1, int(remaining)),
-            check=False,
-        )
+        timeout = remaining
+        if per_call_timeout is not None:
+            timeout = min(timeout, float(per_call_timeout))
+        timeout = max(2, int(timeout))
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise TimeoutError(f"{cmd[0]} timed out after {timeout}s") from exc
         if proc.returncode != 0:
             stderr = (proc.stderr or proc.stdout or "").strip()
             raise RuntimeError(f"{cmd[0]} failed: {stderr[:400]}")

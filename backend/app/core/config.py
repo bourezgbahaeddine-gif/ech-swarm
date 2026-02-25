@@ -166,6 +166,7 @@ class Settings(BaseSettings):
     document_intel_ocr_enabled: bool = True
     document_intel_ocr_force: bool = False
     document_intel_ocr_timeout_seconds: int = 180
+    document_intel_ocr_per_page_timeout_seconds: int = 15
     document_intel_ocr_max_pages: int = 24
     document_intel_ocr_dpi: int = 220
     document_intel_ocr_trigger_min_chars: int = 1200
