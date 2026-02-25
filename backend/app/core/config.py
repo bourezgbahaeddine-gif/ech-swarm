@@ -88,7 +88,7 @@ class Settings(BaseSettings):
 
     # Scheduling
     scout_interval_minutes: int = 20
-    trend_radar_interval_minutes: int = 10
+    trend_radar_interval_minutes: int = 120
     auto_pipeline_enabled: bool = False
     auto_trends_enabled: bool = True
     auto_scribe_enabled: bool = True

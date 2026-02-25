@@ -293,7 +293,11 @@ async def trigger_trend_scan(
     """Enqueue trend scan run."""
     _assert_trend_permission(current_user)
     geo_upper = geo.upper()
+    if geo_upper in {"*", "ALL"}:
+        geo_upper = "ALL"
     category_lower = category.lower()
+    if geo_upper == "ALL":
+        category_lower = "all"
     entity_id = f"trend:{geo_upper}:{category_lower}"
     active = await job_queue_service.find_active_job(
         db,
@@ -328,11 +332,11 @@ async def trigger_trend_scan(
 @router.get("/agents/trends/latest")
 async def get_latest_trend_scan(
     request: Request,
-    geo: str = Query("DZ", min_length=2, max_length=16),
+    geo: str = Query("ALL", min_length=2, max_length=16),
     category: str = Query("all", min_length=2, max_length=32),
     refresh_if_empty: bool = Query(True),
     refresh_if_stale: bool = Query(True),
-    stale_after_minutes: int = Query(20, ge=5, le=120),
+    stale_after_minutes: int = Query(120, ge=30, le=360),
     limit: int = Query(12, ge=1, le=30),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -340,8 +344,36 @@ async def get_latest_trend_scan(
     """Fetch latest cached trend payload (and optionally enqueue refresh)."""
     _assert_trend_permission(current_user)
     geo = geo.upper()
+    if geo in {"*", "ALL"}:
+        geo = "ALL"
     category = category.lower()
     payload = await cache_service.get_json(f"trends:last:{geo}:{category}")
+    if not payload:
+        snapshot = await cache_service.get_json("trends:last:ALL:all")
+        if snapshot and snapshot.get("alerts"):
+            alerts = snapshot.get("alerts") or []
+            filtered = [
+                item
+                for item in alerts
+                if (geo == "ALL" or str(item.get("geography", "")).upper() == geo)
+                and (category == "all" or str(item.get("category", "")).lower() == category)
+            ]
+            payload = {
+                "alerts": filtered,
+                "generated_at": snapshot.get("generated_at"),
+                "status": "from_aggregate_cache",
+            }
+    elif category != "all" or geo != "ALL":
+        alerts = payload.get("alerts") or []
+        payload = {
+            **payload,
+            "alerts": [
+                item
+                for item in alerts
+                if (geo == "ALL" or str(item.get("geography", "")).upper() == geo)
+                and (category == "all" or str(item.get("category", "")).lower() == category)
+            ],
+        }
     generated_at = None
     if payload and payload.get("generated_at"):
         try:
@@ -356,7 +388,8 @@ async def get_latest_trend_scan(
 
     should_refresh = (refresh_if_empty and not (payload and payload.get("alerts"))) or (refresh_if_stale and is_stale)
     if should_refresh:
-        entity_id = f"trend:{geo}:{category}"
+        # Always refresh the aggregate snapshot once, then serve all geo/category filters from cache.
+        entity_id = "trend:ALL:all"
         active = await job_queue_service.find_active_job(
             db,
             job_type="trends_scan",
@@ -374,7 +407,7 @@ async def get_latest_trend_scan(
             current_user=current_user,
             job_type="trends_scan",
             queue_name="ai_trends",
-            payload={"geo": geo, "category": category, "limit": limit, "mode": "fast"},
+            payload={"geo": "ALL", "category": "all", "limit": max(8, limit), "mode": "fast"},
             entity_id=entity_id,
         )
         refresh_status = "refresh_queued"

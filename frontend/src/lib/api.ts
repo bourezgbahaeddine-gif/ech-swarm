@@ -151,6 +151,8 @@ export interface TrendAlert {
     keyword: string;
     source_signals: string[];
     strength: number;
+    confidence?: number;
+    interaction_score?: number;
     category: string;
     geography: string;
     reason: string | null;
@@ -544,7 +546,14 @@ export const dashboardApi = {
     triggerScribe: () => api.post('/dashboard/agents/scribe/run'),
     triggerTrends: (params?: { geo?: string; category?: string; limit?: number; wait?: boolean }) =>
         api.post<{ message: string; alerts?: TrendAlert[] }>('/dashboard/agents/trends/scan', null, { params }),
-    latestTrends: (params?: { geo?: string; category?: string }) =>
+    latestTrends: (params?: {
+        geo?: string;
+        category?: string;
+        refresh_if_empty?: boolean;
+        refresh_if_stale?: boolean;
+        stale_after_minutes?: number;
+        limit?: number;
+    }) =>
         api.get<{ alerts: TrendAlert[] }>('/dashboard/agents/trends/latest', { params }),
     triggerPublishedMonitor: (params?: { feed_url?: string; limit?: number; wait?: boolean }) =>
         api.post<{ message: string; report?: PublishedMonitorReport }>('/dashboard/agents/published-monitor/run', null, { params }),

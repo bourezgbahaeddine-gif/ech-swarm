@@ -130,7 +130,7 @@ async def _run_trends_once():
             db,
             job_type="trends_scan",
             queue_name="ai_trends",
-            payload={"geo": "DZ", "category": "all", "limit": 12, "mode": "fast"},
+            payload={"geo": "ALL", "category": "all", "limit": 10, "mode": "fast"},
             entity_id="auto_trends",
             actor_username="system",
             max_attempts=3,

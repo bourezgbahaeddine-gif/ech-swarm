@@ -154,6 +154,8 @@ class TrendRadarAgent:
 
     async def scan(self, geo: str = "DZ", category: str = "all", limit: int = 12, mode: str = "fast") -> list[TrendAlert]:
         """Run a full trend scan cycle."""
+        if (geo or "").upper() == "ALL":
+            return await self.scan_all(limit_per_geo=limit, mode=mode, category=category)
         geo = self._normalize_geo(geo)
         category = (category or "all").lower()
         mode = (mode or "fast").lower()
@@ -237,8 +239,8 @@ class TrendRadarAgent:
 
             alerts: list[TrendAlert] = []
             for trend in verified_trends[:limit]:
-                # Non-DZ scans should stay responsive and avoid long AI latency.
-                if geo != "DZ" and mode != "deep":
+                # Keep fast mode deterministic and low-latency for all geographies.
+                if mode != "deep":
                     alert = TrendAlert(
                         keyword=trend["keyword"],
                         source_signals=trend["source_signals"],
@@ -276,13 +278,14 @@ class TrendRadarAgent:
                     alerts.append(alert)
 
             if alerts:
+                cache_ttl = timedelta(minutes=max(60, settings.trend_radar_interval_minutes * 2))
                 await cache_service.set_json(
                     f"trends:last:{geo}:{category}",
                     {
                         "alerts": [a.model_dump(mode="json") for a in alerts],
                         "generated_at": datetime.utcnow().isoformat(),
                     },
-                    ttl=timedelta(minutes=20),
+                    ttl=cache_ttl,
                 )
 
             for alert in alerts[:5]:
@@ -293,6 +296,67 @@ class TrendRadarAgent:
         except Exception as e:
             logger.error("trend_scan_error", geo=geo, category=category, error=str(e))
             return []
+
+    async def scan_all(self, *, limit_per_geo: int = 12, mode: str = "fast", category: str = "all") -> list[TrendAlert]:
+        geos = [code for code in GEO_LABELS.keys() if code != "GLOBAL"] + ["GLOBAL"]
+        semaphore = asyncio.Semaphore(4)
+
+        async def _scan_one(geo_code: str) -> list[TrendAlert]:
+            async with semaphore:
+                try:
+                    return await self.scan(
+                        geo=geo_code,
+                        category=category,
+                        limit=limit_per_geo,
+                        mode=mode,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("trend_scan_all_geo_failed", geo=geo_code, error=str(exc))
+                    return []
+
+        per_geo_alerts = await asyncio.gather(*[_scan_one(code) for code in geos])
+        all_alerts: list[TrendAlert] = [alert for bucket in per_geo_alerts for alert in bucket]
+
+        # Dedupe by (geo, keyword) and sort by confidence then strength.
+        dedup: dict[tuple[str, str], TrendAlert] = {}
+        for alert in all_alerts:
+            key = (alert.geography, normalize_text(alert.keyword))
+            current = dedup.get(key)
+            if not current:
+                dedup[key] = alert
+                continue
+            if (alert.confidence, alert.strength) > (current.confidence, current.strength):
+                dedup[key] = alert
+
+        snapshot_alerts = sorted(
+            dedup.values(),
+            key=lambda item: (item.confidence, item.strength, item.interaction_score),
+            reverse=True,
+        )
+
+        snapshot_payload = {
+            "alerts": [a.model_dump(mode="json") for a in snapshot_alerts],
+            "generated_at": datetime.utcnow().isoformat(),
+            "scope": "all_geos",
+            "category": (category or "all").lower(),
+        }
+        cache_ttl = timedelta(minutes=max(60, settings.trend_radar_interval_minutes * 2))
+        await cache_service.set_json(
+            "trends:last:ALL:all",
+            snapshot_payload,
+            ttl=cache_ttl,
+        )
+
+        # Also store category-scoped aggregate cache for instant UI filtering.
+        if (category or "all").lower() != "all":
+            await cache_service.set_json(
+                f"trends:last:ALL:{(category or 'all').lower()}",
+                snapshot_payload,
+                ttl=cache_ttl,
+            )
+
+        logger.info("trend_scan_all_complete", total_alerts=len(snapshot_alerts), category=category)
+        return snapshot_alerts
 
     @staticmethod
     def _normalize_geo(geo: str | None) -> str:
@@ -597,6 +661,8 @@ class TrendRadarAgent:
                 continue
             if self._is_weak_term(trend):
                 continue
+            if not self._is_newsworthy_keyword(trend):
+                continue
             detected_geo = self._detect_geography(trend, geo)
             if not self._is_geo_compatible(scan_geo=geo, detected_geo=detected_geo):
                 continue
@@ -637,6 +703,8 @@ class TrendRadarAgent:
         for burst_word in rss_bursts:
             if self._is_weak_term(burst_word):
                 continue
+            if not self._is_newsworthy_keyword(burst_word):
+                continue
             if burst_word in competitor_set and burst_word not in [v["keyword"] for v in verified]:
                 category = self._categorize_keyword(burst_word)
                 if category_filter != "all" and category != category_filter:
@@ -659,6 +727,23 @@ class TrendRadarAgent:
         verified = self._merge_similar_trends(verified)
         verified.sort(key=lambda x: x["strength"], reverse=True)
         return verified
+
+    def _is_newsworthy_keyword(self, keyword: str) -> bool:
+        term = normalize_text(keyword)
+        if not term or self._is_weak_term(term):
+            return False
+        parts = [p for p in term.split() if p]
+        if not parts:
+            return False
+        if len(parts) == 1:
+            if len(term) < 5:
+                return False
+            # Single terms are allowed only if they look like entities or topical anchors.
+            if not self._is_high_quality_single_term(keyword):
+                return False
+        if len(parts) > 5:
+            return False
+        return True
 
     async def _score_with_internal_interaction(self, trends: list[dict]) -> list[dict]:
         out: list[dict] = []
@@ -699,14 +784,31 @@ class TrendRadarAgent:
             if t and len(t) > 2 and not self._is_weak_term(t)
         ]
         terms: list[str] = []
-        terms.extend(tokens)
-        # bi-grams and tri-grams improve editorial quality vs single tokens
+        # Prefer phrases over single tokens to avoid noisy/random trend terms.
         for n in (2, 3):
             for i in range(0, max(0, len(tokens) - n + 1)):
                 phrase = " ".join(tokens[i:i + n]).strip()
-                if phrase and not self._is_weak_term(phrase):
+                if phrase and not self._is_weak_term(phrase) and 6 <= len(phrase) <= 64:
                     terms.append(phrase)
+        # Keep only high-quality single terms (usually entities or strongly topical words).
+        for token in tokens:
+            if self._is_high_quality_single_term(token):
+                terms.append(token)
         return list(dict.fromkeys(terms))
+
+    @staticmethod
+    def _is_high_quality_single_term(term: str) -> bool:
+        clean = normalize_text(term)
+        if not clean or len(clean) < 5:
+            return False
+        if clean.isdigit() or re.fullmatch(r"\d{2,4}", clean):
+            return False
+        has_arabic = bool(re.search(r"[\u0600-\u06FF]", term))
+        if has_arabic:
+            return len(clean) >= 4
+        if bool(re.search(r"[A-ZÀ-ÖØ-Ý]", term)):
+            return True
+        return len(clean) >= 7
 
     def _strip_publisher_suffix(self, raw_title: str) -> str:
         """Remove trailing publisher/source suffix from Google News titles."""

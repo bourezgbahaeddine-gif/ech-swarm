@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 
 const GEO_OPTIONS = [
+    { value: 'ALL', label: 'كل الجغرافيات' },
     { value: 'DZ', label: 'الجزائر' },
     { value: 'GLOBAL', label: 'دولي' },
     { value: 'FR', label: 'فرنسا' },
@@ -48,6 +49,7 @@ const CATEGORY_OPTIONS = [
 ];
 
 const GEO_LABEL: Record<string, string> = {
+    ALL: 'كل الجغرافيات',
     DZ: 'الجزائر',
     MA: 'المغرب',
     TN: 'تونس',
@@ -75,7 +77,7 @@ const CATEGORY_LABEL: Record<string, string> = {
 };
 
 export default function TrendsPage() {
-    const [trends, setTrends] = useState<TrendAlert[]>([]);
+    const [allTrends, setAllTrends] = useState<TrendAlert[]>([]);
     const [relatedNews, setRelatedNews] = useState<Record<string, ArticleBrief[]>>({});
     const [geo, setGeo] = useState('DZ');
     const [category, setCategory] = useState('all');
@@ -84,22 +86,26 @@ export default function TrendsPage() {
     const [lastUpdatedAt, setLastUpdatedAt] = useState<string>('');
 
     const latestMutation = useMutation({
-        mutationFn: () => dashboardApi.latestTrends({ geo, category }),
+        mutationFn: () =>
+            dashboardApi.latestTrends({
+                geo: 'ALL',
+                category: 'all',
+                refresh_if_empty: true,
+                refresh_if_stale: true,
+                stale_after_minutes: 120,
+                limit,
+            }),
         onSuccess: (response) => {
             const alerts = response.data?.alerts || [];
-            setTrends(alerts);
-            loadRelatedNews(alerts);
+            setAllTrends(alerts);
             setLastUpdatedAt(new Date().toLocaleTimeString('ar-DZ'));
         },
     });
 
     const scanMutation = useMutation({
-        mutationFn: () => dashboardApi.triggerTrends({ geo, category, limit, wait: true }),
-        onSuccess: (response) => {
-            const alerts = response.data?.alerts || [];
-            setTrends(alerts);
-            loadRelatedNews(alerts);
-            setLastUpdatedAt(new Date().toLocaleTimeString('ar-DZ'));
+        mutationFn: () => dashboardApi.triggerTrends({ geo: 'ALL', category: 'all', limit, wait: false }),
+        onSuccess: () => {
+            window.setTimeout(() => latestMutation.mutate(), 2500);
         },
     });
 
@@ -133,32 +139,45 @@ export default function TrendsPage() {
 
         const poll = window.setInterval(() => {
             latestMutation.mutate();
-        }, 60 * 1000);
+        }, 2 * 60 * 1000);
 
         const queueScan = window.setInterval(() => {
             dashboardApi
-                .triggerTrends({ geo, category, limit, wait: false })
+                .triggerTrends({ geo: 'ALL', category: 'all', limit, wait: false })
                 .then(() => window.setTimeout(() => latestMutation.mutate(), 2500))
                 .catch(() => undefined);
-        }, 10 * 60 * 1000);
+        }, 2 * 60 * 60 * 1000);
 
         return () => {
             window.clearInterval(poll);
             window.clearInterval(queueScan);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [geo, category, limit]);
+    }, [limit]);
+
+    const filteredTrends = useMemo(() => {
+        return allTrends.filter((trend) => {
+            const matchGeo = geo === 'ALL' ? true : trend.geography === geo;
+            const matchCategory = category === 'all' ? true : trend.category === category;
+            return matchGeo && matchCategory;
+        });
+    }, [allTrends, geo, category]);
 
     const scoredTrends = useMemo(() => {
-        return [...trends]
+        return [...filteredTrends]
             .map((trend) => {
                 let editorialScore = trend.strength;
                 if (trend.geography === 'DZ') editorialScore += 2;
                 if (trend.category === 'politics' || trend.category === 'economy') editorialScore += 1;
                 return { ...trend, editorialScore: Math.min(editorialScore, 10) };
             })
-            .sort((a, b) => b.editorialScore - a.editorialScore);
-    }, [trends]);
+            .sort((a, b) => b.editorialScore - a.editorialScore)
+            .slice(0, limit);
+    }, [filteredTrends, limit]);
+
+    useEffect(() => {
+        loadRelatedNews(scoredTrends);
+    }, [scoredTrends]);
 
     const groupedByCategory = useMemo(() => {
         const buckets = new Map<string, TrendAlert[]>();
@@ -205,7 +224,7 @@ export default function TrendsPage() {
                     </h1>
                     <p className="text-sm text-gray-400 mt-1">مسح ترندات فعّال مع تقسيم جغرافي وتصنيفي يخدم غرفة التحرير</p>
                     <p className="text-xs text-gray-500 mt-1">
-                        تحديث تلقائي كل دقيقة
+                        تحديث تلقائي كل ساعتين
                         {lastUpdatedAt ? ` • آخر تحديث: ${lastUpdatedAt}` : ''}
                     </p>
                 </div>
@@ -227,7 +246,7 @@ export default function TrendsPage() {
                     ) : (
                         <>
                             <Radar className="w-4 h-4" />
-                            مسح الآن
+                            جلب كل التراند الآن
                         </>
                     )}
                 </button>
@@ -281,7 +300,7 @@ export default function TrendsPage() {
                 </div>
                 <div className="rounded-xl border border-white/10 bg-black/20 p-3 flex items-center justify-between">
                     <span className="text-xs text-gray-400">آخر مسح</span>
-                    <span className="text-sm text-emerald-300 font-semibold">{scoredTrends.length}</span>
+                    <span className="text-sm text-emerald-300 font-semibold">{allTrends.length}</span>
                 </div>
             </div>
 
@@ -292,9 +311,9 @@ export default function TrendsPage() {
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {[
-                        { step: '1', title: 'مسح المصادر', desc: 'Google Trends + YouTube + RSS + منافسين', color: 'text-blue-400' },
-                        { step: '2', title: 'تحقق تقاطعي', desc: 'يقبل فقط الترند المؤكد من مصدرين+', color: 'text-purple-400' },
-                        { step: '3', title: 'تحليل تحريري', desc: 'زوايا نشر + سبب الصعود + أرشيف', color: 'text-emerald-400' },
+                        { step: '1', title: 'مسح شامل', desc: 'جلب كل الجغرافيات دفعة واحدة (ALL)', color: 'text-blue-400' },
+                        { step: '2', title: 'تصفية فورية', desc: 'التنقل بين الجغرافيا/التصنيف بدون إعادة المسح', color: 'text-purple-400' },
+                        { step: '3', title: 'جودة الكلمات', desc: 'ترتيب الكلمات الأخبارية وحذف الكلمات العشوائية', color: 'text-emerald-400' },
                     ].map(({ step, title, desc, color }) => (
                         <div key={step} className="flex items-start gap-3">
                             <div className={cn('w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-sm font-bold flex-shrink-0', color)}>
@@ -466,8 +485,8 @@ export default function TrendsPage() {
             {!scanMutation.isPending && scoredTrends.length === 0 && (
                 <div className="text-center py-20 rounded-2xl bg-gray-800/20 border border-white/10">
                     <Radar className="w-16 h-16 text-gray-700 mx-auto mb-4" />
-                    <h3 className="text-lg font-semibold text-white">اضغط &quot;مسح الآن&quot; لبدء الرادار</h3>
-                    <p className="text-sm text-gray-500 mt-1">يمكنك تحديد الجغرافيا والتصنيف قبل المسح لنتائج أدق</p>
+                    <h3 className="text-lg font-semibold text-white">اضغط &quot;جلب كل التراند الآن&quot; لبدء الرادار</h3>
+                    <p className="text-sm text-gray-500 mt-1">بعدها يمكنك التنقل بين أي جغرافيا/تصنيف مباشرة بدون انتظار</p>
                 </div>
             )}
         </div>
