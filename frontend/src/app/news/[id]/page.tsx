@@ -21,9 +21,11 @@ import {
     Link2,
     BookOpenText,
     Loader2,
+    Film,
+    ScrollText,
 } from 'lucide-react';
 import { constitutionApi } from '@/lib/constitution-api';
-import { editorialApi, newsApi, storiesApi, type StoryDossierResponse, type StorySuggestion } from '@/lib/api';
+import { editorialApi, newsApi, scriptsApi, storiesApi, type StoryDossierResponse, type StorySuggestion } from '@/lib/api';
 import { formatDate, formatRelativeTime, getCategoryLabel, getStatusColor, cn } from '@/lib/utils';
 
 type NewsGuideType = 'welcome' | 'action';
@@ -140,6 +142,38 @@ export default function NewsDetailsPage() {
             queryClient.invalidateQueries({ queryKey: ['stories-page-list'] });
         },
         onError: () => setActionMessage('تعذر إنشاء القصة من هذا الخبر حالياً.'),
+    });
+
+    const generateStoryScriptMutation = useMutation({
+        mutationFn: () =>
+            scriptsApi.createFromArticle(id, {
+                type: 'story_script',
+                tone: 'neutral',
+                language: 'ar',
+                length_seconds: 90,
+                style_constraints: [],
+            }),
+        onSuccess: (res) => {
+            setActionMessage(`تم إرسال سكربت القصة للتوليد: ${res.data.script.title}`);
+            router.push(`/scripts?script_id=${res.data.script.id}`);
+        },
+        onError: () => setActionMessage('تعذر إرسال مهمة Story Script حالياً.'),
+    });
+
+    const generateVideoPackageMutation = useMutation({
+        mutationFn: () =>
+            scriptsApi.createFromArticle(id, {
+                type: 'video_script',
+                tone: 'neutral',
+                language: 'ar',
+                length_seconds: 75,
+                style_constraints: [],
+            }),
+        onSuccess: (res) => {
+            setActionMessage(`تم إرسال باقة الفيديو للتوليد: ${res.data.script.title}`);
+            router.push(`/scripts?script_id=${res.data.script.id}`);
+        },
+        onError: () => setActionMessage('تعذر إرسال مهمة Video Package حالياً.'),
     });
 
     const { data: suggestionsData, isFetching: suggestionsLoading } = useQuery({
@@ -329,6 +363,22 @@ export default function NewsDetailsPage() {
                                 className="h-10 rounded-xl border border-sky-500/30 bg-sky-500/15 text-sm text-sky-200 inline-flex items-center justify-center gap-2"
                             >
                                 <Link2 className="w-4 h-4" /> ربط مع قصة
+                            </button>
+                            <button
+                                onClick={() => generateStoryScriptMutation.mutate()}
+                                disabled={generateStoryScriptMutation.isPending}
+                                className="h-10 rounded-xl border border-indigo-500/30 bg-indigo-500/15 text-sm text-indigo-200 disabled:opacity-60 inline-flex items-center justify-center gap-2"
+                            >
+                                {generateStoryScriptMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScrollText className="w-4 h-4" />}
+                                Generate Story Script
+                            </button>
+                            <button
+                                onClick={() => generateVideoPackageMutation.mutate()}
+                                disabled={generateVideoPackageMutation.isPending}
+                                className="h-10 rounded-xl border border-fuchsia-500/30 bg-fuchsia-500/15 text-sm text-fuchsia-200 disabled:opacity-60 inline-flex items-center justify-center gap-2"
+                            >
+                                {generateVideoPackageMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Film className="w-4 h-4" />}
+                                Turn into Video
                             </button>
                             {linkedStoryId && (
                                 <button

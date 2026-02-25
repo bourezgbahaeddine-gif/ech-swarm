@@ -194,3 +194,43 @@ Data integrity is enforced at DB level for `story_items`:
 
 - exactly one of `article_id` or `draft_id` must be set
 - `link_type` must match the non-null reference (`article` or `draft`)
+
+### Script Studio subsystem (MVP)
+
+Script Studio adds a unified script pipeline under `/api/v1/scripts` with Human-in-the-Loop review:
+
+- `story_script`
+- `video_script`
+- `bulletin_daily`
+- `bulletin_weekly`
+
+Core tables:
+
+- `script_projects`
+  - source scope: `article_id` or `story_id` for story/video types
+  - bulletin types are scope-free and operate on selected news windows
+  - lifecycle: `new -> generating -> ready_for_review -> approved|rejected|archived`
+- `script_outputs`
+  - versioned outputs per project
+  - structured payload (`content_json`) + rendered text (`content_text`)
+  - quality gate issues persisted per version
+
+Generation execution:
+
+- API creation endpoints create `script_projects` then enqueue `script_generate` jobs.
+- Queue routing uses `ai_scripts`.
+- Task idempotency key: `script:{script_id}:v{target_version}`.
+- Worker task `run_script_generate_job` calls `script_studio_service.generate_project_output`.
+- On success:
+  - output version is stored
+  - project transitions to `ready_for_review`
+- On failure:
+  - error is logged via job system (`job_runs` / dead-letter path)
+  - project remains `generating` for operator visibility.
+
+RBAC and audit:
+
+- View/create: newsroom roles (`director`, `editor_chief`, `journalist`, `social_media`, `print_editor`)
+- Approve/reject: chief roles (`editor_chief`, `director`)
+- Reject requires explicit reason
+- Approve/reject actions are recorded in `action_audit_logs` with request/correlation IDs.

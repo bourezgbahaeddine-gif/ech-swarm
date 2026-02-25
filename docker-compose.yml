@@ -40,7 +40,7 @@ services:
     command: >
       celery -A app.queue.celery_app:celery_app worker
       --loglevel=INFO
-      --queues=ai_router,ai_scribe,ai_quality,ai_simulator,ai_msi,ai_links,ai_trends
+      --queues=ai_router,ai_scribe,ai_quality,ai_simulator,ai_msi,ai_links,ai_trends,ai_scripts
       --concurrency=${CELERY_WORKER_CONCURRENCY:-4}
     env_file:
       - .env

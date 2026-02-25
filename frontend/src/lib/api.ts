@@ -493,6 +493,46 @@ export interface StoryDossierResponse {
     };
 }
 
+export interface ScriptOutputRecord {
+    id: number;
+    script_id: number;
+    version: number;
+    format: 'markdown' | 'json' | 'srt' | string;
+    content_json: Record<string, unknown> | null;
+    content_text: string | null;
+    quality_issues: Array<{
+        code: string;
+        message: string;
+        severity: 'info' | 'warn' | 'blocker' | string;
+        details?: Record<string, unknown>;
+    }>;
+    created_at: string | null;
+}
+
+export interface ScriptProjectRecord {
+    id: number;
+    type: 'story_script' | 'video_script' | 'bulletin_daily' | 'bulletin_weekly' | string;
+    status: 'new' | 'generating' | 'ready_for_review' | 'approved' | 'rejected' | 'archived' | string;
+    story_id: number | null;
+    article_id: number | null;
+    title: string;
+    params_json: Record<string, unknown>;
+    created_by: string | null;
+    updated_by: string | null;
+    created_at: string | null;
+    updated_at: string | null;
+    outputs: ScriptOutputRecord[];
+}
+
+export interface ScriptProjectQueuedResponse {
+    script: ScriptProjectRecord;
+    job: {
+        job_id: string;
+        status: string;
+        target_version: number;
+    };
+}
+
 export interface SocialApprovedItem {
     article_id: number;
     title: string;
@@ -673,6 +713,59 @@ export const storiesApi = {
         api.post<{ story_id: number; article_id: number; story_item_id: number }>(`/stories/${storyId}/link/article/${articleId}`, payload || {}),
     dossier: (storyId: number, params?: { timeline_limit?: number }) =>
         api.get<StoryDossierResponse>(`/stories/${storyId}/dossier`, { params }),
+};
+
+export const scriptsApi = {
+    list: (params?: { limit?: number; type?: string; status?: string }) =>
+        api.get<ScriptProjectRecord[]>('/scripts', { params }),
+    get: (scriptId: number) =>
+        api.get<ScriptProjectRecord>(`/scripts/${scriptId}`),
+    outputs: (scriptId: number) =>
+        api.get<ScriptOutputRecord[]>(`/scripts/${scriptId}/outputs`),
+    createFromArticle: (
+        articleId: number,
+        payload: {
+            type: 'story_script' | 'video_script';
+            tone?: string;
+            length_seconds?: number;
+            language?: string;
+            style_constraints?: string[];
+        },
+    ) => api.post<ScriptProjectQueuedResponse>(`/scripts/from-article/${articleId}`, payload),
+    createFromStory: (
+        storyId: number,
+        payload: {
+            type: 'story_script' | 'video_script';
+            tone?: string;
+            length_seconds?: number;
+            language?: string;
+            style_constraints?: string[];
+        },
+    ) => api.post<ScriptProjectQueuedResponse>(`/scripts/from-story/${storyId}`, payload),
+    generateDailyBulletin: (
+        payload: {
+            max_items?: number;
+            duration_minutes?: number;
+            desks?: string[];
+            language?: string;
+            tone?: string;
+        },
+        params?: { geo?: string; category?: string },
+    ) => api.post<ScriptProjectQueuedResponse>('/scripts/bulletin/daily', payload, { params }),
+    generateWeeklyBulletin: (
+        payload: {
+            max_items?: number;
+            duration_minutes?: number;
+            desks?: string[];
+            language?: string;
+            tone?: string;
+        },
+        params?: { geo?: string; category?: string },
+    ) => api.post<ScriptProjectQueuedResponse>('/scripts/bulletin/weekly', payload, { params }),
+    approve: (scriptId: number, payload?: { reason?: string }) =>
+        api.post<ScriptProjectRecord>(`/scripts/${scriptId}/approve`, payload || {}),
+    reject: (scriptId: number, payload: { reason: string }) =>
+        api.post<ScriptProjectRecord>(`/scripts/${scriptId}/reject`, payload),
 };
 
 export const dashboardApi = {

@@ -28,6 +28,7 @@ QUEUE_LIMITS = {
     "ai_msi": settings.queue_depth_limit_msi,
     "ai_links": settings.queue_depth_limit_links,
     "ai_trends": settings.queue_depth_limit_trends,
+    "ai_scripts": settings.queue_depth_limit_scripts,
 }
 
 JOB_TASK_MAP: dict[str, tuple[str, str]] = {
@@ -48,6 +49,7 @@ JOB_TASK_MAP: dict[str, tuple[str, str]] = {
     "trends_scan": ("app.queue.tasks.pipeline_tasks.run_trends_scan", "ai_trends"),
     "published_monitor_scan": ("app.queue.tasks.pipeline_tasks.run_published_monitor_scan", "ai_quality"),
     "document_intel_extract": ("app.queue.tasks.pipeline_tasks.run_document_intel_extract_job", "ai_quality"),
+    "script_generate": ("app.queue.tasks.pipeline_tasks.run_script_generate_job", "ai_scripts"),
 }
 
 

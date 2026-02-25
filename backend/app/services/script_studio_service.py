@@ -11,18 +11,9 @@ from sqlalchemy.orm import selectinload
 
 from app.core.database import async_session
 from app.core.logging import get_logger
-from app.models import (
-    Article,
-    EditorialDraft,
-    NewsCategory,
-    NewsStatus,
-    ScriptOutput,
-    ScriptOutputFormat,
-    ScriptProject,
-    ScriptProjectStatus,
-    ScriptProjectType,
-    Story,
-)
+from app.models.news import Article, EditorialDraft, NewsCategory, NewsStatus
+from app.models.script import ScriptOutput, ScriptOutputFormat, ScriptProject, ScriptProjectStatus, ScriptProjectType
+from app.models.story import Story
 from app.repositories.script_repository import script_repository
 from app.services.ai_service import ai_service
 

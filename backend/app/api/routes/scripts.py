@@ -11,7 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps.rbac import require_roles
 from app.api.envelope import success_envelope
 from app.core.database import get_db
-from app.models import Article, ScriptOutput, ScriptProjectStatus, ScriptProjectType, Story
+from app.models.news import Article
+from app.models.script import ScriptOutput, ScriptProjectStatus, ScriptProjectType
+from app.models.story import Story
 from app.models.user import User, UserRole
 from app.repositories.script_repository import script_repository
 from app.services.audit_service import audit_service

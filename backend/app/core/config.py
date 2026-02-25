@@ -125,6 +125,7 @@ class Settings(BaseSettings):
     queue_depth_limit_msi: int = 80
     queue_depth_limit_links: int = 120
     queue_depth_limit_trends: int = 120
+    queue_depth_limit_scripts: int = 120
 
     # Provider routing / circuit breaker
     provider_health_window_sec: int = 180

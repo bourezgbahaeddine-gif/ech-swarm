@@ -4,7 +4,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models import ScriptOutput, ScriptOutputFormat, ScriptProject, ScriptProjectStatus, ScriptProjectType
+from app.models.script import ScriptOutput, ScriptOutputFormat, ScriptProject, ScriptProjectStatus, ScriptProjectType
 
 
 class ScriptRepository:

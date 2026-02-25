@@ -59,6 +59,13 @@ from app.models.link_intelligence import (
 from app.models.job_queue import JobRun, DeadLetterJob
 from app.models.story import Story, StoryItem, StoryStatus
 from app.models.idempotency import TaskIdempotencyKey
+from app.models.script import (
+    ScriptProject,
+    ScriptProjectType,
+    ScriptProjectStatus,
+    ScriptOutput,
+    ScriptOutputFormat,
+)
 
 __all__ = [
     "Source", "Article", "EditorDecision", "EditorialDraft", "FeedbackLog",
@@ -115,4 +122,9 @@ __all__ = [
     "StoryItem",
     "StoryStatus",
     "TaskIdempotencyKey",
+    "ScriptProject",
+    "ScriptProjectType",
+    "ScriptProjectStatus",
+    "ScriptOutput",
+    "ScriptOutputFormat",
 ]

@@ -24,6 +24,7 @@ from app.queue.celery_app import celery_app
 from app.services.document_intel_job_storage import document_intel_job_storage
 from app.services.document_intel_service import document_intel_service
 from app.services.job_queue_service import job_queue_service
+from app.services.script_studio_service import script_studio_service
 from app.services.task_execution_service import execute_with_task_idempotency
 from app.simulator.service import audience_simulation_service
 
@@ -173,6 +174,21 @@ async def _run_document_intel_extract(job: JobRun) -> dict:
         return result
     finally:
         await document_intel_job_storage.delete_payload(blob_key)
+
+
+async def _run_script_generate(job: JobRun) -> dict:
+    payload = job.payload_json or {}
+    script_id = int(payload.get("script_id") or 0)
+    target_version = int(payload.get("target_version") or 0)
+    if script_id <= 0:
+        raise RuntimeError("script_id_missing")
+    if target_version <= 0:
+        raise RuntimeError("script_target_version_missing")
+    return await script_studio_service.generate_project_output(
+        script_id=script_id,
+        target_version=target_version,
+        actor_username=job.actor_username,
+    )
 
 
 @celery_app.task(
@@ -401,6 +417,35 @@ def run_document_intel_extract_job(self: Task, job_id: str) -> dict:
     except Exception as exc:  # noqa: BLE001
         tb = traceback.format_exc()
         final = int(getattr(self.request, "retries", 0)) >= int(getattr(self, "max_retries", 2))
+        run_async(_fail(job_id, str(exc), tb, final))
+        raise
+    finally:
+        structlog.contextvars.clear_contextvars()
+
+
+@celery_app.task(
+    bind=True,
+    autoretry_for=(TimeoutError, ConnectionError),
+    retry_backoff=True,
+    retry_jitter=True,
+    max_retries=3,
+    soft_time_limit=DEFAULT_TASK_SOFT_LIMIT_SEC,
+    time_limit=DEFAULT_TASK_HARD_LIMIT_SEC,
+)
+def run_script_generate_job(self: Task, job_id: str) -> dict:
+    try:
+        result = run_async(
+            _run_task_with_idempotency(
+                job_id,
+                task_name="script_generate",
+                runner=_run_script_generate,
+            )
+        )
+        run_async(_complete(job_id, result))
+        return {"ok": True}
+    except Exception as exc:  # noqa: BLE001
+        tb = traceback.format_exc()
+        final = int(getattr(self.request, "retries", 0)) >= int(getattr(self, "max_retries", 3))
         run_async(_fail(job_id, str(exc), tb, final))
         raise
     finally:

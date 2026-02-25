@@ -351,3 +351,63 @@ curl -sS "http://127.0.0.1:8000/api/v1/stories/suggest?article_id=<ARTICLE_ID>&l
 ### Resolution
 - Use `POST /api/v1/stories/from-article/<ARTICLE_ID>?reuse=true` for one-click story activation.
 - Then retry suggestions for nearby articles in the same topic window.
+
+---
+
+## 19) Script Studio generation is stuck in `generating`
+### Symptoms
+- `POST /api/v1/scripts/*` succeeds but project remains `generating`.
+- No new rows in `script_outputs`.
+
+### Checks
+```bash
+curl -sS "http://127.0.0.1:8000/api/v1/scripts?limit=20" -H "Authorization: Bearer $TOKEN"
+curl -sS "http://127.0.0.1:8000/api/v1/jobs?job_type=script_generate&limit=20" -H "Authorization: Bearer $TOKEN"
+docker logs ech-worker --since 15m | grep -E "script_generate|script_generation_failed|job_failed"
+```
+
+### Common causes
+- Provider not configured (`GEMINI_API_KEY` / `GROQ_API_KEY`).
+- Queue backpressure on `ai_scripts`.
+- Worker not running latest backend image.
+
+### Resolution
+```bash
+docker compose up -d --force-recreate backend worker
+docker compose run --rm backend alembic upgrade head
+```
+Re-run a single generation and confirm new output version appears in `/api/v1/scripts/{id}/outputs`.
+
+---
+
+## 20) Script generation retries create duplicate outputs
+### Symptoms
+- Multiple identical outputs for same project version after retries.
+
+### Checks
+```bash
+docker logs ech-worker --since 15m | grep -E "task_idempotency_reused_result|script_generate"
+```
+
+### Resolution
+- Ensure payload contains explicit idempotency key format:
+  - `script:{script_id}:v{target_version}`
+- Ensure migration head is applied (includes `task_idempotency_keys` and Script Studio tables).
+- Validate unique constraint:
+  - `uq_script_output_script_version`
+
+---
+
+## 21) Rejecting script fails with 400
+### Symptoms
+- `POST /api/v1/scripts/{id}/reject` returns 400.
+
+### Cause
+- Reject reason is mandatory.
+
+### Resolution
+- Send payload:
+```json
+{"reason":"Factual gap in quotes section; needs source-backed revision."}
+```
+- If using frontend, fill the reject reason field before submit.
