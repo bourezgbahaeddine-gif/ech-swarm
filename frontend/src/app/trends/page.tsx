@@ -24,6 +24,11 @@ const GEO_OPTIONS = [
     { value: 'GLOBAL', label: 'دولي' },
     { value: 'FR', label: 'فرنسا' },
     { value: 'US', label: 'أمريكا' },
+    { value: 'GB', label: 'بريطانيا' },
+    { value: 'CA', label: 'كندا' },
+    { value: 'AE', label: 'الإمارات' },
+    { value: 'SA', label: 'السعودية' },
+    { value: 'QA', label: 'قطر' },
     { value: 'MA', label: 'المغرب' },
     { value: 'TN', label: 'تونس' },
     { value: 'EG', label: 'مصر' },
@@ -36,6 +41,8 @@ const CATEGORY_OPTIONS = [
     { value: 'sports', label: 'رياضة' },
     { value: 'technology', label: 'تكنولوجيا' },
     { value: 'society', label: 'مجتمع' },
+    { value: 'justice', label: 'عدالة' },
+    { value: 'energy', label: 'طاقة' },
     { value: 'international', label: 'دولي' },
     { value: 'general', label: 'عام' },
 ];
@@ -48,6 +55,10 @@ const GEO_LABEL: Record<string, string> = {
     FR: 'فرنسا',
     US: 'أمريكا',
     GB: 'بريطانيا',
+    CA: 'كندا',
+    AE: 'الإمارات',
+    SA: 'السعودية',
+    QA: 'قطر',
     GLOBAL: 'دولي',
 };
 
@@ -57,6 +68,8 @@ const CATEGORY_LABEL: Record<string, string> = {
     sports: 'رياضة',
     technology: 'تكنولوجيا',
     society: 'مجتمع',
+    justice: 'عدالة',
+    energy: 'طاقة',
     international: 'دولي',
     general: 'عام',
 };

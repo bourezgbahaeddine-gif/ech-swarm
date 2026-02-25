@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Optional
 import re
 import math
+from urllib.parse import quote_plus
 
 import aiohttp
 import feedparser
@@ -47,8 +48,14 @@ CATEGORY_KEYWORDS: dict[str, set[str]] = {
         "اقتصاد", "نفط", "غاز", "dinar", "market", "inflation", "économie", "pétrole", "banque",
         "bourse", "emploi", "entreprise", "industrie", "finances",
     },
-    "justice": {"justice", "tribunal", "procès", "avocat", "accusé", "police", "محكمة", "قضاء"},
-    "energy": {"energie", "énergie", "electricite", "électricité", "gaz", "petrole", "pétrole", "طاقة", "نفط"},
+    "justice": {
+        "justice", "tribunal", "procès", "avocat", "accusé", "police", "court", "judge", "lawsuit",
+        "justice", "law", "criminal", "محكمة", "قضاء", "قانون", "قضية", "النيابة",
+    },
+    "energy": {
+        "energie", "énergie", "electricite", "électricité", "gaz", "petrole", "pétrole", "power",
+        "electricity", "renewable", "solar", "nuclear", "طاقة", "نفط", "غاز", "كهرباء", "متجددة",
+    },
     "sports": {"رياضة", "كرة", "match", "football", "league", "olympic", "sport", "fifa", "caf", "ligue", "tennis"},
     "technology": {"ذكاء", "تقنية", "ai", "tech", "startup", "cyber", "robot", "innovation", "digital"},
     "society": {"مجتمع", "education", "school", "health", "crime", "santé", "éducation", "ramadan", "culture", "cinema"},
@@ -63,18 +70,26 @@ GEO_LABELS: dict[str, str] = {
     "FR": "فرنسا",
     "US": "الولايات المتحدة",
     "GB": "المملكة المتحدة",
+    "CA": "كندا",
+    "AE": "الإمارات",
+    "SA": "السعودية",
+    "QA": "قطر",
     "GLOBAL": "دولي",
 }
 
-GEO_NEWS_RSS: dict[str, str] = {
-    "DZ": "https://news.google.com/rss?hl=ar&gl=DZ&ceid=DZ:ar",
-    "FR": "https://news.google.com/rss?hl=fr&gl=FR&ceid=FR:fr",
-    "MA": "https://news.google.com/rss?hl=ar&gl=MA&ceid=MA:ar",
-    "TN": "https://news.google.com/rss?hl=ar&gl=TN&ceid=TN:ar",
-    "EG": "https://news.google.com/rss?hl=ar&gl=EG&ceid=EG:ar",
-    "US": "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en",
-    "GB": "https://news.google.com/rss?hl=en-GB&gl=GB&ceid=GB:en",
-    "GLOBAL": "https://news.google.com/rss?hl=en&gl=US&ceid=US:en",
+GEO_NEWS_LOCALE: dict[str, tuple[str, str]] = {
+    "DZ": ("ar", "ar"),
+    "MA": ("ar", "ar"),
+    "TN": ("ar", "ar"),
+    "EG": ("ar", "ar"),
+    "AE": ("ar", "ar"),
+    "SA": ("ar", "ar"),
+    "QA": ("ar", "ar"),
+    "FR": ("fr", "fr"),
+    "US": ("en-US", "en"),
+    "GB": ("en-GB", "en"),
+    "CA": ("en-CA", "en"),
+    "GLOBAL": ("en", "en"),
 }
 
 # Minimum number of trend signals we try to keep per scan.
@@ -83,6 +98,34 @@ MIN_TRENDS_BY_GEO = {
     "DEFAULT": 6,
 }
 MIN_CONFIDENCE = 0.65
+
+SUPPORTED_GEO_CODES = set(GEO_LABELS.keys())
+
+CATEGORY_QUERY_TERMS: dict[str, str] = {
+    "all": "",
+    "general": "",
+    "politics": "government OR election OR parliament OR سياسة OR حكومة",
+    "economy": "economy OR inflation OR market OR اقتصاد OR تضخم",
+    "sports": "sports OR football OR match OR رياضة OR كرة",
+    "technology": "technology OR AI OR startup OR تقنية OR ذكاء اصطناعي",
+    "society": "society OR education OR health OR مجتمع OR تعليم OR صحة",
+    "international": "world OR international OR دولي OR عالمي",
+    "justice": "justice OR court OR tribunal OR قضاء OR محكمة",
+    "energy": "energy OR oil OR gas OR طاقة OR نفط OR غاز",
+}
+
+YOUTUBE_CATEGORY_ID_BY_CATEGORY: dict[str, str] = {
+    "all": "",
+    "general": "",
+    "politics": "25",       # News & Politics
+    "economy": "25",        # proxied through news/politics bucket
+    "sports": "17",         # Sports
+    "technology": "28",     # Science & Technology
+    "society": "25",        # closest available in trends endpoint
+    "international": "25",  # closest available in trends endpoint
+    "justice": "25",        # closest available in trends endpoint
+    "energy": "25",         # closest available in trends endpoint
+}
 
 WEAK_TERMS = {
     # Arabic
@@ -110,17 +153,20 @@ class TrendRadarAgent:
 
     async def scan(self, geo: str = "DZ", category: str = "all", limit: int = 12, mode: str = "fast") -> list[TrendAlert]:
         """Run a full trend scan cycle."""
-        geo = (geo or "DZ").upper()
+        geo = self._normalize_geo(geo)
         category = (category or "all").lower()
         mode = (mode or "fast").lower()
         limit = max(1, min(limit, 30))
         try:
-            google_trends = await self._fetch_google_trends(geo)
-            youtube_trends = await self._fetch_youtube_trends(geo)
+            google_trends, youtube_trends, geo_news_trends = await asyncio.gather(
+                self._fetch_google_trends(geo),
+                self._fetch_youtube_trends(geo, category),
+                self._fetch_geo_news_trends(geo, category),
+            )
             primary_trends = self._merge_ranked_terms(google_trends, youtube_trends)
             if not primary_trends:
-                # Fallback source to avoid empty scans for non-DZ geos.
-                primary_trends = await self._fetch_geo_news_trends(geo)
+                # Fallback source to avoid empty scans in low-signal geos/categories.
+                primary_trends = geo_news_trends
             if not primary_trends:
                 # Last-resort fallback from internal recently crawled titles.
                 primary_trends = await self._fallback_from_recent_titles(geo)
@@ -137,6 +183,7 @@ class TrendRadarAgent:
                 primary_trends,
                 google_trends,
                 youtube_trends,
+                geo_news_trends,
                 competitor_keywords,
                 rss_bursts,
                 geo=geo,
@@ -220,9 +267,28 @@ class TrendRadarAgent:
             logger.error("trend_scan_error", geo=geo, category=category, error=str(e))
             return []
 
-    async def _fetch_geo_news_trends(self, geo: str) -> list[str]:
+    @staticmethod
+    def _normalize_geo(geo: str | None) -> str:
+        candidate = (geo or "DZ").upper().strip()
+        if candidate in SUPPORTED_GEO_CODES:
+            return candidate
+        return "GLOBAL"
+
+    def _build_geo_news_rss_url(self, *, geo: str, category_filter: str) -> str:
+        normalized_geo = self._normalize_geo(geo)
+        hl, ceid_lang = GEO_NEWS_LOCALE.get(normalized_geo, GEO_NEWS_LOCALE["GLOBAL"])
+        base = (
+            f"https://news.google.com/rss?hl={hl}&gl={normalized_geo if normalized_geo != 'GLOBAL' else 'US'}"
+            f"&ceid={normalized_geo if normalized_geo != 'GLOBAL' else 'US'}:{ceid_lang}"
+        )
+        query = (CATEGORY_QUERY_TERMS.get(category_filter or "all", "") or "").strip()
+        if query:
+            return f"{base}&q={quote_plus(query)}"
+        return base
+
+    async def _fetch_geo_news_trends(self, geo: str, category_filter: str = "all") -> list[str]:
         """Fallback: fetch regional headlines from Google News RSS."""
-        url = GEO_NEWS_RSS.get(geo, GEO_NEWS_RSS["GLOBAL"])
+        url = self._build_geo_news_rss_url(geo=geo, category_filter=category_filter)
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
@@ -353,7 +419,7 @@ class TrendRadarAgent:
         )
         return enabled, (api_key or "").strip()
 
-    async def _fetch_youtube_trends(self, geo: str) -> list[str]:
+    async def _fetch_youtube_trends(self, geo: str, category_filter: str = "all") -> list[str]:
         """Fetch trending YouTube topics via official YouTube Data API."""
         enabled, api_key = await self._youtube_trends_config()
         if not enabled:
@@ -362,7 +428,10 @@ class TrendRadarAgent:
             logger.info("youtube_trends_disabled_no_key", geo=geo)
             return []
 
-        region_code = geo if geo and geo != "GLOBAL" else "US"
+        region_code = self._normalize_geo(geo)
+        if region_code == "GLOBAL":
+            region_code = "US"
+        video_category_id = YOUTUBE_CATEGORY_ID_BY_CATEGORY.get((category_filter or "all").lower(), "")
         try:
             timeout = aiohttp.ClientTimeout(total=15)
             params = {
@@ -372,6 +441,8 @@ class TrendRadarAgent:
                 "maxResults": 50,
                 "key": api_key,
             }
+            if video_category_id:
+                params["videoCategoryId"] = video_category_id
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(YOUTUBE_TRENDING_URL, params=params) as resp:
                     if resp.status != 200:
@@ -476,6 +547,7 @@ class TrendRadarAgent:
         primary_trends: list[str],
         google_trends: list[str],
         youtube_trends: list[str],
+        geo_news_trends: list[str],
         competitor_keywords: list[str],
         rss_bursts: list[str],
         geo: str,
@@ -487,6 +559,7 @@ class TrendRadarAgent:
         all_primary = {normalize_text(item) for item in primary_trends if item}
         google_set = {normalize_text(item) for item in google_trends if item}
         youtube_set = {normalize_text(item) for item in youtube_trends if item}
+        geo_news_set = {normalize_text(item) for item in geo_news_trends if item}
         competitor_set = set(competitor_keywords)
         burst_set = set(rss_bursts)
 
@@ -503,6 +576,8 @@ class TrendRadarAgent:
                 sources.append("google_trends")
             if trend in youtube_set:
                 sources.append("youtube_trending")
+            if trend in geo_news_set:
+                sources.append("geo_news_rss")
             trend_terms = self._extract_candidate_terms(trend)
             trend_terms.append(trend)
 
@@ -568,6 +643,8 @@ class TrendRadarAgent:
                 confidence += 0.25
             if "youtube_trending" in signals:
                 confidence += 0.20
+            if "geo_news_rss" in signals:
+                confidence += 0.15
             if "competitors" in signals:
                 confidence += 0.20
             if "rss_burst" in signals:
