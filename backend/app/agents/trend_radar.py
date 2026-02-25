@@ -21,12 +21,14 @@ from app.core.logging import get_logger
 from app.schemas import TrendAlert
 from app.services.ai_service import ai_service
 from app.services.cache_service import cache_service
+from app.services.settings_service import settings_service
 from app.utils.hashing import normalize_text
 
 logger = get_logger("agent.trend_radar")
 settings = get_settings()
 
 GOOGLE_TRENDS_URL = "https://trends.google.com/trends/trendingsearches/daily/rss"
+YOUTUBE_TRENDING_URL = "https://www.googleapis.com/youtube/v3/videos"
 
 COMPETITOR_FEEDS = [
     "https://www.echoroukonline.com/feed/",
@@ -114,12 +116,14 @@ class TrendRadarAgent:
         limit = max(1, min(limit, 30))
         try:
             google_trends = await self._fetch_google_trends(geo)
-            if not google_trends:
+            youtube_trends = await self._fetch_youtube_trends(geo)
+            primary_trends = self._merge_ranked_terms(google_trends, youtube_trends)
+            if not primary_trends:
                 # Fallback source to avoid empty scans for non-DZ geos.
-                google_trends = await self._fetch_geo_news_trends(geo)
-            if not google_trends:
+                primary_trends = await self._fetch_geo_news_trends(geo)
+            if not primary_trends:
                 # Last-resort fallback from internal recently crawled titles.
-                google_trends = await self._fallback_from_recent_titles(geo)
+                primary_trends = await self._fallback_from_recent_titles(geo)
             # Important: competitor feeds + RSS bursts are currently Algeria-centric.
             # We must not pollute non-DZ scans with DZ signals.
             if geo == "DZ":
@@ -130,7 +134,9 @@ class TrendRadarAgent:
                 rss_bursts = []
 
             verified_trends = self._cross_validate(
+                primary_trends,
                 google_trends,
+                youtube_trends,
                 competitor_keywords,
                 rss_bursts,
                 geo=geo,
@@ -145,7 +151,7 @@ class TrendRadarAgent:
             if len(verified_trends) < target_min:
                 verified_trends = self._expand_geo_fallback(
                     verified_trends=verified_trends,
-                    google_trends=google_trends,
+                    primary_trends=primary_trends,
                     geo=geo,
                     category_filter=category,
                     target_min=target_min,
@@ -287,13 +293,13 @@ class TrendRadarAgent:
     def _expand_geo_fallback(
         self,
         verified_trends: list[dict],
-        google_trends: list[str],
+        primary_trends: list[str],
         geo: str,
         category_filter: str,
         target_min: int,
     ) -> list[dict]:
         existing = {normalize_text(v["keyword"]) for v in verified_trends}
-        for trend in google_trends:
+        for trend in primary_trends:
             raw = trend.strip()
             norm = normalize_text(raw)
             if not norm or norm in existing or self._is_weak_term(norm):
@@ -307,7 +313,7 @@ class TrendRadarAgent:
             verified_trends.append(
                 {
                     "keyword": raw,
-                    "source_signals": ["google_trends", "geo_fallback"],
+                    "source_signals": ["primary_trends", "geo_fallback"],
                     "strength": 5,
                     "confidence": 0.58 if geo == "DZ" else 0.55,
                     "interaction_score": 0.0,
@@ -334,6 +340,97 @@ class TrendRadarAgent:
         except Exception as e:
             logger.warning("google_trends_error", geo=geo, error=str(e))
             return []
+
+    async def _youtube_trends_config(self) -> tuple[bool, str]:
+        enabled_raw = await settings_service.get_value(
+            "YOUTUBE_TRENDS_ENABLED",
+            str(settings.youtube_trends_enabled).lower(),
+        )
+        enabled = str(enabled_raw or "").strip().lower() in {"1", "true", "yes", "on"}
+        api_key = await settings_service.get_value(
+            "YOUTUBE_DATA_API_KEY",
+            settings.youtube_data_api_key or "",
+        )
+        return enabled, (api_key or "").strip()
+
+    async def _fetch_youtube_trends(self, geo: str) -> list[str]:
+        """Fetch trending YouTube topics via official YouTube Data API."""
+        enabled, api_key = await self._youtube_trends_config()
+        if not enabled:
+            return []
+        if not api_key:
+            logger.info("youtube_trends_disabled_no_key", geo=geo)
+            return []
+
+        region_code = geo if geo and geo != "GLOBAL" else "US"
+        try:
+            timeout = aiohttp.ClientTimeout(total=15)
+            params = {
+                "part": "snippet",
+                "chart": "mostPopular",
+                "regionCode": region_code,
+                "maxResults": 50,
+                "key": api_key,
+            }
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(YOUTUBE_TRENDING_URL, params=params) as resp:
+                    if resp.status != 200:
+                        body = (await resp.text())[:500]
+                        logger.warning("youtube_trends_error", geo=geo, status=resp.status, body=body)
+                        return []
+                    data = await resp.json()
+
+            items = data.get("items") or []
+            terms_counter: Counter[str] = Counter()
+            for item in items:
+                snippet = item.get("snippet") or {}
+                title = normalize_text(snippet.get("title", ""))
+                if not title:
+                    continue
+                for term in self._extract_candidate_terms(title):
+                    terms_counter[term] += 1
+                for entity in self._extract_named_entities(snippet.get("title", "")):
+                    terms_counter[entity] += 3
+
+            ranked = sorted(
+                terms_counter.items(),
+                key=lambda kv: (
+                    0 if self._looks_like_entity(kv[0]) else 1,
+                    0 if " " in kv[0] else 1,
+                    -kv[1],
+                    -len(kv[0]),
+                ),
+            )
+
+            out: list[str] = []
+            for term, freq in ranked:
+                if self._is_weak_term(term):
+                    continue
+                if (not self._looks_like_entity(term)) and " " not in term and freq < 2:
+                    continue
+                out.append(term)
+                if len(out) >= 40:
+                    break
+
+            if out:
+                logger.info("youtube_trends_fetched", geo=geo, terms=len(out))
+            return out
+        except Exception as e:  # noqa: BLE001
+            logger.warning("youtube_trends_exception", geo=geo, error=str(e))
+            return []
+
+    @staticmethod
+    def _merge_ranked_terms(*lists: list[str]) -> list[str]:
+        merged: list[str] = []
+        seen: set[str] = set()
+        for source in lists:
+            for term in source:
+                normalized = normalize_text(term)
+                if not normalized or normalized in seen:
+                    continue
+                seen.add(normalized)
+                merged.append(term)
+        return merged
 
     async def _fetch_competitor_keywords(self) -> list[str]:
         """Extract keywords from competitor headlines."""
@@ -376,7 +473,9 @@ class TrendRadarAgent:
 
     def _cross_validate(
         self,
+        primary_trends: list[str],
         google_trends: list[str],
+        youtube_trends: list[str],
         competitor_keywords: list[str],
         rss_bursts: list[str],
         geo: str,
@@ -385,20 +484,25 @@ class TrendRadarAgent:
         """A trend is verified if it appears in at least 2 different sources."""
         verified: list[dict] = []
 
-        all_google = set(google_trends)
+        all_primary = {normalize_text(item) for item in primary_trends if item}
+        google_set = {normalize_text(item) for item in google_trends if item}
+        youtube_set = {normalize_text(item) for item in youtube_trends if item}
         competitor_set = set(competitor_keywords)
         burst_set = set(rss_bursts)
 
-        for trend in all_google:
+        for trend in all_primary:
             if not trend or len(trend) < 3:
                 continue
-            trend = normalize_text(trend)
             if self._is_weak_term(trend):
                 continue
             detected_geo = self._detect_geography(trend, geo)
             if not self._is_geo_compatible(scan_geo=geo, detected_geo=detected_geo):
                 continue
-            sources = ["google_trends"]
+            sources: list[str] = []
+            if trend in google_set:
+                sources.append("google_trends")
+            if trend in youtube_set:
+                sources.append("youtube_trending")
             trend_terms = self._extract_candidate_terms(trend)
             trend_terms.append(trend)
 
@@ -462,6 +566,8 @@ class TrendRadarAgent:
             confidence = 0.30
             if "google_trends" in signals:
                 confidence += 0.25
+            if "youtube_trending" in signals:
+                confidence += 0.20
             if "competitors" in signals:
                 confidence += 0.20
             if "rss_burst" in signals:

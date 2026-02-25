@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     gemini_model_flash: str = "gemini-2.5-flash"
     gemini_model_pro: str = "gemini-2.5-pro"
     groq_api_key: str = ""
+    youtube_data_api_key: str = ""
+    youtube_trends_enabled: bool = False
 
     # Notifications
     telegram_bot_token: str = ""

@@ -7,6 +7,7 @@ Admin endpoints for managing external API credentials/config.
 from datetime import datetime
 from typing import Optional
 
+import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -165,6 +166,8 @@ async def import_from_env(
         "GEMINI_MODEL_FLASH": settings.gemini_model_flash,
         "GEMINI_MODEL_PRO": settings.gemini_model_pro,
         "GROQ_API_KEY": settings.groq_api_key,
+        "YOUTUBE_DATA_API_KEY": settings.youtube_data_api_key,
+        "YOUTUBE_TRENDS_ENABLED": str(settings.youtube_trends_enabled).lower(),
         "TELEGRAM_BOT_TOKEN": settings.telegram_bot_token,
         "TELEGRAM_CHANNEL_EDITORS": settings.telegram_channel_editors,
         "TELEGRAM_CHANNEL_ALERTS": settings.telegram_channel_alerts,
@@ -241,6 +244,31 @@ async def test_setting(
     if key == "GROQ_API_KEY":
         groq = await ai_service._get_groq()
         return {"ok": groq is not None}
+    if key == "YOUTUBE_DATA_API_KEY":
+        api_key = await settings_service.get_value("YOUTUBE_DATA_API_KEY", settings.youtube_data_api_key or "")
+        if not api_key:
+            return {"ok": False, "missing": "YOUTUBE_DATA_API_KEY"}
+        url = "https://www.googleapis.com/youtube/v3/videos"
+        params = {
+            "part": "id",
+            "chart": "mostPopular",
+            "regionCode": "US",
+            "maxResults": 1,
+            "key": api_key,
+        }
+        try:
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url, params=params) as resp:
+                    if resp.status != 200:
+                        return {"ok": False, "status": resp.status}
+                    payload = await resp.json()
+                    return {"ok": bool(payload.get("items"))}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+    if key == "YOUTUBE_TRENDS_ENABLED":
+        enabled = await settings_service.get_value("YOUTUBE_TRENDS_ENABLED", str(settings.youtube_trends_enabled).lower())
+        return {"ok": str(enabled).strip().lower() in {"1", "true", "yes", "on"}}
     if key in ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHANNEL_EDITORS", "TELEGRAM_CHANNEL_ALERTS"]:
         ok = await notification_service.send_telegram("✅ اختبار اتصال من لوحة المدير")
         return {"ok": ok}

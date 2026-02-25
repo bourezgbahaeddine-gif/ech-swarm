@@ -20,6 +20,8 @@ const SETTINGS: SettingRow[] = [
     { key: 'GEMINI_MODEL_FLASH', label: 'Gemini Flash Model', description: 'اسم نموذج Gemini Flash', is_secret: false, group: 'ai' },
     { key: 'GEMINI_MODEL_PRO', label: 'Gemini Pro Model', description: 'اسم نموذج Gemini Pro', is_secret: false, group: 'ai' },
     { key: 'GROQ_API_KEY', label: 'Groq API Key', description: 'مفتاح Groq', is_secret: true, group: 'ai' },
+    { key: 'YOUTUBE_DATA_API_KEY', label: 'YouTube Data API Key', description: 'مفتاح YouTube Data API v3', is_secret: true, group: 'ai' },
+    { key: 'YOUTUBE_TRENDS_ENABLED', label: 'Enable YouTube Trends', description: 'تفعيل مصدر YouTube للتراند (true/false)', is_secret: false, group: 'ai' },
 
     { key: 'TELEGRAM_BOT_TOKEN', label: 'Telegram Bot Token', description: 'مفتاح بوت تيليجرام', is_secret: true, group: 'notifications' },
     { key: 'TELEGRAM_CHANNEL_EDITORS', label: 'Telegram Editors Channel', description: 'قناة المحررين', is_secret: false, group: 'notifications' },

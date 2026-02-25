@@ -279,7 +279,7 @@ export default function TrendsPage() {
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {[
-                        { step: '1', title: 'مسح المصادر', desc: 'Google Trends + RSS + منافسين', color: 'text-blue-400' },
+                        { step: '1', title: 'مسح المصادر', desc: 'Google Trends + YouTube + RSS + منافسين', color: 'text-blue-400' },
                         { step: '2', title: 'تحقق تقاطعي', desc: 'يقبل فقط الترند المؤكد من مصدرين+', color: 'text-purple-400' },
                         { step: '3', title: 'تحليل تحريري', desc: 'زوايا نشر + سبب الصعود + أرشيف', color: 'text-emerald-400' },
                     ].map(({ step, title, desc, color }) => (
