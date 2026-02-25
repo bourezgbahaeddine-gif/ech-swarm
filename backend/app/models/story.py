@@ -3,7 +3,18 @@ from __future__ import annotations
 import enum
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -52,8 +63,16 @@ class StoryItem(Base):
     draft = relationship("EditorialDraft")
 
     __table_args__ = (
+        CheckConstraint(
+            "((article_id IS NOT NULL AND draft_id IS NULL) OR (article_id IS NULL AND draft_id IS NOT NULL))",
+            name="ck_story_items_exactly_one_ref",
+        ),
+        CheckConstraint(
+            "((link_type = 'article' AND article_id IS NOT NULL AND draft_id IS NULL) "
+            "OR (link_type = 'draft' AND draft_id IS NOT NULL AND article_id IS NULL))",
+            name="ck_story_items_link_type_match",
+        ),
         UniqueConstraint("story_id", "article_id", name="uq_story_item_story_article"),
         UniqueConstraint("story_id", "draft_id", name="uq_story_item_story_draft"),
         Index("ix_story_items_story_link_type", "story_id", "link_type"),
     )
-

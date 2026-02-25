@@ -283,3 +283,50 @@ Inspect backend logs for:
 ### Resolution
 - Provide `notes` in request payload.
 - In UI, fill the decision note field before submitting these actions.
+
+---
+
+## 16) Story linking fails with integrity check (`story_items`)
+### Symptoms
+- `409/500` on `/api/v1/stories/{id}/link/*`.
+- DB error mentions:
+  - `ck_story_items_exactly_one_ref`
+  - `ck_story_items_link_type_match`
+
+### Cause
+- Invalid story item payload reached DB:
+  - both `article_id` and `draft_id` set, or both null
+  - `link_type` does not match selected reference.
+
+### Checks
+```bash
+docker exec -i ech-postgres psql -U echorouk -d echorouk_db -c "
+SELECT id, story_id, article_id, draft_id, link_type
+FROM story_items
+ORDER BY id DESC
+LIMIT 30;
+"
+```
+
+### Resolution
+- For article link: set only `article_id` with `link_type='article'`.
+- For draft link: set only `draft_id` with `link_type='draft'`.
+
+---
+
+## 17) Transition conflict (`transition_conflict`) during editorial actions
+### Symptoms
+- `409` with error code `transition_conflict`.
+- Message: item is being updated or state changed before transition.
+
+### Cause
+- Concurrent update race between user action and background/editorial flow.
+- Transition now uses row lock (`SELECT ... FOR UPDATE`) + expected-current-state guard.
+
+### Resolution
+- Refresh the workspace item and retry once.
+- If conflict repeats, inspect recent audit/events for that article before reattempt.
+
+### Note on downgrade
+- Migration `20260225_story_idempotency_audit` introduces enum `story_status`.
+- Downgrade drops enum with `checkfirst=True`; if another table uses the same enum later, drop may fail by design and should be handled manually.

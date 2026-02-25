@@ -593,13 +593,15 @@ async def _transition_article_status(
     reason: str | None = None,
     details: dict[str, Any] | None = None,
 ) -> None:
-    current_status = article.status or NewsStatus.NEW
-    state_transition_service.assert_transition(
-        current=current_status,
+    expected_status = article.status or NewsStatus.NEW
+    locked_article, current_status = await state_transition_service.transition_article(
+        db=db,
+        article_id=article.id,
         target=target_status,
+        expected_current=expected_status,
         entity=f"article:{article.id}",
     )
-    article.status = target_status
+    article.status = locked_article.status
     await audit_service.log_action(
         db,
         action=action,
