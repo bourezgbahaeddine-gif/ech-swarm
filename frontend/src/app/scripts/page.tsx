@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2, RefreshCw, ScrollText, CheckCircle2, XCircle } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
@@ -13,6 +13,20 @@ type ScriptTypeFilter = 'all' | 'story_script' | 'video_script' | 'bulletin_dail
 type ScriptStatusFilter = 'all' | 'new' | 'generating' | 'ready_for_review' | 'approved' | 'rejected' | 'archived';
 
 export default function ScriptsPage() {
+    return (
+        <Suspense
+            fallback={
+                <div className="space-y-4" dir="rtl">
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">جاري تحميل استوديو السكربت...</div>
+                </div>
+            }
+        >
+            <ScriptsPageClient />
+        </Suspense>
+    );
+}
+
+function ScriptsPageClient() {
     const searchParams = useSearchParams();
     const queryClient = useQueryClient();
     const { user } = useAuth();
