@@ -12,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps.rbac import require_roles
 from app.api.envelope import success_envelope
 from app.core.database import get_db
-from app.models import Article, EditorialDraft, Story, StoryStatus, User, UserRole
+from app.models import Article, EditorialDraft, Story, StoryStatus
+from app.models.user import User, UserRole
 from app.repositories.story_repository import story_repository
 from app.services.audit_service import audit_service
 

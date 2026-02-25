@@ -17,7 +17,14 @@ depends_on = None
 
 
 def upgrade() -> None:
-    story_status = postgresql.ENUM("open", "monitoring", "closed", "archived", name="story_status")
+    story_status = postgresql.ENUM(
+        "open",
+        "monitoring",
+        "closed",
+        "archived",
+        name="story_status",
+        create_type=False,
+    )
     story_status.create(op.get_bind(), checkfirst=True)
 
     op.create_table(
@@ -28,7 +35,7 @@ def upgrade() -> None:
         sa.Column("summary", sa.Text(), nullable=True),
         sa.Column("category", sa.String(length=80), nullable=True),
         sa.Column("geography", sa.String(length=24), nullable=True),
-        sa.Column("status", sa.Enum("open", "monitoring", "closed", "archived", name="story_status", create_type=False), nullable=False, server_default="open"),
+        sa.Column("status", story_status, nullable=False, server_default="open"),
         sa.Column("priority", sa.Integer(), nullable=False, server_default="5"),
         sa.Column("created_by", sa.String(length=128), nullable=True),
         sa.Column("updated_by", sa.String(length=128), nullable=True),
@@ -141,6 +148,12 @@ def downgrade() -> None:
     op.drop_index("ix_stories_story_key", table_name="stories")
     op.drop_table("stories")
 
-    story_status = postgresql.ENUM("open", "monitoring", "closed", "archived", name="story_status")
+    story_status = postgresql.ENUM(
+        "open",
+        "monitoring",
+        "closed",
+        "archived",
+        name="story_status",
+        create_type=False,
+    )
     story_status.drop(op.get_bind(), checkfirst=True)
-
