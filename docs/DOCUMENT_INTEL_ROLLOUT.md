@@ -34,6 +34,7 @@
   - For large files, system skips Docling and uses `pypdf` directly.
   - OCR controls:
     - `ECHOROUK_OS_DOCUMENT_INTEL_OCR_ENABLED` (default `true`)
+    - `ECHOROUK_OS_DOCUMENT_INTEL_OCR_FORCE` (default `false`)
     - `ECHOROUK_OS_DOCUMENT_INTEL_OCR_TIMEOUT_SECONDS` (default `180`)
     - `ECHOROUK_OS_DOCUMENT_INTEL_OCR_MAX_PAGES` (default `24`)
     - `ECHOROUK_OS_DOCUMENT_INTEL_OCR_DPI` (default `220`)

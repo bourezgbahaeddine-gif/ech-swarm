@@ -121,6 +121,7 @@ class DocumentIntelService:
         self.docling_timeout_seconds = max(10, int(settings.document_intel_docling_timeout_seconds))
         self.docling_max_bytes = max(1, int(settings.document_intel_docling_max_size_mb)) * 1024 * 1024
         self.ocr_enabled = bool(settings.document_intel_ocr_enabled)
+        self.ocr_force = bool(settings.document_intel_ocr_force)
         self.ocr_timeout_seconds = max(30, int(settings.document_intel_ocr_timeout_seconds))
         self.ocr_max_pages = max(1, int(settings.document_intel_ocr_max_pages))
         self.ocr_dpi = max(120, int(settings.document_intel_ocr_dpi))
@@ -417,6 +418,8 @@ print(json.dumps({"text": text, "markdown": markdown, "pages": pages}, ensure_as
     def _should_run_ocr(self, normalized_text: str, paragraphs: list[str]) -> bool:
         if not self.ocr_enabled:
             return False
+        if self.ocr_force:
+            return True
         if not normalized_text:
             return True
         if len(normalized_text) < self.ocr_trigger_min_chars:
