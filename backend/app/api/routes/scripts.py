@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -176,7 +176,7 @@ async def list_script_projects(
 async def create_script_from_article(
     article_id: int,
     payload: ScriptFromArticleRequest,
-    reuse: bool = Query(default=False),
+    reuse: Annotated[bool, Query()] = False,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(*VIEW_ROLES)),
 ):
@@ -235,7 +235,7 @@ async def create_script_from_article(
 async def create_script_from_story(
     story_id: int,
     payload: ScriptFromStoryRequest,
-    reuse: bool = Query(default=False),
+    reuse: Annotated[bool, Query()] = False,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(*VIEW_ROLES)),
 ):
