@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import desc, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -16,6 +17,7 @@ from app.models.script import ScriptOutput, ScriptOutputFormat, ScriptProject, S
 from app.models.story import Story
 from app.repositories.script_repository import script_repository
 from app.services.ai_service import ai_service
+from app.services.audit_service import audit_service
 
 logger = get_logger("services.script_studio")
 
@@ -284,15 +286,58 @@ class ScriptStudioService:
                     params=project.params_json if isinstance(project.params_json, dict) else {},
                 )
 
-                created_output = await script_repository.create_output(
-                    db,
-                    script_id=script_id,
-                    version=target_version,
-                    content_json=output_json,
-                    content_text=self._render_text_output(project.type, output_json),
-                    output_format=ScriptOutputFormat.json,
-                    quality_issues_json=quality["issues"],
+                recheck_output_row = await db.execute(
+                    select(ScriptOutput).where(ScriptOutput.script_id == script_id, ScriptOutput.version == target_version)
                 )
+                recheck_output = recheck_output_row.scalar_one_or_none()
+                if recheck_output:
+                    project.status = ScriptProjectStatus.ready_for_review
+                    project.updated_by = actor_value
+                    await db.commit()
+                    return {
+                        "script_id": script_id,
+                        "status": project.status.value,
+                        "version": recheck_output.version,
+                        "reused": True,
+                    }
+
+                try:
+                    created_output = await script_repository.create_output(
+                        db,
+                        script_id=script_id,
+                        version=target_version,
+                        content_json=output_json,
+                        content_text=self._render_text_output(project.type, output_json),
+                        output_format=ScriptOutputFormat.json,
+                        quality_issues_json=quality["issues"],
+                    )
+                except IntegrityError as exc:
+                    await db.rollback()
+                    logger.warning(
+                        "script_output_version_race",
+                        script_id=script_id,
+                        target_version=target_version,
+                        error=exc.__class__.__name__,
+                    )
+                    race_output_row = await db.execute(
+                        select(ScriptOutput).where(ScriptOutput.script_id == script_id, ScriptOutput.version == target_version)
+                    )
+                    race_output = race_output_row.scalar_one_or_none()
+                    if race_output:
+                        project = await script_repository.get_project_by_id(db, script_id)
+                        if not project:
+                            raise RuntimeError("script_project_not_found")
+                        project.status = ScriptProjectStatus.ready_for_review
+                        project.updated_by = actor_value
+                        await db.commit()
+                        return {
+                            "script_id": script_id,
+                            "status": project.status.value,
+                            "version": race_output.version,
+                            "reused": True,
+                        }
+                    raise
+
                 project.status = ScriptProjectStatus.ready_for_review
                 project.updated_by = actor_value
                 await db.commit()
@@ -305,13 +350,32 @@ class ScriptStudioService:
                     "issues_count": len(quality["issues"]),
                     "reused": False,
                 }
-        except Exception:
-            logger.exception("script_generation_failed", script_id=script_id)
+        except Exception as exc:
+            logger.exception(
+                "script_generation_failed",
+                script_id=script_id,
+                target_version=target_version,
+                actor_username=actor_value,
+            )
             async with async_session() as db:
                 project = await script_repository.get_project_by_id(db, script_id)
                 if project:
-                    project.status = ScriptProjectStatus.generating
+                    project.status = ScriptProjectStatus.failed
                     project.updated_by = actor_value
+                    await audit_service.log_action(
+                        db,
+                        action="script_generation_failed",
+                        entity_type="script_project",
+                        entity_id=project.id,
+                        actor=None,
+                        from_state=ScriptProjectStatus.generating.value,
+                        to_state=ScriptProjectStatus.failed.value,
+                        details={
+                            "error": str(exc),
+                            "target_version": target_version,
+                            "actor_username": actor_value,
+                        },
+                    )
                     await db.commit()
             raise
 

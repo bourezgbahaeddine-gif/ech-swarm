@@ -96,5 +96,41 @@ class ScriptRepository:
         )
         return list(rows.scalars().all())
 
+    async def get_latest_project_by_source(
+        self,
+        db: AsyncSession,
+        *,
+        project_type: ScriptProjectType,
+        article_id: int | None = None,
+        story_id: int | None = None,
+    ) -> ScriptProject | None:
+        if article_id is None and story_id is None:
+            return None
+
+        stmt = (
+            select(ScriptProject)
+            .options(selectinload(ScriptProject.outputs))
+            .where(
+                ScriptProject.type == project_type,
+                ScriptProject.status.in_(
+                    (
+                        ScriptProjectStatus.new,
+                        ScriptProjectStatus.generating,
+                        ScriptProjectStatus.ready_for_review,
+                        ScriptProjectStatus.approved,
+                    )
+                ),
+            )
+            .order_by(desc(ScriptProject.updated_at), desc(ScriptProject.id))
+            .limit(1)
+        )
+        if article_id is not None:
+            stmt = stmt.where(ScriptProject.article_id == article_id)
+        if story_id is not None:
+            stmt = stmt.where(ScriptProject.story_id == story_id)
+
+        row = await db.execute(stmt)
+        return row.scalar_one_or_none()
+
 
 script_repository = ScriptRepository()

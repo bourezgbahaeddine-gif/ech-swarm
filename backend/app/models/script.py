@@ -31,6 +31,7 @@ class ScriptProjectType(str, enum.Enum):
 class ScriptProjectStatus(str, enum.Enum):
     new = "new"
     generating = "generating"
+    failed = "failed"
     ready_for_review = "ready_for_review"
     approved = "approved"
     rejected = "rejected"

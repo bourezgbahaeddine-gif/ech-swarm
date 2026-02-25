@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 
 from app.api.routes import scripts as scripts_route
 from app.models.script import ScriptProjectStatus, ScriptProjectType
@@ -39,10 +40,17 @@ class _SequenceDb:
     async def commit(self):
         return None
 
+    async def rollback(self):
+        return None
+
 
 def _decode_data(response):
     payload = json.loads(response.body.decode("utf-8"))
     return payload["data"]
+
+
+def _decode_payload(response):
+    return json.loads(response.body.decode("utf-8"))
 
 
 @pytest.mark.asyncio
@@ -100,6 +108,53 @@ async def test_create_script_from_article_smoke(monkeypatch):
     assert data["script"]["id"] == 31
     assert data["script"]["article_id"] == 77
     assert data["job"]["target_version"] == 1
+
+
+@pytest.mark.asyncio
+async def test_reuse_existing_script_project(monkeypatch):
+    article = SimpleNamespace(id=77, title_ar="عنوان", original_title="Story title")
+    now = datetime.now(timezone.utc)
+    reused_project = SimpleNamespace(
+        id=99,
+        type=ScriptProjectType.story_script,
+        status=ScriptProjectStatus.ready_for_review,
+        story_id=None,
+        article_id=77,
+        title="Story Script - عنوان",
+        params_json={},
+        created_by="editor",
+        updated_by="editor",
+        created_at=now,
+        updated_at=now,
+        outputs=[],
+    )
+
+    async def _never_called(*_args, **_kwargs):
+        raise AssertionError("create/queue should not run in reuse mode")
+
+    async def _fake_latest(*_args, **_kwargs):
+        return reused_project
+
+    monkeypatch.setattr(scripts_route.script_repository, "get_latest_project_by_source", _fake_latest)
+    monkeypatch.setattr(scripts_route.script_repository, "create_project", _never_called)
+    monkeypatch.setattr(scripts_route, "_queue_script_generation", _never_called)
+
+    db = _SequenceDb([article])
+    current_user = SimpleNamespace(id=1, username="editor", role=UserRole.journalist)
+    payload = scripts_route.ScriptFromArticleRequest(type="story_script", tone="neutral", length_seconds=90, language="ar")
+
+    response = await scripts_route.create_script_from_article(
+        article_id=77,
+        payload=payload,
+        reuse=True,
+        db=db,
+        current_user=current_user,
+    )
+    body = _decode_payload(response)
+
+    assert body["data"]["script"]["id"] == 99
+    assert body["data"]["job"] is None
+    assert body["meta"]["reused"] is True
 
 
 @pytest.mark.asyncio
@@ -210,3 +265,123 @@ async def test_approve_requires_role_and_reason_on_reject():
             current_user=SimpleNamespace(id=2, username="chief", role=UserRole.editor_chief),
         )
     assert reject_exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_script_status_failed_on_exception(monkeypatch):
+    now = datetime.now(timezone.utc)
+    project = SimpleNamespace(
+        id=123,
+        type=ScriptProjectType.story_script,
+        status=ScriptProjectStatus.new,
+        params_json={"tone": "neutral", "language": "ar"},
+        updated_by=None,
+        created_at=now,
+        updated_at=now,
+        outputs=[],
+    )
+    shared_db = _SequenceDb([None, None])
+
+    class _SessionCtx:
+        async def __aenter__(self):
+            return shared_db
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    def _fake_async_session():
+        return _SessionCtx()
+
+    async def _fake_get_project_by_id(*_args, **_kwargs):
+        return project
+
+    async def _fake_context(*_args, **_kwargs):
+        return {"scope": "article"}
+
+    async def _raise_generate_json(*_args, **_kwargs):
+        raise RuntimeError("provider_down")
+
+    async def _noop_audit(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr("app.services.script_studio_service.async_session", _fake_async_session)
+    monkeypatch.setattr("app.services.script_studio_service.script_repository.get_project_by_id", _fake_get_project_by_id)
+    monkeypatch.setattr("app.services.script_studio_service.audit_service.log_action", _noop_audit)
+    monkeypatch.setattr(script_studio_service, "build_input_context", _fake_context)
+    monkeypatch.setattr("app.services.script_studio_service.ai_service.generate_json", _raise_generate_json)
+
+    with pytest.raises(RuntimeError):
+        await script_studio_service.generate_project_output(
+            script_id=123,
+            target_version=1,
+            actor_username="worker",
+        )
+
+    assert project.status == ScriptProjectStatus.failed
+    assert project.updated_by == "worker"
+
+
+@pytest.mark.asyncio
+async def test_version_race_returns_reused_not_error(monkeypatch):
+    now = datetime.now(timezone.utc)
+    project = SimpleNamespace(
+        id=321,
+        type=ScriptProjectType.story_script,
+        status=ScriptProjectStatus.new,
+        params_json={"tone": "neutral", "language": "ar"},
+        updated_by=None,
+        created_at=now,
+        updated_at=now,
+        outputs=[],
+    )
+    existing_output = SimpleNamespace(id=11, script_id=321, version=2)
+    shared_db = _SequenceDb([None, None, existing_output])
+
+    class _SessionCtx:
+        async def __aenter__(self):
+            return shared_db
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    def _fake_async_session():
+        return _SessionCtx()
+
+    async def _fake_get_project_by_id(*_args, **_kwargs):
+        return project
+
+    async def _fake_context(*_args, **_kwargs):
+        return {"scope": "article"}
+
+    async def _fake_generate_json(*_args, **_kwargs):
+        return {
+            "hook": "h",
+            "context": "c",
+            "what_happened": "w",
+            "why_it_matters": "m",
+            "known_unknown": "k",
+            "quotes": [],
+            "timeline": [],
+            "close": "z",
+            "social_short": "s",
+            "anchor_notes": "n",
+        }
+
+    async def _raise_integrity(*_args, **_kwargs):
+        raise IntegrityError("insert", {}, Exception("duplicate"))
+
+    monkeypatch.setattr("app.services.script_studio_service.async_session", _fake_async_session)
+    monkeypatch.setattr("app.services.script_studio_service.script_repository.get_project_by_id", _fake_get_project_by_id)
+    monkeypatch.setattr(script_studio_service, "build_input_context", _fake_context)
+    monkeypatch.setattr("app.services.script_studio_service.ai_service.generate_json", _fake_generate_json)
+    monkeypatch.setattr("app.services.script_studio_service.script_repository.create_output", _raise_integrity)
+
+    result = await script_studio_service.generate_project_output(
+        script_id=321,
+        target_version=2,
+        actor_username="worker",
+    )
+
+    assert result["reused"] is True
+    assert result["version"] == 2
+    assert project.status == ScriptProjectStatus.ready_for_review

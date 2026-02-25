@@ -176,6 +176,7 @@ async def list_script_projects(
 async def create_script_from_article(
     article_id: int,
     payload: ScriptFromArticleRequest,
+    reuse: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(*VIEW_ROLES)),
 ):
@@ -187,6 +188,18 @@ async def create_script_from_article(
     project_type = _parse_project_type(payload.type)
     if project_type not in {ScriptProjectType.story_script, ScriptProjectType.video_script}:
         raise HTTPException(status_code=400, detail="Unsupported script type for article source")
+
+    if reuse:
+        reusable = await script_repository.get_latest_project_by_source(
+            db,
+            project_type=project_type,
+            article_id=article.id,
+        )
+        if reusable:
+            return success_envelope(
+                {"script": _serialize_project(reusable), "job": None},
+                meta={"reused": True},
+            )
 
     script_title = f"{'Video Package' if project_type == ScriptProjectType.video_script else 'Story Script'} - {_safe_article_title(article)}"
     params_json = {
@@ -222,6 +235,7 @@ async def create_script_from_article(
 async def create_script_from_story(
     story_id: int,
     payload: ScriptFromStoryRequest,
+    reuse: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(*VIEW_ROLES)),
 ):
@@ -233,6 +247,18 @@ async def create_script_from_story(
     project_type = _parse_project_type(payload.type)
     if project_type not in {ScriptProjectType.story_script, ScriptProjectType.video_script}:
         raise HTTPException(status_code=400, detail="Unsupported script type for story source")
+
+    if reuse:
+        reusable = await script_repository.get_latest_project_by_source(
+            db,
+            project_type=project_type,
+            story_id=story.id,
+        )
+        if reusable:
+            return success_envelope(
+                {"script": _serialize_project(reusable), "job": None},
+                meta={"reused": True},
+            )
 
     params_json = {
         "tone": payload.tone,
