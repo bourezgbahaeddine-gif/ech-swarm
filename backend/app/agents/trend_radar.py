@@ -98,6 +98,7 @@ MIN_TRENDS_BY_GEO = {
     "DEFAULT": 6,
 }
 MIN_CONFIDENCE = 0.65
+MIN_CONFIDENCE_NON_DZ = 0.50
 
 SUPPORTED_GEO_CODES = set(GEO_LABELS.keys())
 
@@ -163,13 +164,24 @@ class TrendRadarAgent:
                 self._fetch_youtube_trends(geo, category),
                 self._fetch_geo_news_trends(geo, category),
             )
-            primary_trends = self._merge_ranked_terms(google_trends, youtube_trends)
+            primary_trends = self._merge_ranked_terms(google_trends, youtube_trends, geo_news_trends)
             if not primary_trends:
                 # Fallback source to avoid empty scans in low-signal geos/categories.
                 primary_trends = geo_news_trends
             if not primary_trends:
                 # Last-resort fallback from internal recently crawled titles.
                 primary_trends = await self._fallback_from_recent_titles(geo)
+            if not primary_trends and geo != "GLOBAL":
+                # Cross-geo resilience: fallback to global news signals when local feeds are sparse.
+                global_google, global_youtube, global_news = await asyncio.gather(
+                    self._fetch_google_trends("GLOBAL"),
+                    self._fetch_youtube_trends("GLOBAL", category),
+                    self._fetch_geo_news_trends("GLOBAL", category),
+                )
+                google_trends = google_trends or global_google
+                youtube_trends = youtube_trends or global_youtube
+                geo_news_trends = geo_news_trends or global_news
+                primary_trends = self._merge_ranked_terms(primary_trends, global_google, global_youtube, global_news)
             # Important: competitor feeds + RSS bursts are currently Algeria-centric.
             # We must not pollute non-DZ scans with DZ signals.
             if geo == "DZ":
@@ -190,7 +202,22 @@ class TrendRadarAgent:
                 category_filter=category,
             )
             verified_trends = await self._score_with_internal_interaction(verified_trends)
-            verified_trends = [t for t in verified_trends if t.get("confidence", 0.0) >= MIN_CONFIDENCE]
+            min_confidence = MIN_CONFIDENCE if geo == "DZ" else MIN_CONFIDENCE_NON_DZ
+            verified_trends = [t for t in verified_trends if t.get("confidence", 0.0) >= min_confidence]
+            if not verified_trends and category != "all":
+                # Category can be sparse per geo. Fallback to "all" then expose best available signals.
+                verified_trends = self._cross_validate(
+                    primary_trends,
+                    google_trends,
+                    youtube_trends,
+                    geo_news_trends,
+                    competitor_keywords,
+                    rss_bursts,
+                    geo=geo,
+                    category_filter="all",
+                )
+                verified_trends = await self._score_with_internal_interaction(verified_trends)
+                verified_trends = [t for t in verified_trends if t.get("confidence", 0.0) >= min_confidence]
 
             # Promote top geo trends as fallback so newsroom still gets usable signals
             # even when strict cross-validation is sparse.
@@ -563,6 +590,8 @@ class TrendRadarAgent:
         competitor_set = set(competitor_keywords)
         burst_set = set(rss_bursts)
 
+        required_source_count = 2 if geo == "DZ" else 1
+
         for trend in all_primary:
             if not trend or len(trend) < 3:
                 continue
@@ -586,7 +615,7 @@ class TrendRadarAgent:
             if any(term in burst_set for term in trend_terms):
                 sources.append("rss_burst")
 
-            if len(sources) < 2:
+            if len(sources) < required_source_count:
                 continue
 
             category = self._categorize_keyword(trend)
@@ -597,7 +626,7 @@ class TrendRadarAgent:
                 {
                     "keyword": trend,
                     "source_signals": sources,
-                    "strength": min(len(sources) * 3 + 2, 10),
+                    "strength": min((len(sources) * 3 + 2) if len(sources) >= 2 else 4, 10),
                     "confidence": 0.0,
                     "interaction_score": 0.0,
                     "category": category,
