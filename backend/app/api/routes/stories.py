@@ -8,8 +8,8 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.rbac import require_roles
@@ -244,6 +244,24 @@ async def suggest_stories_for_article(
     if not stories:
         return success_envelope([])
 
+    article_title = (article.title_ar or article.original_title or "").strip()
+    trigram_similarity_by_story: dict[int, float] = {}
+    if article_title:
+        story_ids = [story.id for story in stories]
+        try:
+            trigram_rows = await db.execute(
+                select(
+                    Story.id,
+                    func.similarity(func.lower(Story.title), article_title.lower()).label("sim"),
+                ).where(Story.id.in_(story_ids))
+            )
+            trigram_similarity_by_story = {
+                int(story_id): max(float(similarity or 0.0), 0.0)
+                for story_id, similarity in trigram_rows.all()
+            }
+        except SQLAlchemyError:
+            trigram_similarity_by_story = {}
+
     relation_rows = await db.execute(
         select(ArticleRelation).where(
             or_(
@@ -259,7 +277,6 @@ async def suggest_stories_for_article(
         if rel.to_article_id != article_id:
             related_article_ids.add(int(rel.to_article_id))
 
-    article_title = (article.title_ar or article.original_title or "").strip()
     article_title_tokens = _tokenize(article_title)
     article_entities_raw = article.entities if isinstance(article.entities, list) else []
     article_entities = {str(entity).strip().lower() for entity in article_entities_raw if str(entity).strip()}
@@ -271,7 +288,8 @@ async def suggest_stories_for_article(
         story_tokens = _tokenize(f"{story_title} {story_summary}")
         seq_score = SequenceMatcher(None, article_title.lower(), story_title.lower()).ratio() if story_title else 0.0
         token_score = _jaccard_similarity(article_title_tokens, story_tokens)
-        title_similarity = max(seq_score, token_score)
+        trigram_score = trigram_similarity_by_story.get(story.id, 0.0)
+        title_similarity = max(seq_score, token_score, trigram_score)
 
         entity_overlap = 0
         if article_entities and story_tokens:
@@ -285,6 +303,8 @@ async def suggest_stories_for_article(
         if title_similarity > 0:
             score += title_similarity * 65.0
             reasons.append(f"title_similarity:{title_similarity:.2f}")
+            if trigram_score > 0:
+                reasons.append(f"title_similarity_trgm:{trigram_score:.2f}")
         if entity_overlap > 0:
             entity_score = min(20.0, entity_overlap * 4.0)
             score += entity_score
