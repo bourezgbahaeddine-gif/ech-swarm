@@ -351,3 +351,27 @@ Rights holder: **Bourezg Baha eddine** (بهاء الدين بورزق).
 **صُنع بعناية لخدمة الصحافة الجزائرية 🇩🇿**
 
 </div>
+
+## Operational Health Checks
+
+Use these commands after deploy or local boot:
+
+```bash
+# backend health
+curl -sS http://127.0.0.1:8000/health
+
+# authenticated smoke check
+TOKEN=$(curl -sS -X POST http://127.0.0.1:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"<user>","password":"<pass>"}' \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
+
+curl -sS "http://127.0.0.1:8000/api/v1/dashboard/stats" -H "Authorization: Bearer $TOKEN"
+curl -sS "http://127.0.0.1:8000/api/v1/jobs/queues/depth" -H "Authorization: Bearer $TOKEN"
+```
+
+For queue debugging and operator playbook, see:
+
+- `docs/TROUBLESHOOTING_PLAYBOOK.md`
+- `docs/QUALITY_GATES.md`
+- `docs/architecture.md`

@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.domain.quality.gates import GateIssue, GateResult, GateSeverity
 from app.models import Article, ArticleQualityReport, EditorialDraft
 
 logger = get_logger("quality_gate_service")
@@ -122,6 +123,81 @@ class QualityGateService:
         db.add(row)
         await db.flush()
         return row
+
+    async def run_submission_quality_gates(
+        self,
+        db: AsyncSession,
+        *,
+        article_id: int,
+        policy_report: dict[str, Any] | None = None,
+    ) -> GateResult:
+        stages = ["FACT_CHECK", "SEO_TECH", "READABILITY", "QUALITY_SCORE"]
+        issues: list[GateIssue] = []
+        for stage in stages:
+            row = await db.execute(
+                select(ArticleQualityReport)
+                .where(
+                    ArticleQualityReport.article_id == article_id,
+                    ArticleQualityReport.stage == stage,
+                )
+                .order_by(ArticleQualityReport.created_at.desc(), ArticleQualityReport.id.desc())
+                .limit(1)
+            )
+            report = row.scalar_one_or_none()
+            if not report:
+                issues.append(
+                    GateIssue(
+                        code=f"{stage.lower()}_missing",
+                        message=f"Quality report is missing for stage {stage}",
+                        severity=GateSeverity.BLOCKER,
+                        details={"stage": stage},
+                    )
+                )
+                continue
+            if not bool(report.passed):
+                reasons = report.blocking_reasons or [f"Stage {stage} failed"]
+                for reason in reasons:
+                    issues.append(
+                        GateIssue(
+                            code=f"{stage.lower()}_failed",
+                            message=str(reason),
+                            severity=GateSeverity.BLOCKER,
+                            details={"stage": stage},
+                        )
+                    )
+            elif report.score is not None and int(report.score) < 70:
+                issues.append(
+                    GateIssue(
+                        code=f"{stage.lower()}_low_score",
+                        message=f"Stage {stage} score is low ({report.score})",
+                        severity=GateSeverity.WARN,
+                        details={"stage": stage, "score": int(report.score)},
+                    )
+                )
+
+        if policy_report:
+            if not bool(policy_report.get("passed", False)):
+                for reason in policy_report.get("blocking_reasons", []) or ["Editorial policy gate failed"]:
+                    issues.append(
+                        GateIssue(
+                            code="editorial_policy_failed",
+                            message=str(reason),
+                            severity=GateSeverity.BLOCKER,
+                            details={"stage": "EDITORIAL_POLICY"},
+                        )
+                    )
+            for reason in policy_report.get("actionable_fixes", [])[:5]:
+                issues.append(
+                    GateIssue(
+                        code="editorial_policy_fix",
+                        message=str(reason),
+                        severity=GateSeverity.INFO,
+                        details={"stage": "EDITORIAL_POLICY"},
+                    )
+                )
+
+        has_blocker = any(item.severity == GateSeverity.BLOCKER for item in issues)
+        return GateResult(passed=not has_blocker, issues=issues)
 
     def readability_report(self, text: str) -> dict[str, Any]:
         clean = (text or "").strip()

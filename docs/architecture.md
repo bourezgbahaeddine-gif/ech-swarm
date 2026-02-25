@@ -124,3 +124,45 @@ Raw Input → Strip HTML → Remove Scripts → Decode Entities → Remove XSS P
 - `.env.example` for documentation only
 - Docker secrets for production deployment
 - API keys validated on startup
+
+## 2026-02-25 Hardening Update
+
+### Layering and bounded contexts
+
+The backend now follows explicit boundaries:
+
+- `app/api/*`: HTTP transport only (request parsing, auth dependencies, response mapping).
+- `app/services/*`: application orchestration and cross-module workflows.
+- `app/domain/*`: pure domain logic (state machine and quality gate primitives).
+- `app/repositories/*`: reusable persistence access patterns.
+- `app/models/*`: SQLAlchemy persistence models.
+
+New modules introduced:
+
+- `app/domain/news/state_machine.py`
+- `app/domain/quality/gates.py`
+- `app/repositories/story_repository.py`
+- `app/repositories/task_idempotency_repository.py`
+- `app/services/task_execution_service.py`
+
+### Correlation and request tracking propagation
+
+Request middleware sets and logs:
+
+- `request_id`
+- `correlation_id`
+
+These values are persisted in `job_runs` and rebound inside Celery workers through `_load_job()` / `_mark_running()` context binding so worker logs remain traceable back to the triggering API request.
+
+### Task idempotency approach
+
+Task-level idempotency is implemented via `task_idempotency_keys` and `task_execution_service`.
+
+- Key format: `task_name:entity_id:payload_hash` (or explicit `idempotency_key` from payload).
+- `acquire` states:
+  - `acquired`: task can execute
+  - `running`: another active owner exists -> skip duplicate side effects
+  - `completed`: return cached result
+- Completion/failure updates are stored for replay-safe retries.
+
+This is applied to pipeline and editorial queue workers to avoid duplicate transitions/draft side effects under retry/requeue conditions.

@@ -13,6 +13,30 @@ export const api = axios.create({
     headers: { 'Content-Type': 'application/json' },
 });
 
+export interface ApiEnvelopeError {
+    code: string;
+    message: string;
+    details?: unknown;
+}
+
+export interface ApiEnvelope<T> {
+    ok: boolean;
+    data: T;
+    error: ApiEnvelopeError | null;
+    meta?: {
+        request_id?: string | null;
+        correlation_id?: string | null;
+        timestamp?: string;
+        [key: string]: unknown;
+    };
+}
+
+function isApiEnvelope(value: unknown): value is ApiEnvelope<unknown> {
+    if (!value || typeof value !== 'object') return false;
+    const candidate = value as Record<string, unknown>;
+    return 'ok' in candidate && 'data' in candidate && 'error' in candidate && 'meta' in candidate;
+}
+
 // ── Types ──
 
 export interface Source {
@@ -145,6 +169,22 @@ export interface PipelineRun {
     errors: number;
     ai_calls: number;
     status: string;
+}
+
+export interface OpsOverviewResponse {
+    lookback_hours: number;
+    generated_at: string;
+    throughput: Array<{ job_type: string; completed: number }>;
+    latency: Array<{ job_type: string; avg_seconds: number }>;
+    pipeline: {
+        runs_total: number;
+        success_runs: number;
+        success_rate_percent: number;
+        avg_run_seconds: number;
+    };
+    failure_reasons: Array<{ reason: string; count: number }>;
+    queue_depth: Record<string, number>;
+    state_age_seconds: Array<{ status: string | null; avg_age_seconds: number; count: number }>;
 }
 
 export interface TrendAlert {
@@ -356,6 +396,17 @@ export interface ChiefPendingItem {
     status: string | null;
     updated_at: string;
     work_id: string | null;
+    decision_card?: {
+        risk_level: 'low' | 'medium' | 'high' | string;
+        quality_score: number | null;
+        claims_score: number | null;
+        quality_issues: string[];
+        claims_issues: string[];
+        sources_summary: {
+            source_name: string | null;
+            entities_count: number;
+        };
+    };
     policy: {
         passed: boolean;
         score: number | null;
@@ -525,7 +576,7 @@ export const editorialApi = {
         api.get(`/editorial/workspace/drafts/${workId}/publish-readiness`),
     chiefPending: (limit = 100) =>
         api.get<ChiefPendingItem[]>(`/editorial/chief/pending`, { params: { limit } }),
-    chiefFinalDecision: (articleId: number, data: { decision: 'approve' | 'return_for_revision'; notes?: string }) =>
+    chiefFinalDecision: (articleId: number, data: { decision: 'approve' | 'approve_with_reservations' | 'send_back' | 'reject' | 'return_for_revision'; notes?: string }) =>
         api.post(`/editorial/${articleId}/chief/final-decision`, data),
     socialApprovedFeed: (limit = 50) =>
         api.get<SocialApprovedItem[]>(`/editorial/social/approved-feed`, { params: { limit } }),
@@ -561,6 +612,8 @@ export const dashboardApi = {
         api.get<PublishedMonitorLatestResponse>('/dashboard/agents/published-monitor/latest', { params }),
     notifications: (params?: { limit?: number }) =>
         api.get<{ items: DashboardNotification[]; total: number }>('/dashboard/notifications', { params }),
+    opsOverview: (params?: { lookback_hours?: number }) =>
+        api.get<OpsOverviewResponse>('/dashboard/ops/overview', { params }),
 };
 
 export const jobsApi = {
@@ -1155,11 +1208,43 @@ export const competitorXrayApi = {
         api.post<CompetitorXrayBrief>('/competitor-xray/brief', payload),
 };
 
-// ── Axios Interceptor: auto-redirect on 401 ──
+// ── Axios Interceptors: envelope compatibility + auth handling ──
 
 api.interceptors.response.use(
-    (response) => response,
+    (response) => {
+        if (isApiEnvelope(response.data)) {
+            if (response.data.ok) {
+                response.data = response.data.data;
+                return response;
+            }
+
+            const envelopeError = response.data.error;
+            const wrappedError = {
+                ...new Error(envelopeError?.message || 'Request failed'),
+                response: {
+                    ...response,
+                    data: {
+                        detail: envelopeError?.message || 'Request failed',
+                        code: envelopeError?.code || 'api_error',
+                        details: envelopeError?.details,
+                    },
+                },
+            };
+            return Promise.reject(wrappedError);
+        }
+        return response;
+    },
     (error) => {
+        if (error?.response?.data && isApiEnvelope(error.response.data)) {
+            const envelopeError = error.response.data.error;
+            error.response.data = {
+                detail: envelopeError?.message || 'Request failed',
+                code: envelopeError?.code || 'api_error',
+                details: envelopeError?.details,
+                meta: error.response.data.meta || {},
+            };
+        }
+
         if (error.response?.status === 401 && typeof window !== 'undefined') {
             localStorage.removeItem('echorouk_token');
             localStorage.removeItem('echorouk_user');

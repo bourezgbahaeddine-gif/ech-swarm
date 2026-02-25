@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.domain.news.state_machine import can_transition
 from app.models import Article, EditorialDraft, NewsStatus
 from app.services.article_index_service import article_index_service
 from app.services.ai_service import ai_service
@@ -107,6 +108,8 @@ class ScribeAgent:
             article.title_ar = generated_title
             article.seo_title = generated_seo_title
             article.seo_description = generated_seo_description
+            if not can_transition(article.status, NewsStatus.DRAFT_GENERATED):
+                return {"error": f"Invalid transition to draft_generated from {article.status.value}"}
             article.status = NewsStatus.DRAFT_GENERATED
             article.updated_at = datetime.utcnow()
 

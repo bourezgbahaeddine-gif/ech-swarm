@@ -8,10 +8,11 @@ from datetime import datetime
 from typing import Optional
 
 import aiohttp
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps.rbac import enforce_roles
 from app.core.database import get_db
 from app.core.logging import get_logger
 from app.models.settings import ApiSetting
@@ -35,8 +36,8 @@ def _mask(value: Optional[str]) -> Optional[str]:
     return "••••••••"
 
 
-def _is_admin(user: User) -> bool:
-    return user.role == UserRole.director
+def _require_admin(user: User) -> None:
+    enforce_roles(user, {UserRole.director}, message="Not authorized")
 
 
 def _audit_value(value: Optional[str], is_secret: bool) -> Optional[str]:
@@ -50,8 +51,7 @@ async def list_settings(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not _is_admin(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    _require_admin(current_user)
 
     result = await db.execute(select(ApiSetting).order_by(ApiSetting.key.asc()))
     settings_list = result.scalars().all()
@@ -75,8 +75,7 @@ async def get_setting(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not _is_admin(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    _require_admin(current_user)
 
     result = await db.execute(select(ApiSetting).where(ApiSetting.key == key))
     s = result.scalar_one_or_none()
@@ -100,8 +99,7 @@ async def upsert_setting(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not _is_admin(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    _require_admin(current_user)
 
     result = await db.execute(select(ApiSetting).where(ApiSetting.key == key))
     setting = result.scalar_one_or_none()
@@ -158,8 +156,7 @@ async def import_from_env(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not _is_admin(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    _require_admin(current_user)
 
     defaults = {
         "GEMINI_API_KEY": settings.gemini_api_key,
@@ -210,8 +207,7 @@ async def list_audit(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not _is_admin(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    _require_admin(current_user)
 
     result = await db.execute(
         select(SettingsAudit).order_by(SettingsAudit.created_at.desc()).limit(limit)
@@ -234,8 +230,7 @@ async def test_setting(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not _is_admin(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    _require_admin(current_user)
 
     key = key.upper()
     if key == "GEMINI_API_KEY":

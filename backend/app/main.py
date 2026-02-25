@@ -13,9 +13,9 @@ import asyncio
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
 from app.core.database import init_db
@@ -51,9 +51,11 @@ from app.api.routes.media_logger import router as media_logger_router
 from app.api.routes.document_intel import router as document_intel_router
 from app.api.routes.competitor_xray import router as competitor_xray_router
 from app.api.routes.jobs import router as jobs_router
+from app.api.routes.stories import router as stories_router
 from app.msi.scheduler import start_msi_scheduler, stop_msi_scheduler
 from app.services.competitor_xray_service import competitor_xray_service
 from app.services.job_queue_service import job_queue_service
+from app.api.envelope import error_envelope
 
 settings = get_settings()
 logger = get_logger("main")
@@ -331,29 +333,65 @@ async def log_requests(request: Request, call_next):
     set_correlation_id(correlation_id)
     structlog.contextvars.bind_contextvars(request_id=request_id, correlation_id=correlation_id)
     start = time.time()
-    response = await call_next(request)
-    elapsed = round((time.time() - start) * 1000, 2)
-    response.headers["x-request-id"] = request_id
-    response.headers["x-correlation-id"] = correlation_id
+    response = None
+    try:
+        response = await call_next(request)
+        return response
+    finally:
+        elapsed = round((time.time() - start) * 1000, 2)
+        if response is not None:
+            response.headers["x-request-id"] = request_id
+            response.headers["x-correlation-id"] = correlation_id
+            status_code = response.status_code
+        else:
+            status_code = 500
 
-    if request.url.path not in ["/health", "/docs", "/redoc", "/openapi.json"]:
-        logger.info(
-            "http_request",
-            method=request.method,
-            path=request.url.path,
-            status=response.status_code,
-            elapsed_ms=elapsed,
-            request_id=get_request_id(),
-            correlation_id=get_correlation_id(),
-        )
-    structlog.contextvars.clear_contextvars()
-    set_request_id("")
-    set_correlation_id("")
+        if request.url.path not in ["/health", "/docs", "/redoc", "/openapi.json"]:
+            logger.info(
+                "http_request",
+                method=request.method,
+                path=request.url.path,
+                status=status_code,
+                elapsed_ms=elapsed,
+                request_id=get_request_id(),
+                correlation_id=get_correlation_id(),
+            )
 
-    return response
+        structlog.contextvars.clear_contextvars()
+        set_request_id("")
+        set_correlation_id("")
 
 
 # ── Global Exception Handler ──
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    logger.warning(
+        "http_exception",
+        path=request.url.path,
+        status_code=exc.status_code,
+        detail=str(exc.detail),
+    )
+    return error_envelope(
+        code="http_error",
+        message="Request failed",
+        status_code=exc.status_code,
+        details=exc.detail,
+        meta={"path": request.url.path},
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    logger.warning("validation_error", path=request.url.path, errors=exc.errors())
+    return error_envelope(
+        code="validation_error",
+        message="Validation failed",
+        status_code=422,
+        details=exc.errors(),
+        meta={"path": request.url.path},
+    )
+
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -367,12 +405,12 @@ async def global_exception_handler(request: Request, exc: Exception):
         error=str(exc),
         error_type=type(exc).__name__,
     )
-    return JSONResponse(
+    return error_envelope(
+        code="internal_error",
+        message="خطأ داخلي في النظام",
         status_code=500,
-        content={
-            "error": "خطأ داخلي في النظام",
-            "detail": "Internal server error. The team has been notified.",
-        },
+        details="Internal server error. The team has been notified.",
+        meta={"path": request.url.path},
     )
 
 
@@ -394,6 +432,7 @@ app.include_router(media_logger_router, prefix="/api/v1")
 app.include_router(document_intel_router, prefix="/api/v1")
 app.include_router(competitor_xray_router, prefix="/api/v1")
 app.include_router(jobs_router, prefix="/api/v1")
+app.include_router(stories_router, prefix="/api/v1")
 
 
 # ── Health Check ──

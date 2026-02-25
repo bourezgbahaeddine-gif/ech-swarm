@@ -19,6 +19,16 @@ function getApiErrorMessage(error: unknown, fallback: string): string {
         if (typeof detail === 'string' && detail.trim()) {
             return detail;
         }
+        if (detail && typeof detail === 'object') {
+            const message = (detail as { message?: unknown }).message;
+            if (typeof message === 'string' && message.trim()) {
+                return message;
+            }
+        }
+        const message = error.response?.data?.error?.message;
+        if (typeof message === 'string' && message.trim()) {
+            return message;
+        }
     }
     return fallback;
 }
@@ -36,6 +46,21 @@ export default function EditorialPage() {
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
     const [notesMap, setNotesMap] = useState<Record<number, string>>({});
+
+    const decisionRequiresReason: Record<string, boolean> = {
+        approve: false,
+        approve_with_reservations: true,
+        send_back: false,
+        reject: true,
+        return_for_revision: false,
+    };
+    const decisionLabel: Record<string, string> = {
+        approve: 'اعتماد نهائي',
+        approve_with_reservations: 'اعتماد بتحفظات',
+        send_back: 'إرجاع للمراجعة',
+        reject: 'رفض',
+        return_for_revision: 'إرجاع للمراجعة',
+    };
 
     const chiefQueueQuery = useQuery({
         queryKey: ['chief-pending-queue'],
@@ -77,7 +102,15 @@ export default function EditorialPage() {
     });
 
     const chiefDecisionMutation = useMutation({
-        mutationFn: ({ articleId, decision, notes }: { articleId: number; decision: 'approve' | 'return_for_revision'; notes?: string }) =>
+        mutationFn: ({
+            articleId,
+            decision,
+            notes,
+        }: {
+            articleId: number;
+            decision: 'approve' | 'approve_with_reservations' | 'send_back' | 'reject' | 'return_for_revision';
+            notes?: string;
+        }) =>
             editorialApi.chiefFinalDecision(articleId, { decision, notes }),
         onSuccess: (res) => {
             setSuccessMessage(res.data?.message || 'تم تنفيذ القرار.');
@@ -119,6 +152,28 @@ export default function EditorialPage() {
     const chiefItems = useMemo(() => (chiefQueueQuery.data?.data || []) as ChiefPendingItem[], [chiefQueueQuery.data?.data]);
     const pendingCandidates = useMemo(() => (pendingCandidatesQuery.data?.data || []) as ArticleBrief[], [pendingCandidatesQuery.data?.data]);
     const socialItems = useMemo(() => (socialFeedQuery.data?.data || []) as SocialApprovedItem[], [socialFeedQuery.data?.data]);
+
+    const submitChiefDecision = (
+        item: ChiefPendingItem,
+        decision: 'approve' | 'approve_with_reservations' | 'send_back' | 'reject' | 'return_for_revision',
+    ) => {
+        const note = (notesMap[item.id] || '').trim();
+        if (decisionRequiresReason[decision] && !note) {
+            setErrorMessage(`سبب القرار مطلوب للإجراء: ${decisionLabel[decision]}`);
+            setSuccessMessage(null);
+            return;
+        }
+        const confirmed = typeof window === 'undefined'
+            ? true
+            : window.confirm(`تأكيد الإجراء: ${decisionLabel[decision]}؟`);
+        if (!confirmed) return;
+
+        chiefDecisionMutation.mutate({
+            articleId: item.id,
+            decision,
+            notes: note || undefined,
+        });
+    };
 
     return (
         <div className="space-y-6">
@@ -168,7 +223,34 @@ export default function EditorialPage() {
                                         </div>
                                     )}
 
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                                    {!!item.decision_card && (
+                                        <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-200" dir="rtl">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <span className={`px-2 py-1 rounded-md border ${
+                                                    item.decision_card.risk_level === 'high'
+                                                        ? 'border-red-500/40 bg-red-500/10 text-red-200'
+                                                        : item.decision_card.risk_level === 'low'
+                                                            ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
+                                                            : 'border-amber-500/40 bg-amber-500/10 text-amber-200'
+                                                }`}>
+                                                    مستوى المخاطر: {item.decision_card.risk_level}
+                                                </span>
+                                                <span className="px-2 py-1 rounded-md border border-cyan-500/30 bg-cyan-500/10 text-cyan-200">
+                                                    جودة: {item.decision_card.quality_score ?? '-'}
+                                                </span>
+                                                <span className="px-2 py-1 rounded-md border border-violet-500/30 bg-violet-500/10 text-violet-200">
+                                                    ادعاءات: {item.decision_card.claims_score ?? '-'}
+                                                </span>
+                                            </div>
+                                            {(item.decision_card.quality_issues.length > 0 || item.decision_card.claims_issues.length > 0) && (
+                                                <p className="text-gray-400 mt-2">
+                                                    قضايا الجودة/الادعاءات: {item.decision_card.quality_issues.length + item.decision_card.claims_issues.length}
+                                                </p>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
                                         <a
                                             href={item.work_id ? `/workspace-drafts?article_id=${item.id}&work_id=${item.work_id}` : `/workspace-drafts?article_id=${item.id}`}
                                             className="px-3 py-2 rounded-xl border border-white/20 bg-white/5 text-center text-xs text-gray-200 hover:text-white"
@@ -176,18 +258,32 @@ export default function EditorialPage() {
                                             فتح النسخة في المحرر
                                         </a>
                                         <button
-                                            onClick={() => chiefDecisionMutation.mutate({ articleId: item.id, decision: 'approve', notes: note || undefined })}
+                                            onClick={() => submitChiefDecision(item, 'approve')}
                                             disabled={chiefDecisionMutation.isPending}
                                             className="px-3 py-2 rounded-xl border border-emerald-500/30 bg-emerald-500/20 text-xs text-emerald-200 flex items-center justify-center gap-1"
                                         >
                                             <CheckCircle2 className="w-4 h-4" /> اعتماد نهائي
                                         </button>
                                         <button
-                                            onClick={() => chiefDecisionMutation.mutate({ articleId: item.id, decision: 'return_for_revision', notes: note || undefined })}
+                                            onClick={() => submitChiefDecision(item, 'approve_with_reservations')}
+                                            disabled={chiefDecisionMutation.isPending}
+                                            className="px-3 py-2 rounded-xl border border-orange-500/30 bg-orange-500/20 text-xs text-orange-200 flex items-center justify-center gap-1"
+                                        >
+                                            اعتماد بتحفظات
+                                        </button>
+                                        <button
+                                            onClick={() => submitChiefDecision(item, 'send_back')}
                                             disabled={chiefDecisionMutation.isPending}
                                             className="px-3 py-2 rounded-xl border border-amber-500/30 bg-amber-500/20 text-xs text-amber-200 flex items-center justify-center gap-1"
                                         >
                                             <RotateCcw className="w-4 h-4" /> إعادة للمراجعة
+                                        </button>
+                                        <button
+                                            onClick={() => submitChiefDecision(item, 'reject')}
+                                            disabled={chiefDecisionMutation.isPending}
+                                            className="px-3 py-2 rounded-xl border border-red-500/30 bg-red-500/20 text-xs text-red-200 flex items-center justify-center gap-1"
+                                        >
+                                            رفض
                                         </button>
                                     </div>
 
@@ -195,7 +291,7 @@ export default function EditorialPage() {
                                         type="text"
                                         value={note}
                                         onChange={(e) => setNotesMap((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                                        placeholder="ملاحظة اختيارية مع القرار..."
+                                        placeholder="سبب القرار (إلزامي للتحفظات/الرفض)..."
                                         className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2 text-xs text-white placeholder:text-gray-500"
                                         dir="rtl"
                                     />

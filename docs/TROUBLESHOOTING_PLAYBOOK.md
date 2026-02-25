@@ -218,3 +218,68 @@ docker logs ech-backend --since 10m | egrep -i "sim_|error|traceback"
 ### Fix
 - Ensure frontend normalizes article HTML before `dangerouslySetInnerHTML`.
 - Hard refresh client cache after deploy (`Ctrl+F5`).
+
+## 12) Envelope-style API errors (`ok=false`) in frontend
+### Symptoms
+- UI receives non-standard error object.
+- Toasts display generic fallback messages.
+
+### Checks
+```bash
+docker logs ech-backend --since 10m | grep -E "http_exception|validation_error|unhandled_exception"
+```
+
+### Resolution
+- Frontend API client now unwraps envelope responses and normalizes envelope errors into `response.data.detail`.
+- Ensure the frontend image is rebuilt after backend envelope changes.
+
+---
+
+## 13) Invalid state transition (`invalid_state_transition`)
+### Symptoms
+- `409` with error code `invalid_state_transition` on editorial/chief actions.
+
+### Cause
+- Action attempted from a non-allowed lifecycle state.
+
+### Checks
+```bash
+curl -sS "http://127.0.0.1:8000/api/v1/news/<ARTICLE_ID>" -H "Authorization: Bearer $TOKEN"
+```
+Review current `status` and compare with the transition rules in:
+- `backend/app/domain/news/state_machine.py`
+
+### Resolution
+- Move item through the expected workflow step first.
+- Avoid direct status jumps in custom scripts.
+
+---
+
+## 14) Duplicate queue execution / retry side effects
+### Symptoms
+- Same workflow appears to run multiple times after retries.
+
+### Checks
+```bash
+curl -sS "http://127.0.0.1:8000/api/v1/jobs?limit=50" -H "Authorization: Bearer $TOKEN"
+```
+Inspect backend logs for:
+- `task_idempotency_reused_result`
+- `task_idempotency_skip_running`
+
+### Resolution
+- Confirm migration for `task_idempotency_keys` is applied.
+- Confirm workers run latest code with `task_execution_service`.
+
+---
+
+## 15) Chief decisions rejected due missing reason
+### Symptoms
+- `422` when using `approve_with_reservations` or `reject`.
+
+### Cause
+- Reason is mandatory for those decisions.
+
+### Resolution
+- Provide `notes` in request payload.
+- In UI, fill the decision note field before submitting these actions.

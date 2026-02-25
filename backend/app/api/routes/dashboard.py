@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import select, func, and_, update, desc
+from sqlalchemy import select, func, and_, update, desc, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -122,6 +122,117 @@ async def get_pipeline_runs(
     )
     runs = result.scalars().all()
     return [PipelineRunResponse.model_validate(r) for r in runs]
+
+
+@router.get("/ops/overview")
+async def get_operational_overview(
+    lookback_hours: int = Query(24, ge=1, le=168),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Lightweight operational telemetry from existing run tables."""
+    _assert_agent_control_permission(current_user)
+    window_start = datetime.utcnow() - timedelta(hours=lookback_hours)
+
+    job_counts_rows = await db.execute(
+        select(JobRun.job_type, func.count(JobRun.id))
+        .where(
+            JobRun.status == "completed",
+            JobRun.finished_at.is_not(None),
+            JobRun.finished_at >= window_start,
+        )
+        .group_by(JobRun.job_type)
+        .order_by(func.count(JobRun.id).desc())
+    )
+    throughput = [
+        {"job_type": job_type, "completed": int(count or 0)}
+        for job_type, count in job_counts_rows.all()
+    ]
+
+    job_latency_rows = await db.execute(
+        select(
+            JobRun.job_type,
+            func.avg(func.extract("epoch", JobRun.finished_at - JobRun.started_at)).label("avg_seconds"),
+        )
+        .where(
+            JobRun.status == "completed",
+            JobRun.started_at.is_not(None),
+            JobRun.finished_at.is_not(None),
+            JobRun.finished_at >= window_start,
+        )
+        .group_by(JobRun.job_type)
+        .order_by(func.avg(func.extract("epoch", JobRun.finished_at - JobRun.started_at)).desc())
+    )
+    latency = [
+        {"job_type": job_type, "avg_seconds": round(float(avg_seconds or 0.0), 2)}
+        for job_type, avg_seconds in job_latency_rows.all()
+    ]
+
+    failures_rows = await db.execute(
+        select(JobRun.error, func.count(JobRun.id))
+        .where(
+            JobRun.status.in_(["failed", "dead_lettered"]),
+            JobRun.finished_at.is_not(None),
+            JobRun.finished_at >= window_start,
+            JobRun.error.is_not(None),
+        )
+        .group_by(JobRun.error)
+        .order_by(func.count(JobRun.id).desc())
+        .limit(10)
+    )
+    failure_distribution: list[dict[str, object]] = []
+    for error_text, count in failures_rows.all():
+        reason = str(error_text or "unknown").split(":", 1)[0].strip() or "unknown"
+        failure_distribution.append({"reason": reason, "count": int(count or 0)})
+
+    pipeline_summary_row = await db.execute(
+        select(
+            func.count(PipelineRun.id).label("runs"),
+            func.avg(func.extract("epoch", PipelineRun.finished_at - PipelineRun.started_at)).label("avg_seconds"),
+            func.sum(case((PipelineRun.status == "success", 1), else_=0)).label("success_runs"),
+        )
+        .where(
+            PipelineRun.started_at >= window_start,
+            PipelineRun.finished_at.is_not(None),
+        )
+    )
+    pipeline_summary = pipeline_summary_row.one()
+    runs_total = int(pipeline_summary.runs or 0)
+    success_runs = int(pipeline_summary.success_runs or 0)
+    success_rate = round((success_runs / runs_total) * 100.0, 2) if runs_total else 0.0
+
+    state_age_rows = await db.execute(
+        select(
+            Article.status,
+            func.avg(func.extract("epoch", datetime.utcnow() - Article.updated_at)).label("avg_age_seconds"),
+            func.count(Article.id).label("count"),
+        )
+        .group_by(Article.status)
+    )
+    state_ages = [
+        {
+            "status": status.value if status else None,
+            "avg_age_seconds": round(float(avg_age_seconds or 0.0), 2),
+            "count": int(count or 0),
+        }
+        for status, avg_age_seconds, count in state_age_rows.all()
+    ]
+
+    return {
+        "lookback_hours": lookback_hours,
+        "generated_at": datetime.utcnow().isoformat(),
+        "throughput": throughput,
+        "latency": latency,
+        "pipeline": {
+            "runs_total": runs_total,
+            "success_runs": success_runs,
+            "success_rate_percent": success_rate,
+            "avg_run_seconds": round(float(pipeline_summary.avg_seconds or 0.0), 2),
+        },
+        "failure_reasons": failure_distribution,
+        "queue_depth": await job_queue_service.queue_depths(),
+        "state_age_seconds": state_ages,
+    }
 
 
 @router.get("/failed-jobs")

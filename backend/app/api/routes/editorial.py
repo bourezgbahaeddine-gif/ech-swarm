@@ -12,6 +12,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.scribe import scribe_agent
+from app.api.deps.rbac import enforce_roles, require_roles
 from app.api.routes.auth import get_current_user
 from app.core.correlation import get_correlation_id, get_request_id
 from app.core.database import get_db, async_session
@@ -39,6 +40,8 @@ from app.services.link_intelligence_service import link_intelligence_service
 from app.services.job_queue_service import job_queue_service
 from app.services.quality_gate_service import quality_gate_service
 from app.services.smart_editor_service import smart_editor_service
+from app.services.audit_service import audit_service
+from app.services.state_transition_service import state_transition_service
 from app.services.trend_signal_service import bump_keyword_interactions, extract_keywords
 
 logger = get_logger("api.editorial")
@@ -119,7 +122,7 @@ class LinkApplyRequest(BaseModel):
 
 
 class ChiefFinalDecisionRequest(BaseModel):
-    decision: Literal["approve", "return_for_revision"]
+    decision: Literal["approve", "approve_with_reservations", "send_back", "reject", "return_for_revision"]
     notes: Optional[str] = Field(default=None, max_length=1000)
 
 
@@ -133,8 +136,7 @@ class ManualWorkspaceDraftCreateRequest(BaseModel):
 
 
 def _require_roles(user: User, allowed: set[UserRole]) -> None:
-    if user.role not in allowed:
-        raise HTTPException(status_code=403, detail="ليست لديك صلاحية تنفيذ هذا الإجراء")
+    enforce_roles(user, allowed, message="Not authorized for this action")
 
 
 def _can_review_decision(user: User, decision: str) -> None:
@@ -581,6 +583,36 @@ async def _get_latest_draft_or_404(db: AsyncSession, work_id: str) -> EditorialD
     return draft
 
 
+async def _transition_article_status(
+    *,
+    db: AsyncSession,
+    article: Article,
+    target_status: NewsStatus,
+    actor: User,
+    action: str,
+    reason: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> None:
+    current_status = article.status or NewsStatus.NEW
+    state_transition_service.assert_transition(
+        current=current_status,
+        target=target_status,
+        entity=f"article:{article.id}",
+    )
+    article.status = target_status
+    await audit_service.log_action(
+        db,
+        action=action,
+        entity_type="article",
+        entity_id=article.id,
+        actor=actor,
+        from_state=current_status.value,
+        to_state=target_status.value,
+        reason=reason,
+        details=details or {},
+    )
+
+
 async def _submit_draft_for_chief_approval(
     *,
     db: AsyncSession,
@@ -633,18 +665,51 @@ async def _submit_draft_for_chief_approval(
         upsert_by_stage=True,
     )
 
+    gate_result = await quality_gate_service.run_submission_quality_gates(
+        db,
+        article_id=article.id,
+        policy_report=policy_report,
+    )
+
     decision = policy_report.get("decision", "reservations")
+    if not gate_result.passed:
+        decision = "reservations"
+
+    blockers = [issue.message for issue in gate_result.blockers]
     if decision == "approved":
-        article.status = NewsStatus.READY_FOR_CHIEF_APPROVAL
+        target_status = NewsStatus.READY_FOR_CHIEF_APPROVAL
         status_message = "جاهز لاعتماد رئيس التحرير"
     else:
-        article.status = NewsStatus.APPROVAL_REQUEST_WITH_RESERVATIONS
+        target_status = NewsStatus.APPROVAL_REQUEST_WITH_RESERVATIONS
         status_message = "طلب اعتماد مع تحفظات"
+
+    await _transition_article_status(
+        db=db,
+        article=article,
+        target_status=target_status,
+        actor=current_user,
+        action="submit_for_chief_approval",
+        reason=f"policy_decision:{decision}",
+        details={
+            "work_id": draft.work_id,
+            "policy_score": policy_report.get("score"),
+            "blocking_reasons": blockers,
+        },
+    )
 
     draft.status = "applied"
     draft.applied_by = current_user.full_name_ar
     draft.applied_at = datetime.utcnow()
     draft.updated_by = current_user.full_name_ar
+    await audit_service.log_action(
+        db,
+        action="draft_submit_for_chief",
+        entity_type="editorial_draft",
+        entity_id=draft.id,
+        actor=current_user,
+        reason=f"policy_decision:{decision}",
+        details={"work_id": draft.work_id, "version": draft.version},
+    )
 
     db.add(
         EditorDecision(
@@ -673,7 +738,7 @@ async def _submit_draft_for_chief_approval(
         "policy_decision": decision,
         "status": article.status.value,
         "status_message": status_message,
-        "blocking_reasons": policy_report.get("blocking_reasons", []),
+        "blocking_reasons": blockers or policy_report.get("blocking_reasons", []),
         "actionable_fixes": policy_report.get("actionable_fixes", []),
     }
 
@@ -775,21 +840,48 @@ async def make_decision(
             )
         )
 
+    if data.decision == "reject" and not (data.reason or "").strip():
+        raise HTTPException(status_code=422, detail="reason is required when decision=reject")
+
     if data.decision == "approve":
-        article.status = NewsStatus.APPROVED_HANDOFF
+        await _transition_article_status(
+            db=db,
+            article=article,
+            target_status=NewsStatus.APPROVED_HANDOFF,
+            actor=current_user,
+            action="editor_decision_approve",
+            reason=(data.reason or "").strip() or None,
+            details={"article_id": article_id},
+        )
         article.reviewed_by = editor_name
         article.reviewed_at = datetime.utcnow()
         if data.edited_title:
             article.title_ar = data.edited_title
         await bump_keyword_interactions(extract_keywords(article.title_ar or article.original_title), weight=2)
     elif data.decision == "reject":
-        article.status = NewsStatus.REJECTED
+        await _transition_article_status(
+            db=db,
+            article=article,
+            target_status=NewsStatus.REJECTED,
+            actor=current_user,
+            action="editor_decision_reject",
+            reason=(data.reason or "").strip(),
+            details={"article_id": article_id},
+        )
         article.reviewed_by = editor_name
         article.reviewed_at = datetime.utcnow()
         article.rejection_reason = data.reason
     elif data.decision == "rewrite":
         article.body_html = None
-        article.status = NewsStatus.APPROVED
+        await _transition_article_status(
+            db=db,
+            article=article,
+            target_status=NewsStatus.APPROVED,
+            actor=current_user,
+            action="editor_decision_rewrite",
+            reason=(data.reason or "").strip() or None,
+            details={"article_id": article_id},
+        )
         await bump_keyword_interactions(extract_keywords(article.title_ar or article.original_title), weight=1)
 
     await db.commit()
@@ -831,7 +923,15 @@ async def handoff_to_scribe(
 
     if article.status in [NewsStatus.CANDIDATE, NewsStatus.CLASSIFIED, NewsStatus.REJECTED]:
         was_rejected = article.status == NewsStatus.REJECTED
-        article.status = NewsStatus.APPROVED_HANDOFF
+        await _transition_article_status(
+            db=db,
+            article=article,
+            target_status=NewsStatus.APPROVED_HANDOFF,
+            actor=current_user,
+            action="handoff_to_scribe",
+            reason="handoff_reopen_from_rejected" if was_rejected else "handoff_to_scribe",
+            details={"article_id": article_id},
+        )
         article.reviewed_by = current_user.full_name_ar
         article.reviewed_at = datetime.utcnow()
         if was_rejected:
@@ -1994,9 +2094,8 @@ async def submit_draft_for_chief_approval(
 async def chief_pending_queue(
     limit: int = 100,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles(UserRole.director, UserRole.editor_chief)),
 ):
-    _require_roles(current_user, {UserRole.director, UserRole.editor_chief})
     rows = await db.execute(
         select(Article)
         .where(Article.status.in_(list(CHIEF_REVIEW_STATUSES)))
@@ -2008,6 +2107,8 @@ async def chief_pending_queue(
     out: list[dict[str, Any]] = []
     for article in articles:
         policy_report = await _latest_stage_report(db, article_id=article.id, stage="EDITORIAL_POLICY")
+        quality_report = await _latest_stage_report(db, article_id=article.id, stage="QUALITY_SCORE")
+        fact_report = await _latest_stage_report(db, article_id=article.id, stage="FACT_CHECK")
         latest_draft_row = await db.execute(
             select(EditorialDraft)
             .where(EditorialDraft.article_id == article.id)
@@ -2015,6 +2116,16 @@ async def chief_pending_queue(
             .limit(1)
         )
         latest_draft = latest_draft_row.scalar_one_or_none()
+        quality_score = int(quality_report.score) if quality_report and quality_report.score is not None else None
+        claims_score = int(fact_report.score) if fact_report and fact_report.score is not None else None
+        risk_level = "medium"
+        if quality_score is not None and quality_score < 60:
+            risk_level = "high"
+        elif claims_score is not None and claims_score < 60:
+            risk_level = "high"
+        elif quality_score is not None and quality_score >= 85 and (claims_score is None or claims_score >= 85):
+            risk_level = "low"
+
         out.append(
             {
                 "id": article.id,
@@ -2028,6 +2139,17 @@ async def chief_pending_queue(
                 "status": article.status.value if article.status else None,
                 "updated_at": article.updated_at,
                 "work_id": latest_draft.work_id if latest_draft else None,
+                "decision_card": {
+                    "risk_level": risk_level,
+                    "quality_score": quality_score,
+                    "claims_score": claims_score,
+                    "quality_issues": (quality_report.blocking_reasons if quality_report else []) or [],
+                    "claims_issues": (fact_report.blocking_reasons if fact_report else []) or [],
+                    "sources_summary": {
+                        "source_name": article.source_name,
+                        "entities_count": len(article.entities or []),
+                    },
+                },
                 "policy": {
                     "passed": bool(policy_report.passed) if policy_report else False,
                     "score": policy_report.score if policy_report else None,
@@ -2046,9 +2168,8 @@ async def chief_final_decision(
     article_id: int,
     payload: ChiefFinalDecisionRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles(UserRole.director, UserRole.editor_chief)),
 ):
-    _require_roles(current_user, {UserRole.director, UserRole.editor_chief})
     article_row = await db.execute(select(Article).where(Article.id == article_id))
     article = article_row.scalar_one_or_none()
     if not article:
@@ -2056,13 +2177,62 @@ async def chief_final_decision(
     if article.status not in CHIEF_REVIEW_STATUSES:
         raise HTTPException(409, "Article is not waiting chief approval")
 
-    if payload.decision == "approve":
+    decision = payload.decision
+    if decision == "return_for_revision":
+        decision = "send_back"
+
+    note = (payload.notes or "").strip()
+    if decision in {"approve_with_reservations", "reject"} and not note:
+        raise HTTPException(status_code=422, detail="reason is required for this decision")
+
+    if decision == "approve":
         await _assert_publish_gate_and_constitution(db, article_id=article.id, user=current_user)
-        article.status = NewsStatus.READY_FOR_MANUAL_PUBLISH
+        await _transition_article_status(
+            db=db,
+            article=article,
+            target_status=NewsStatus.READY_FOR_MANUAL_PUBLISH,
+            actor=current_user,
+            action="chief_approve",
+            reason=note or None,
+            details={"article_id": article.id},
+        )
         message = "تم اعتماد النسخة النهائية وأصبحت جاهزة للنشر اليدوي."
-    else:
-        article.status = NewsStatus.DRAFT_GENERATED
+    elif decision == "approve_with_reservations":
+        await _transition_article_status(
+            db=db,
+            article=article,
+            target_status=NewsStatus.APPROVAL_REQUEST_WITH_RESERVATIONS,
+            actor=current_user,
+            action="chief_approve_with_reservations",
+            reason=note,
+            details={"article_id": article.id},
+        )
+        message = "تم تسجيل اعتماد بتحفظات وإبقاء الخبر ضمن مراجعة السياسة."
+    elif decision == "send_back":
+        await _transition_article_status(
+            db=db,
+            article=article,
+            target_status=NewsStatus.DRAFT_GENERATED,
+            actor=current_user,
+            action="chief_send_back",
+            reason=note or None,
+            details={"article_id": article.id},
+        )
         message = "تمت إعادة الخبر للصحفي للمراجعة."
+    elif decision == "reject":
+        await _transition_article_status(
+            db=db,
+            article=article,
+            target_status=NewsStatus.REJECTED,
+            actor=current_user,
+            action="chief_reject",
+            reason=note,
+            details={"article_id": article.id},
+        )
+        article.rejection_reason = note
+        message = "تم رفض الخبر من رئيس التحرير."
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported chief decision: {payload.decision}")
 
     article.reviewed_by = current_user.full_name_ar
     article.reviewed_at = datetime.utcnow()
@@ -2071,8 +2241,8 @@ async def chief_final_decision(
         EditorDecision(
             article_id=article.id,
             editor_name=current_user.full_name_ar,
-            decision=f"chief:{payload.decision}",
-            reason=payload.notes or "",
+            decision=f"chief:{decision}",
+            reason=note,
             edited_title=article.title_ar,
             edited_body=article.body_html,
         )
@@ -2081,7 +2251,7 @@ async def chief_final_decision(
     return {
         "article_id": article.id,
         "status": article.status.value if article.status else None,
-        "decision": payload.decision,
+        "decision": decision,
         "message": message,
     }
 
@@ -2112,6 +2282,14 @@ async def archive_draft_by_work_id(
 
     draft.status = "archived"
     draft.updated_by = current_user.full_name_ar
+    await audit_service.log_action(
+        db,
+        action="draft_archive",
+        entity_type="editorial_draft",
+        entity_id=draft.id,
+        actor=current_user,
+        details={"work_id": work_id, "version": draft.version},
+    )
     await db.commit()
     return {"work_id": work_id, "archived": True, "draft": _draft_to_dict(draft)}
 
@@ -2144,7 +2322,15 @@ async def regenerate_draft_by_work_id(
         raise HTTPException(404, "Article not found")
 
     if article.status not in [NewsStatus.APPROVED, NewsStatus.APPROVED_HANDOFF, NewsStatus.DRAFT_GENERATED]:
-        article.status = NewsStatus.APPROVED_HANDOFF
+        await _transition_article_status(
+            db=db,
+            article=article,
+            target_status=NewsStatus.APPROVED_HANDOFF,
+            actor=current_user,
+            action="regenerate_prepare_handoff",
+            reason="regenerate_requested",
+            details={"article_id": article.id, "work_id": work_id},
+        )
         await db.commit()
 
     scribe_result = await scribe_agent.write_article(
@@ -2264,6 +2450,16 @@ async def create_draft(
         updated_by=current_user.full_name_ar,
     )
     db.add(draft)
+    await db.flush()
+    await audit_service.log_action(
+        db,
+        action="draft_create",
+        entity_type="editorial_draft",
+        entity_id=draft.id,
+        actor=current_user,
+        reason=(payload.note or "").strip() or None,
+        details={"article_id": article_id, "work_id": draft.work_id, "version": draft.version},
+    )
     await db.commit()
     await db.refresh(draft)
     return _draft_to_dict(draft)
@@ -2315,6 +2511,20 @@ async def update_draft(
         note=payload.note,
         updated_by=current_user.full_name_ar,
         change_origin="manual",
+    )
+    await audit_service.log_action(
+        db,
+        action="draft_update",
+        entity_type="editorial_draft",
+        entity_id=new_draft.id,
+        actor=current_user,
+        reason=(payload.note or "").strip() or None,
+        details={
+            "article_id": article_id,
+            "work_id": new_draft.work_id,
+            "from_version": latest.version,
+            "to_version": new_draft.version,
+        },
     )
     await db.commit()
     return _draft_to_dict(new_draft)

@@ -5,7 +5,7 @@ from app.models.news import (
     NewsStatus, NewsCategory, UrgencyLevel, Sentiment,
 )
 from app.models.settings import ApiSetting
-from app.models.audit import SettingsAudit
+from app.models.audit import SettingsAudit, ActionAuditLog
 from app.models.user_activity import UserActivityLog
 from app.models.constitution import ConstitutionMeta, ConstitutionAck, ImagePrompt, InfographicData
 from app.models.knowledge import (
@@ -57,6 +57,8 @@ from app.models.link_intelligence import (
     LinkClickEvent,
 )
 from app.models.job_queue import JobRun, DeadLetterJob
+from app.models.story import Story, StoryItem, StoryStatus
+from app.models.idempotency import TaskIdempotencyKey
 
 __all__ = [
     "Source", "Article", "EditorDecision", "EditorialDraft", "FeedbackLog",
@@ -64,6 +66,7 @@ __all__ = [
     "NewsStatus", "NewsCategory", "UrgencyLevel", "Sentiment",
     "ApiSetting",
     "SettingsAudit",
+    "ActionAuditLog",
     "UserActivityLog",
     "ConstitutionMeta",
     "ConstitutionAck",
@@ -108,4 +111,8 @@ __all__ = [
     "LinkClickEvent",
     "JobRun",
     "DeadLetterJob",
+    "Story",
+    "StoryItem",
+    "StoryStatus",
+    "TaskIdempotencyKey",
 ]

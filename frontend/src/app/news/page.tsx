@@ -20,6 +20,16 @@ function getApiErrorMessage(error: unknown, fallback: string): string {
         if (typeof detail === 'string' && detail.trim()) {
             return detail;
         }
+        if (detail && typeof detail === 'object') {
+            const message = (detail as { message?: unknown }).message;
+            if (typeof message === 'string' && message.trim()) {
+                return message;
+            }
+        }
+        const message = error.response?.data?.error?.message;
+        if (typeof message === 'string' && message.trim()) {
+            return message;
+        }
     }
     return fallback;
 }
@@ -653,20 +663,25 @@ function NewsPageContent() {
                                 <div className="mt-3 grid grid-cols-3 gap-2">
                                     <button
                                         onClick={() =>
-                                            decideMutation.mutate(
-                                                {
-                                                    articleId: article.id,
-                                                    decision: 'approve',
-                                                },
-                                                {
-                                                    onSuccess: (result) => {
-                                                        const target = result?.workId
-                                                            ? `/workspace-drafts?article_id=${article.id}&work_id=${result.workId}`
-                                                            : `/workspace-drafts?article_id=${article.id}`;
-                                                        router.push(target);
+                                            {
+                                                if (typeof window !== 'undefined' && !window.confirm('تأكيد الموافقة على الخبر؟')) {
+                                                    return;
+                                                }
+                                                decideMutation.mutate(
+                                                    {
+                                                        articleId: article.id,
+                                                        decision: 'approve',
                                                     },
-                                                },
-                                            )
+                                                    {
+                                                        onSuccess: (result) => {
+                                                            const target = result?.workId
+                                                                ? `/workspace-drafts?article_id=${article.id}&work_id=${result.workId}`
+                                                                : `/workspace-drafts?article_id=${article.id}`;
+                                                            router.push(target);
+                                                        },
+                                                    },
+                                                );
+                                            }
                                         }
                                         disabled={decideMutation.isPending || !canReview || !canApproveReject}
                                         className={cn(
@@ -679,7 +694,12 @@ function NewsPageContent() {
                                         <CheckCircle className="w-3 h-3" /> موافقة
                                     </button>
                                     <button
-                                        onClick={() => decideMutation.mutate({ articleId: article.id, decision: 'rewrite' })}
+                                        onClick={() => {
+                                            if (typeof window !== 'undefined' && !window.confirm('تأكيد إرسال الخبر لإعادة الصياغة؟')) {
+                                                return;
+                                            }
+                                            decideMutation.mutate({ articleId: article.id, decision: 'rewrite' });
+                                        }}
                                         disabled={decideMutation.isPending || !canReview || !canRewrite}
                                         className={cn(
                                             'px-2 py-2 rounded-xl border text-[10px] flex items-center justify-center gap-1 transition-colors',
@@ -710,13 +730,23 @@ function NewsPageContent() {
                                             type="text"
                                             value={rejectReason}
                                             onChange={(e) => setRejectReason(e.target.value)}
-                                            placeholder="سبب الرفض (اختياري)..."
+                                            placeholder="سبب الرفض (إلزامي)..."
                                             className="flex-1 h-10 px-3 rounded-xl bg-white/5 border border-white/5 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-red-500/40"
                                             dir="rtl"
                                         />
                                         <button
-                                            onClick={() => decideMutation.mutate({ articleId: article.id, decision: 'reject', reason: rejectReason })}
-                                            disabled={decideMutation.isPending}
+                                            onClick={() => {
+                                                const reason = rejectReason.trim();
+                                                if (!reason) {
+                                                    setErrorMessage('سبب الرفض مطلوب');
+                                                    return;
+                                                }
+                                                if (typeof window !== 'undefined' && !window.confirm('تأكيد رفض الخبر؟')) {
+                                                    return;
+                                                }
+                                                decideMutation.mutate({ articleId: article.id, decision: 'reject', reason });
+                                            }}
+                                            disabled={decideMutation.isPending || !rejectReason.trim()}
                                             className="px-4 py-2 rounded-xl bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors text-xs font-medium"
                                         >
                                             تأكيد الرفض

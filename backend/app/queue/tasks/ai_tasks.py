@@ -20,6 +20,7 @@ from app.services.job_queue_service import job_queue_service
 from app.services.link_intelligence_service import link_intelligence_service
 from app.services.quality_gate_service import quality_gate_service
 from app.services.smart_editor_service import smart_editor_service
+from app.services.task_execution_service import execute_with_task_idempotency
 
 logger = get_logger("queue.ai_tasks")
 LINKS_TASK_SOFT_LIMIT_SEC = 45
@@ -124,12 +125,11 @@ async def _mark_failed_or_dlq(job_id: str, error: str, tb: str, is_final: bool) 
             await job_queue_service.mark_failed(db, job, error)
 
 
-async def _execute_editorial_ai_job(
-    job_id: str,
+async def _execute_editorial_ai_payload(
+    job: JobRun,
     *,
     allowed_operations: set[str] | None = None,
 ) -> dict:
-    job = await _mark_running(job_id)
     payload = job.payload_json or {}
     op = str(payload.get("operation") or "")
     work_id = str(payload.get("work_id") or "")
@@ -264,6 +264,42 @@ async def _execute_editorial_ai_job(
     raise RuntimeError(f"unknown_operation:{op}")
 
 
+async def _execute_editorial_ai_job(
+    job_id: str,
+    *,
+    allowed_operations: set[str] | None = None,
+) -> dict:
+    job = await _mark_running(job_id)
+    return await _execute_editorial_ai_payload(job, allowed_operations=allowed_operations)
+
+
+async def _run_editorial_job_with_idempotency(
+    job_id: str,
+    *,
+    task_name: str,
+    allowed_operations: set[str] | None = None,
+) -> dict:
+    job = await _mark_running(job_id)
+    logger.info(
+        "editorial_task_execution_started",
+        job_id=job_id,
+        task_name=task_name,
+        operation=(job.payload_json or {}).get("operation"),
+        work_id=(job.payload_json or {}).get("work_id"),
+    )
+    result = await execute_with_task_idempotency(
+        job=job,
+        task_name=task_name,
+        runner=lambda: _execute_editorial_ai_payload(job, allowed_operations=allowed_operations),
+    )
+    logger.info(
+        "editorial_task_execution_completed",
+        job_id=job_id,
+        task_name=task_name,
+    )
+    return result
+
+
 @celery_app.task(
     bind=True,
     autoretry_for=(TimeoutError, ConnectionError),
@@ -271,10 +307,17 @@ async def _execute_editorial_ai_job(
     retry_backoff_max=120,
     retry_jitter=True,
     max_retries=5,
+    soft_time_limit=90,
+    time_limit=120,
 )
 def run_editorial_ai_job(self: Task, job_id: str) -> dict:
     try:
-        result = run_async(_execute_editorial_ai_job(job_id))
+        result = run_async(
+            _run_editorial_job_with_idempotency(
+                job_id,
+                task_name="editorial_ai",
+            )
+        )
         run_async(_mark_completed(job_id, result))
         return {"ok": True, "job_id": job_id}
     except Exception as exc:  # noqa: BLE001
@@ -302,7 +345,11 @@ def run_editorial_links_job(self: Task, job_id: str) -> dict:
     try:
         result = run_async(
             asyncio.wait_for(
-                _execute_editorial_ai_job(job_id, allowed_operations={"links_suggest"}),
+                _run_editorial_job_with_idempotency(
+                    job_id,
+                    task_name="editorial_links",
+                    allowed_operations={"links_suggest"},
+                ),
                 timeout=LINKS_TASK_SOFT_LIMIT_SEC,
             )
         )

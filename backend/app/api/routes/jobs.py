@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps.rbac import enforce_roles
 from app.api.routes.auth import get_current_user
 from app.core.database import get_db
 from app.models import DeadLetterJob
@@ -27,18 +28,15 @@ MAINTAIN_ROLES = {UserRole.director, UserRole.editor_chief}
 
 
 def _require_view(user: User) -> None:
-    if user.role not in VIEW_ROLES:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
+    enforce_roles(user, VIEW_ROLES, message="Not allowed")
 
 
 def _require_retry(user: User) -> None:
-    if user.role not in RETRY_ROLES:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
+    enforce_roles(user, RETRY_ROLES, message="Not allowed")
 
 
 def _require_maintain(user: User) -> None:
-    if user.role not in MAINTAIN_ROLES:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
+    enforce_roles(user, MAINTAIN_ROLES, message="Not allowed")
 
 
 @router.get("")
