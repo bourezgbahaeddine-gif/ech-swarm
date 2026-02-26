@@ -558,9 +558,8 @@ class RouterAgent:
 
         # Return category with highest keyword matches
         best = max(scores, key=scores.get)
-
-        # Only trust rule-based if confidence is decent (2+ keywords)
-        if scores[best] >= 2:
+        min_hits = max(1, int(getattr(settings, "router_rule_min_hits", 2)))
+        if scores[best] >= min_hits:
             return best
         return None  # Low confidence → use AI
 
