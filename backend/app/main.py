@@ -12,6 +12,7 @@
 import asyncio
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -71,6 +72,7 @@ _competitor_xray_task: asyncio.Task | None = None
 
 
 async def _run_pipeline_once():
+    tick_id = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     async with async_session() as db:
         scout_stats = await scout_agent.run(db)
         router_job_id = None
@@ -80,7 +82,11 @@ async def _run_pipeline_once():
                 db,
                 job_type="pipeline_router",
                 queue_name="ai_router",
-                payload={"source": "auto_pipeline"},
+                payload={
+                    "source": "auto_pipeline",
+                    "tick_id": tick_id,
+                    "idempotency_key": f"pipeline_router:auto_pipeline:{tick_id}",
+                },
                 entity_id="auto_pipeline",
                 actor_username="system",
                 max_attempts=3,
@@ -97,7 +103,11 @@ async def _run_pipeline_once():
                     db,
                     job_type="pipeline_scribe",
                     queue_name="ai_scribe",
-                    payload={"source": "auto_pipeline"},
+                    payload={
+                        "source": "auto_pipeline",
+                        "tick_id": tick_id,
+                        "idempotency_key": f"pipeline_scribe:auto_pipeline:{tick_id}",
+                    },
                     entity_id="auto_pipeline",
                     actor_username="system",
                     max_attempts=3,
@@ -115,6 +125,7 @@ async def _run_pipeline_once():
 
 
 async def _run_trends_once():
+    tick_id = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     async with async_session() as db:
         active_job = await job_queue_service.find_active_job(
             db,
@@ -133,7 +144,14 @@ async def _run_trends_once():
             db,
             job_type="trends_scan",
             queue_name="ai_trends",
-            payload={"geo": "ALL", "category": "all", "limit": 10, "mode": "fast"},
+            payload={
+                "geo": "ALL",
+                "category": "all",
+                "limit": 10,
+                "mode": "fast",
+                "tick_id": tick_id,
+                "idempotency_key": f"trends_scan:auto_trends:{tick_id}",
+            },
             entity_id="auto_trends",
             actor_username="system",
             max_attempts=3,
@@ -143,6 +161,7 @@ async def _run_trends_once():
 
 
 async def _run_published_monitor_once():
+    tick_id = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     async with async_session() as db:
         allowed, depth, limit_depth = await job_queue_service.check_backpressure("ai_quality")
         if not allowed:
@@ -152,7 +171,12 @@ async def _run_published_monitor_once():
             db,
             job_type="published_monitor_scan",
             queue_name="ai_quality",
-            payload={"feed_url": settings.published_monitor_feed_url, "limit": settings.published_monitor_limit},
+            payload={
+                "feed_url": settings.published_monitor_feed_url,
+                "limit": settings.published_monitor_limit,
+                "tick_id": tick_id,
+                "idempotency_key": f"published_monitor_scan:auto_published_monitor:{tick_id}",
+            },
             entity_id="auto_published_monitor",
             actor_username="system",
             max_attempts=3,

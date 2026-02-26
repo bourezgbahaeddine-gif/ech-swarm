@@ -4,6 +4,7 @@ Echorouk Editorial OS - Dashboard & Agent Control API.
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, func, and_, update, desc, case
@@ -278,11 +279,18 @@ async def _enqueue_dashboard_job(
             detail=f"Queue busy for {job_type} ({depth}/{limit_depth}). Retry in a moment.",
         )
 
+    payload_data = dict(payload or {})
+    payload_data.setdefault("trigger_nonce", uuid4().hex)
+    payload_data.setdefault(
+        "idempotency_key",
+        f"{job_type}:{entity_id or 'dashboard'}:{payload_data['trigger_nonce']}",
+    )
+
     job = await job_queue_service.create_job(
         db,
         job_type=job_type,
         queue_name=queue_name,
-        payload=payload or {},
+        payload=payload_data,
         entity_id=entity_id,
         request_id=request.headers.get("x-request-id") or get_request_id(),
         correlation_id=request.headers.get("x-correlation-id") or get_correlation_id(),
