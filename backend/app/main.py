@@ -85,6 +85,7 @@ async def _run_pipeline_once():
                 payload={
                     "source": "auto_pipeline",
                     "tick_id": tick_id,
+                    "limit": settings.router_batch_limit,
                     "idempotency_key": f"pipeline_router:auto_pipeline:{tick_id}",
                 },
                 entity_id="auto_pipeline",

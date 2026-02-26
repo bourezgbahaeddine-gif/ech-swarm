@@ -497,6 +497,11 @@ class RouterAgent:
         selected: list[tuple[Article, Optional[Source]]] = []
         per_source_total: dict[str, int] = {}
         per_source_candidate_like: dict[str, int] = {}
+        source_quota = max(1, int(getattr(settings, "router_source_quota", ROUTER_SOURCE_QUOTA)))
+        candidate_quota = max(
+            1,
+            int(getattr(settings, "router_candidate_source_quota", ROUTER_CANDIDATE_SOURCE_QUOTA)),
+        )
 
         for article, source in rows_sorted:
             if len(selected) >= limit:
@@ -504,13 +509,13 @@ class RouterAgent:
 
             source_key = str(source.id) if source and source.id else (article.source_name or "unknown")
             total_count = per_source_total.get(source_key, 0)
-            if total_count >= ROUTER_SOURCE_QUOTA:
+            if total_count >= source_quota:
                 continue
 
             text_lower = f"{article.original_title or ''} {article.original_content or ''}".lower()
             source_name = (source.name if source else article.source_name) or ""
             candidate_like = self._has_local_signal(text_lower, source_name)
-            if candidate_like and per_source_candidate_like.get(source_key, 0) >= ROUTER_CANDIDATE_SOURCE_QUOTA:
+            if candidate_like and per_source_candidate_like.get(source_key, 0) >= candidate_quota:
                 continue
 
             selected.append((article, source))

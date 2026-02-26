@@ -373,7 +373,7 @@ async def trigger_router(
         current_user=current_user,
         job_type="pipeline_router",
         queue_name="ai_router",
-        payload={"source": "dashboard"},
+        payload={"source": "dashboard", "limit": settings.router_batch_limit},
         entity_id="dashboard_router",
     )
     return {"message": "Router queued.", **ticket}

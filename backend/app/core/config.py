@@ -127,6 +127,11 @@ class Settings(BaseSettings):
     queue_depth_limit_trends: int = 120
     queue_depth_limit_scripts: int = 120
 
+    # Router throughput tuning
+    router_batch_limit: int = 120
+    router_source_quota: int = 20
+    router_candidate_source_quota: int = 10
+
     # Provider routing / circuit breaker
     provider_health_window_sec: int = 180
     provider_circuit_failures: int = 5

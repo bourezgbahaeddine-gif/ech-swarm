@@ -98,9 +98,15 @@ async def _run_task_with_idempotency(
     return result
 
 
-async def _run_router_batch(_: JobRun) -> dict:
+async def _run_router_batch(job: JobRun) -> dict:
+    payload = job.payload_json or {}
+    try:
+        limit = int(payload.get("limit") or 0)
+    except (TypeError, ValueError):
+        limit = 0
+    limit = max(10, min(limit or 120, 500))
     async with async_session() as db:
-        stats = await router_agent.process_batch(db)
+        stats = await router_agent.process_batch(db, limit=limit)
     return {"stats": stats}
 
 
