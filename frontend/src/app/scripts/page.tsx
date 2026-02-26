@@ -1,11 +1,11 @@
 'use client';
 
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2, RefreshCw, ScrollText, CheckCircle2, XCircle } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 
-import { scriptsApi, type ScriptProjectRecord } from '@/lib/api';
+import { scriptsApi, type ScriptOutputRecord, type ScriptProjectRecord } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { cn, formatRelativeTime } from '@/lib/utils';
 
@@ -412,14 +412,256 @@ function ScriptViewerDrawer({
                             </div>
                         )}
 
-                        <pre className="rounded-xl border border-white/10 bg-black/25 p-3 text-xs text-slate-100 whitespace-pre-wrap overflow-x-auto">
-                            {latestOutput.content_json
-                                ? JSON.stringify(latestOutput.content_json, null, 2)
-                                : latestOutput.content_text || 'لا يوجد محتوى.'}
-                        </pre>
+                        <StructuredScriptOutput projectType={project?.type} output={latestOutput} />
                     </div>
                 )}
             </div>
         </div>
     );
+}
+
+function StructuredScriptOutput({
+    projectType,
+    output,
+}: {
+    projectType: string | undefined;
+    output: ScriptOutputRecord;
+}) {
+    const content = toObject(output.content_json);
+
+    if (!content) {
+        return (
+            <pre className="rounded-xl border border-white/10 bg-black/25 p-3 text-xs text-slate-100 whitespace-pre-wrap overflow-x-auto">
+                {output.content_text || 'No script content available.'}
+            </pre>
+        );
+    }
+
+    if (projectType === 'story_script') return <StoryScriptView data={content} output={output} />;
+    if (projectType === 'video_script') return <VideoScriptView data={content} output={output} />;
+    if (projectType === 'bulletin_daily' || projectType === 'bulletin_weekly') {
+        return <BulletinScriptView data={content} output={output} />;
+    }
+
+    return (
+        <pre className="rounded-xl border border-white/10 bg-black/25 p-3 text-xs text-slate-100 whitespace-pre-wrap overflow-x-auto">
+            {JSON.stringify(content, null, 2)}
+        </pre>
+    );
+}
+
+function StoryScriptView({ data, output }: { data: Record<string, unknown>; output: ScriptOutputRecord }) {
+    const quotes = toObjectArray(data.quotes);
+    const timeline = toObjectArray(data.timeline);
+
+    return (
+        <div className="space-y-3">
+            <SectionCard title="Hook">{toText(data.hook) || '-'}</SectionCard>
+            <SectionCard title="Context">{toText(data.context) || '-'}</SectionCard>
+            <SectionCard title="What Happened">{toText(data.what_happened) || '-'}</SectionCard>
+            <SectionCard title="Why It Matters">{toText(data.why_it_matters) || '-'}</SectionCard>
+            <SectionCard title="Known / Unknown">{toText(data.known_unknown) || '-'}</SectionCard>
+
+            <SectionCard title={`Quotes (${quotes.length})`}>
+                {quotes.length === 0 ? (
+                    <p className="text-xs text-slate-400">No quotes.</p>
+                ) : (
+                    <div className="space-y-2">
+                        {quotes.map((quote, idx) => (
+                            <div key={`q-${idx}`} className="rounded-lg border border-white/10 bg-black/20 p-2">
+                                <p className="text-sm text-slate-100">{toText(quote.text) || '-'}</p>
+                                <p className="mt-1 text-xs text-cyan-300">Source: {toText(quote.source) || 'unknown'}</p>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </SectionCard>
+
+            <SectionCard title={`Timeline (${timeline.length})`}>
+                {timeline.length === 0 ? (
+                    <p className="text-xs text-slate-400">No timeline events.</p>
+                ) : (
+                    <div className="space-y-2">
+                        {timeline.map((item, idx) => (
+                            <div key={`t-${idx}`} className="rounded-lg border border-white/10 bg-black/20 p-2">
+                                <p className="text-xs text-cyan-300">{toText(item.time) || `Step ${idx + 1}`}</p>
+                                <p className="text-sm text-slate-100">{toText(item.event) || '-'}</p>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </SectionCard>
+
+            <SectionCard title="Close">{toText(data.close) || '-'}</SectionCard>
+            <SectionCard title="Social Short">{toText(data.social_short) || '-'}</SectionCard>
+            <SectionCard title="Anchor Notes">{toText(data.anchor_notes) || '-'}</SectionCard>
+
+            <RawOutputDetails output={output} />
+        </div>
+    );
+}
+
+function VideoScriptView({ data, output }: { data: Record<string, unknown>; output: ScriptOutputRecord }) {
+    const scenes = toObjectArray(data.scenes);
+    const assets = toObjectArray(data.assets_list);
+    const ideas = toStringArray(data.thumbnail_ideas);
+
+    return (
+        <div className="space-y-3">
+            <SectionCard title="VO Script">{toText(data.vo_script) || '-'}</SectionCard>
+
+            <SectionCard title={`Scenes (${scenes.length})`}>
+                {scenes.length === 0 ? (
+                    <p className="text-xs text-slate-400">No scenes.</p>
+                ) : (
+                    <div className="space-y-2">
+                        {scenes.map((scene, idx) => (
+                            <div key={`scene-${idx}`} className="rounded-lg border border-white/10 bg-black/20 p-2 space-y-1">
+                                <p className="text-xs text-cyan-300">
+                                    Scene #{toText(scene.idx) || String(idx + 1)} - {toText(scene.duration_s) || '0'}s
+                                </p>
+                                <p className="text-sm text-slate-100">Visual: {toText(scene.visual) || '-'}</p>
+                                <p className="text-sm text-slate-200">On-screen: {toText(scene.on_screen_text) || '-'}</p>
+                                <p className="text-sm text-slate-300">VO: {toText(scene.vo_line) || '-'}</p>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </SectionCard>
+
+            <SectionCard title="Captions (SRT)">
+                <pre className="whitespace-pre-wrap text-xs text-slate-200">{toText(data.captions_srt) || '-'}</pre>
+            </SectionCard>
+
+            <SectionCard title={`Assets (${assets.length})`}>
+                {assets.length === 0 ? (
+                    <p className="text-xs text-slate-400">No assets listed.</p>
+                ) : (
+                    <div className="space-y-2">
+                        {assets.map((asset, idx) => (
+                            <div key={`asset-${idx}`} className="rounded-lg border border-white/10 bg-black/20 p-2">
+                                <p className="text-xs text-cyan-300">{toText(asset.type) || 'asset'}</p>
+                                <p className="text-sm text-slate-100">{toText(asset.hint) || '-'}</p>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </SectionCard>
+
+            <SectionCard title={`Thumbnail Ideas (${ideas.length})`}>
+                {ideas.length === 0 ? (
+                    <p className="text-xs text-slate-400">No ideas.</p>
+                ) : (
+                    <ul className="list-disc pr-5 text-sm text-slate-100 space-y-1">
+                        {ideas.map((idea, idx) => (
+                            <li key={`idea-${idx}`}>{idea}</li>
+                        ))}
+                    </ul>
+                )}
+            </SectionCard>
+
+            <RawOutputDetails output={output} />
+        </div>
+    );
+}
+
+function BulletinScriptView({ data, output }: { data: Record<string, unknown>; output: ScriptOutputRecord }) {
+    const headlines = toStringArray(data.headlines);
+    const segments = toObjectArray(data.segments);
+    const transitions = toStringArray(data.transitions);
+
+    return (
+        <div className="space-y-3">
+            <SectionCard title="Opening">{toText(data.opening) || '-'}</SectionCard>
+
+            <SectionCard title={`Headlines (${headlines.length})`}>
+                {headlines.length === 0 ? (
+                    <p className="text-xs text-slate-400">No headlines.</p>
+                ) : (
+                    <ul className="list-disc pr-5 text-sm text-slate-100 space-y-1">
+                        {headlines.map((headline, idx) => (
+                            <li key={`h-${idx}`}>{headline}</li>
+                        ))}
+                    </ul>
+                )}
+            </SectionCard>
+
+            <SectionCard title={`Segments (${segments.length})`}>
+                {segments.length === 0 ? (
+                    <p className="text-xs text-slate-400">No segments.</p>
+                ) : (
+                    <div className="space-y-2">
+                        {segments.map((segment, idx) => (
+                            <div key={`seg-${idx}`} className="rounded-lg border border-white/10 bg-black/20 p-2 space-y-1">
+                                <p className="text-xs text-cyan-300">
+                                    {toText(segment.title) || `Segment ${idx + 1}`} - {toText(segment.duration_s) || '0'}s
+                                </p>
+                                <p className="text-sm text-slate-100">{toText(segment.vo) || '-'}</p>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </SectionCard>
+
+            <SectionCard title={`Transitions (${transitions.length})`}>
+                {transitions.length === 0 ? (
+                    <p className="text-xs text-slate-400">No transitions.</p>
+                ) : (
+                    <ul className="list-disc pr-5 text-sm text-slate-100 space-y-1">
+                        {transitions.map((transition, idx) => (
+                            <li key={`tr-${idx}`}>{transition}</li>
+                        ))}
+                    </ul>
+                )}
+            </SectionCard>
+
+            <SectionCard title="Closing">{toText(data.closing) || '-'}</SectionCard>
+            <SectionCard title="Social Summary">{toText(data.social_summary) || '-'}</SectionCard>
+
+            <RawOutputDetails output={output} />
+        </div>
+    );
+}
+
+function RawOutputDetails({ output }: { output: ScriptOutputRecord }) {
+    return (
+        <details className="rounded-xl border border-white/10 bg-black/20 p-3">
+            <summary className="cursor-pointer text-xs text-slate-300">Raw JSON</summary>
+            <pre className="mt-2 whitespace-pre-wrap text-xs text-slate-200 overflow-x-auto">
+                {output.content_json ? JSON.stringify(output.content_json, null, 2) : output.content_text || '-'}
+            </pre>
+        </details>
+    );
+}
+
+function SectionCard({ title, children }: { title: string; children: ReactNode }) {
+    return (
+        <section className="rounded-xl border border-white/10 bg-white/5 p-3 space-y-2">
+            <h5 className="text-xs font-semibold text-cyan-300 uppercase tracking-wide">{title}</h5>
+            <div className="text-sm text-slate-100">{children}</div>
+        </section>
+    );
+}
+
+function toObject(value: unknown): Record<string, unknown> | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    return value as Record<string, unknown>;
+}
+
+function toObjectArray(value: unknown): Array<Record<string, unknown>> {
+    if (!Array.isArray(value)) return [];
+    return value
+        .map((item) => toObject(item))
+        .filter((item): item is Record<string, unknown> => Boolean(item));
+}
+
+function toStringArray(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    return value.map((item) => toText(item)).filter((item) => item.length > 0);
+}
+
+function toText(value: unknown): string {
+    if (typeof value === 'string') return value.trim();
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    return '';
 }
