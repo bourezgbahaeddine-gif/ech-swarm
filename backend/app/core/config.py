@@ -131,6 +131,7 @@ class Settings(BaseSettings):
     router_batch_limit: int = 120
     router_source_quota: int = 20
     router_candidate_source_quota: int = 10
+    router_skip_ai_for_non_local_aggregator: bool = True
     auto_pipeline_router_burst_max: int = 4
     auto_pipeline_router_burst_backlog_threshold: int = 400
 

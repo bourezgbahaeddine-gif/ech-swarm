@@ -299,11 +299,17 @@ class RouterAgent:
             source_map = {s.id: s for s in source_rows.scalars().all()}
         rows = [(a, source_map.get(a.source_id)) for a in articles]
         selected = self._select_articles_for_batch(rows, limit)
+        since_commit = 0
 
         for article, source in selected:
             try:
                 await self._classify_article(db, article, source, stats)
                 stats["processed"] += 1
+                since_commit += 1
+                if since_commit >= 50:
+                    # Keep long router runs durable and release row locks progressively.
+                    await db.commit()
+                    since_commit = 0
             except Exception as e:
                 logger.error("router_article_error",
                              article_id=article.id,
@@ -338,6 +344,7 @@ class RouterAgent:
 
         text = f"{article.original_title} {article.original_content or ''}"
         text_lower = text.lower()
+        has_local_signal = self._has_local_signal(text_lower, article.source_name or "")
 
         # Step 0: Early noise gate (before paying any AI cost)
         noisy, noisy_reason = self._noise_gate(article, text_lower)
@@ -373,6 +380,15 @@ class RouterAgent:
             )
 
         # ── Step 3: AI Classification (only if rule-based is uncertain) ──
+        if (
+            category is None
+            and settings.router_skip_ai_for_non_local_aggregator
+            and self._is_google_aggregator(article.source_name or "")
+            and not has_local_signal
+            and urgency != UrgencyLevel.BREAKING
+        ):
+            category = NewsCategory.INTERNATIONAL
+
         if category is None:
             # Need AI for classification
             try:
@@ -424,7 +440,6 @@ class RouterAgent:
                 article.category = NewsCategory.INTERNATIONAL
 
         # ── Step 4: Determine if Candidate ──
-        has_local_signal = self._has_local_signal(text_lower, article.source_name or "")
         quality_ok, quality_reason = self._editorial_quality_gate(article, text_lower, has_local_signal)
         if not quality_ok:
             # Keep Google News items for monitoring, but do not push them to editorial candidates.
