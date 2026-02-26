@@ -114,6 +114,32 @@ echorouk-swarm/
 
 ---
 
+## 🧭 Agent Documentation Bundle
+
+The following repository-level documents are the canonical onboarding/context pack for coding agents and contributors:
+
+- `PROJECT_KNOWLEDGE_BASE.md`
+- `DEVELOPMENT_GUIDELINES.md`
+- `STATE_DATA_MANAGEMENT.md`
+- `STYLING_RULES.md`
+- `IMPLEMENTATION_PLAN.md`
+- `TECHNICAL_CONTEXT_TYPES.md`
+- `TECHNICAL_CONTEXT_CONFIG.md`
+- `AGENT_ONBOARDING.md`
+
+Recommended read order:
+
+1. `PROJECT_KNOWLEDGE_BASE.md`
+2. `DEVELOPMENT_GUIDELINES.md`
+3. `STATE_DATA_MANAGEMENT.md`
+4. `STYLING_RULES.md`
+5. `TECHNICAL_CONTEXT_TYPES.md`
+6. `TECHNICAL_CONTEXT_CONFIG.md`
+7. `IMPLEMENTATION_PLAN.md`
+8. `AGENT_ONBOARDING.md`
+
+---
+
 ## 🚀 Quick Start
 
 ### Prerequisites
