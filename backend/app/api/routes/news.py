@@ -185,7 +185,7 @@ async def _expire_stale_breaking_flags(db: AsyncSession) -> None:
         .where(
             and_(
                 Article.is_breaking == True,
-                Article.crawled_at < cutoff,
+                func.coalesce(Article.published_at, Article.crawled_at) < cutoff,
             )
         )
         .values(
@@ -216,18 +216,29 @@ async def list_articles(
     query = select(Article)
     count_query = select(func.count(Article.id))
     breaking_cutoff = datetime.utcnow() - timedelta(minutes=settings.breaking_news_ttl_minutes)
+    freshness_cutoff = datetime.utcnow() - timedelta(hours=settings.scout_max_article_age_hours)
     actionable_breaking_statuses = [NewsStatus.NEW, NewsStatus.CLASSIFIED, NewsStatus.CANDIDATE]
+    newsroom_fresh_statuses = [NewsStatus.NEW, NewsStatus.CLASSIFIED, NewsStatus.CANDIDATE]
 
     # Apply filters
     filters = []
     if status:
         try:
-            filters.append(Article.status == NewsStatus(status))
+            selected_status = NewsStatus(status)
+            filters.append(Article.status == selected_status)
+            if selected_status in newsroom_fresh_statuses:
+                filters.append(func.coalesce(Article.published_at, Article.crawled_at) >= freshness_cutoff)
         except ValueError:
             raise HTTPException(400, f"Invalid status: {status}")
     else:
         # Keep newsroom list focused by hiding auto-archived noise by default.
         filters.append(Article.status != NewsStatus.ARCHIVED)
+        filters.append(
+            or_(
+                Article.status.notin_(newsroom_fresh_statuses),
+                func.coalesce(Article.published_at, Article.crawled_at) >= freshness_cutoff,
+            )
+        )
     if category:
         try:
             filters.append(Article.category == NewsCategory(category))
@@ -288,7 +299,7 @@ async def get_breaking_news(
         .where(
             and_(
                 Article.is_breaking == True,
-                Article.crawled_at >= cutoff,
+                func.coalesce(Article.published_at, Article.crawled_at) >= cutoff,
                 Article.status.in_(actionable_breaking_statuses),
             )
         )

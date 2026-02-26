@@ -34,7 +34,7 @@ async def _expire_stale_breaking_flags(db: AsyncSession) -> None:
         .where(
             and_(
                 Article.is_breaking == True,
-                Article.crawled_at < cutoff,
+                func.coalesce(Article.published_at, Article.crawled_at) < cutoff,
             )
         )
         .values(
@@ -77,7 +77,7 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
         select(func.count(Article.id)).where(
             and_(
                 Article.is_breaking == True,
-                Article.crawled_at >= breaking_cutoff,
+                func.coalesce(Article.published_at, Article.crawled_at) >= breaking_cutoff,
                 Article.status.in_([NewsStatus.NEW, NewsStatus.CLASSIFIED, NewsStatus.CANDIDATE]),
             )
         )

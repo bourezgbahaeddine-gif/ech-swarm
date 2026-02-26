@@ -11,7 +11,9 @@ import time
 import asyncio
 import random
 import ssl
-from datetime import datetime
+import calendar
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from types import SimpleNamespace
 from typing import Optional, Iterable
 from urllib.parse import urljoin, urlparse
@@ -542,6 +544,25 @@ class ScoutAgent:
             if age_hours > max_age:
                 stats["duplicates"] += 1
                 return
+            future_minutes = (published_at - datetime.utcnow()).total_seconds() / 60.0
+            if future_minutes > settings.scout_max_article_future_minutes:
+                stats["duplicates"] += 1
+                logger.info(
+                    "entry_skipped_future_timestamp",
+                    source=source.name,
+                    title=title[:80],
+                    future_minutes=round(future_minutes, 2),
+                )
+                return
+        elif settings.scout_require_timestamp_for_aggregator and self._is_aggregator_source_name(source.name):
+            # Aggregator feeds without timestamps are noisy and often replay stale items.
+            stats["duplicates"] += 1
+            logger.info(
+                "entry_skipped_missing_timestamp_aggregator",
+                source=source.name,
+                title=title[:80],
+            )
+            return
 
         # Get content
         content = ""
@@ -614,11 +635,19 @@ class ScoutAgent:
         Parse publication datetime from feed entries across common feedparser shapes.
         """
         candidates = []
+        string_candidates = []
         if isinstance(entry, dict):
             candidates.extend([
                 entry.get("published_parsed"),
                 entry.get("updated_parsed"),
                 entry.get("created_parsed"),
+            ])
+            string_candidates.extend([
+                entry.get("published"),
+                entry.get("updated"),
+                entry.get("created"),
+                entry.get("pubDate"),
+                entry.get("dc:date"),
             ])
         else:
             candidates.extend([
@@ -626,14 +655,52 @@ class ScoutAgent:
                 getattr(entry, "updated_parsed", None),
                 getattr(entry, "created_parsed", None),
             ])
+            string_candidates.extend([
+                getattr(entry, "published", None),
+                getattr(entry, "updated", None),
+                getattr(entry, "created", None),
+                getattr(entry, "pubDate", None),
+            ])
 
         for value in candidates:
             if value:
                 try:
-                    return datetime(*value[:6])
+                    raw = tuple(value)
+                    if len(raw) < 6:
+                        continue
+                    utc_epoch = calendar.timegm(raw[:9] if len(raw) >= 9 else raw + (0,) * (9 - len(raw)))
+                    return datetime.utcfromtimestamp(utc_epoch)
                 except (ValueError, TypeError):
                     continue
+
+        for value in string_candidates:
+            if not value:
+                continue
+            text = str(value).strip()
+            if not text:
+                continue
+            try:
+                dt = parsedate_to_datetime(text)
+                if dt.tzinfo is not None:
+                    return dt.astimezone(timezone.utc).replace(tzinfo=None)
+                return dt
+            except (TypeError, ValueError):
+                pass
+            try:
+                dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+                if dt.tzinfo is not None:
+                    return dt.astimezone(timezone.utc).replace(tzinfo=None)
+                return dt
+            except ValueError:
+                continue
         return None
+
+    @staticmethod
+    def _is_aggregator_source_name(source_name: str | None) -> bool:
+        src = (source_name or "").lower()
+        if not src:
+            return False
+        return any(token in src for token in ("news.google.com", "google news", "aggregator", "freshrss"))
 
     async def fetch_single_source(self, db: AsyncSession, source_id: int) -> dict:
         """Fetch a single source on-demand."""

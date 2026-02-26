@@ -9,7 +9,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Optional
 
-from sqlalchemy import select, update, and_
+from sqlalchemy import select, update, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -329,7 +329,7 @@ class RouterAgent:
             .where(
                 and_(
                     Article.is_breaking == True,
-                    Article.crawled_at < cutoff,
+                    func.coalesce(Article.published_at, Article.crawled_at) < cutoff,
                 )
             )
             .values(
@@ -338,6 +338,23 @@ class RouterAgent:
                 updated_at=datetime.utcnow(),
             )
         )
+
+    @staticmethod
+    def _article_event_time(article: Article) -> datetime:
+        return article.published_at or article.crawled_at or article.created_at or datetime.utcnow()
+
+    def _is_article_stale_for_newsroom(self, article: Article) -> bool:
+        event_time = self._article_event_time(article)
+        age_hours = (datetime.utcnow() - event_time).total_seconds() / 3600.0
+        return age_hours > float(settings.scout_max_article_age_hours)
+
+    def _is_article_fresh_for_breaking(self, article: Article) -> bool:
+        event_time = self._article_event_time(article)
+        age_minutes = (datetime.utcnow() - event_time).total_seconds() / 60.0
+        if age_minutes < 0:
+            # Future-dated entries must not be marked breaking.
+            return False
+        return age_minutes <= float(settings.breaking_news_ttl_minutes)
 
     async def _classify_article(self, db: AsyncSession, article: Article, source: Optional[Source], stats: dict):
         """Classify a single article using rules + AI fallback."""
@@ -361,12 +378,21 @@ class RouterAgent:
             article.rejection_reason = "auto_filtered:arabic_source_non_arabic_title"
             return
 
+        # Timing gate: do not keep stale entries as "new/candidate" in newsroom flow.
+        if self._is_article_stale_for_newsroom(article):
+            article.status = NewsStatus.ARCHIVED
+            article.is_breaking = False
+            article.urgency = UrgencyLevel.LOW
+            article.importance_score = 0
+            article.rejection_reason = "auto_filtered:stale_article_timing"
+            return
+
         # ── Step 1: Rule-Based Classification (FREE) ──
         category = self._rule_based_category(text)
         urgency = self._rule_based_urgency(text)
 
         # ── Step 2: Check if Breaking News ──
-        if urgency == UrgencyLevel.BREAKING:
+        if urgency == UrgencyLevel.BREAKING and self._is_article_fresh_for_breaking(article):
             article.is_breaking = True
             article.urgency = UrgencyLevel.BREAKING
             stats["breaking"] += 1
@@ -378,6 +404,8 @@ class RouterAgent:
                 source=article.source_name or "Unknown",
                 url=article.original_url,
             )
+        elif urgency == UrgencyLevel.BREAKING:
+            urgency = UrgencyLevel.HIGH
 
         # ── Step 3: AI Classification (only if rule-based is uncertain) ──
         if (
@@ -400,17 +428,19 @@ class RouterAgent:
                 await cache_service.increment_counter("ai_calls_today")
 
                 # Apply AI results
+                was_breaking = bool(article.is_breaking)
+                ai_breaking = bool(analysis.is_breaking) and self._is_article_fresh_for_breaking(article)
                 article.title_ar = analysis.title_ar
                 article.summary = analysis.summary
                 article.category = NewsCategory(analysis.category) if analysis.category in [e.value for e in NewsCategory] else NewsCategory.LOCAL_ALGERIA
                 article.importance_score = analysis.importance_score
-                article.is_breaking = analysis.is_breaking or article.is_breaking
+                article.is_breaking = was_breaking or ai_breaking
                 article.sentiment = analysis.sentiment
                 article.entities = analysis.entities
                 article.keywords = analysis.keywords
                 article.ai_model_used = settings.gemini_model_flash
 
-                if analysis.is_breaking and not article.is_breaking:
+                if ai_breaking and not was_breaking:
                     article.urgency = UrgencyLevel.BREAKING
                     stats["breaking"] += 1
 

@@ -164,6 +164,8 @@ class Settings(BaseSettings):
     scout_max_new_per_run: int = 250
     scout_freshrss_max_per_source_per_run: int = 12
     scout_max_article_age_hours: int = 72
+    scout_max_article_future_minutes: int = 30
+    scout_require_timestamp_for_aggregator: bool = True
     scout_blocked_domains: str = "echoroukonline.com,www.echoroukonline.com"
 
     # TTS
