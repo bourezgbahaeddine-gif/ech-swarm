@@ -362,6 +362,7 @@ async def trigger_scout(
 @router.post("/agents/router/run")
 async def trigger_router(
     request: Request,
+    limit: int = Query(default=settings.router_batch_limit, ge=10, le=500),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -373,7 +374,7 @@ async def trigger_router(
         current_user=current_user,
         job_type="pipeline_router",
         queue_name="ai_router",
-        payload={"source": "dashboard", "limit": settings.router_batch_limit},
+        payload={"source": "dashboard", "limit": limit},
         entity_id="dashboard_router",
     )
     return {"message": "Router queued.", **ticket}

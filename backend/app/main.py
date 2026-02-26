@@ -17,6 +17,7 @@ from datetime import datetime
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select, func
 
 from app.core.config import get_settings
 from app.core.database import init_db
@@ -33,6 +34,7 @@ from app.services.cache_service import cache_service
 from app.schemas import HealthResponse
 from app.core.database import async_session
 from app.agents import scout_agent
+from app.models import Article, NewsStatus
 import structlog
 
 # Import routers
@@ -75,9 +77,27 @@ async def _run_pipeline_once():
     tick_id = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     async with async_session() as db:
         scout_stats = await scout_agent.run(db)
-        router_job_id = None
-        allowed_router, depth_router, limit_router = await job_queue_service.check_backpressure("ai_router")
-        if allowed_router:
+        new_backlog_row = await db.execute(
+            select(func.count(Article.id)).where(Article.status == NewsStatus.NEW)
+        )
+        new_backlog = int(new_backlog_row.scalar() or 0)
+        burst_max = max(1, int(settings.auto_pipeline_router_burst_max))
+        burst_threshold = max(50, int(settings.auto_pipeline_router_burst_backlog_threshold))
+        extra_bursts = min(max(0, burst_max - 1), new_backlog // burst_threshold)
+        router_jobs_target = 1 + extra_bursts
+
+        router_job_ids: list[str] = []
+        for burst_index in range(router_jobs_target):
+            allowed_router, depth_router, limit_router = await job_queue_service.check_backpressure("ai_router")
+            if not allowed_router:
+                logger.warning(
+                    "auto_pipeline_router_backpressure",
+                    depth=depth_router,
+                    limit=limit_router,
+                    requested_jobs=router_jobs_target,
+                    enqueued_jobs=len(router_job_ids),
+                )
+                break
             router_job = await job_queue_service.create_job(
                 db,
                 job_type="pipeline_router",
@@ -85,17 +105,16 @@ async def _run_pipeline_once():
                 payload={
                     "source": "auto_pipeline",
                     "tick_id": tick_id,
+                    "burst_index": burst_index + 1,
                     "limit": settings.router_batch_limit,
-                    "idempotency_key": f"pipeline_router:auto_pipeline:{tick_id}",
+                    "idempotency_key": f"pipeline_router:auto_pipeline:{tick_id}:{burst_index + 1}",
                 },
                 entity_id="auto_pipeline",
                 actor_username="system",
                 max_attempts=3,
             )
             await job_queue_service.enqueue_by_job_type(job_type="pipeline_router", job_id=str(router_job.id))
-            router_job_id = str(router_job.id)
-        else:
-            logger.warning("auto_pipeline_router_backpressure", depth=depth_router, limit=limit_router)
+            router_job_ids.append(str(router_job.id))
         scribe_job_id = None
         if settings.auto_scribe_enabled:
             allowed_scribe, depth_scribe, limit_scribe = await job_queue_service.check_backpressure("ai_scribe")
@@ -120,7 +139,9 @@ async def _run_pipeline_once():
         logger.info(
             "auto_pipeline_tick_done",
             scout=scout_stats,
-            router_job_id=router_job_id,
+            new_backlog=new_backlog,
+            router_jobs_target=router_jobs_target,
+            router_job_ids=router_job_ids,
             scribe_job_id=scribe_job_id,
         )
 

@@ -131,6 +131,8 @@ class Settings(BaseSettings):
     router_batch_limit: int = 120
     router_source_quota: int = 20
     router_candidate_source_quota: int = 10
+    auto_pipeline_router_burst_max: int = 4
+    auto_pipeline_router_burst_backlog_threshold: int = 400
 
     # Provider routing / circuit breaker
     provider_health_window_sec: int = 180
