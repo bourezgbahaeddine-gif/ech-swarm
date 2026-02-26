@@ -63,8 +63,18 @@ class ProviderManager:
         for name, st in self._state.items():
             if st.open_until and st.open_until > now:
                 continue
+            if settings.provider_prefer_configured_only and not self._is_configured(name):
+                continue
             providers.append(name)
         return providers or ["gemini"]
+
+    @staticmethod
+    def _is_configured(provider: str) -> bool:
+        if provider == "groq":
+            return bool((settings.groq_api_key or "").strip())
+        if provider == "gemini":
+            return bool((settings.gemini_api_key or "").strip())
+        return True
 
     def pick(self) -> str:
         eligible = self._eligible()
@@ -111,4 +121,3 @@ class ProviderManager:
 
 
 provider_manager = ProviderManager()
-

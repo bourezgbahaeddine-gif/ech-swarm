@@ -280,7 +280,7 @@ class RouterAgent:
 
     async def process_batch(self, db: AsyncSession, limit: int = 50) -> dict:
         """Process a batch of NEW articles through triage."""
-        stats = {"processed": 0, "candidates": 0, "ai_calls": 0, "breaking": 0}
+        stats = {"processed": 0, "candidates": 0, "ai_calls": 0, "ai_skipped": 0, "breaking": 0}
         await self._expire_stale_breaking_flags(db)
 
         # Pull a wider pool, lock only article rows, then enrich with sources.
@@ -418,42 +418,53 @@ class RouterAgent:
             category = NewsCategory.INTERNATIONAL
 
         if category is None:
-            # Need AI for classification
-            try:
-                analysis = await ai_service.analyze_news(
-                    text[:4000],
-                    source=article.source_name or "",
-                )
-                stats["ai_calls"] += 1
-                await cache_service.increment_counter("ai_calls_today")
+            ai_cap = max(1, int(getattr(settings, "router_ai_calls_per_batch_cap", 24)))
+            if stats["ai_calls"] >= ai_cap:
+                stats["ai_skipped"] += 1
+                article.category = NewsCategory.LOCAL_ALGERIA if has_local_signal else NewsCategory.INTERNATIONAL
+                article.importance_score = self._estimate_importance(text, article.category, urgency)
+                article.urgency = urgency
+                if not article.title_ar:
+                    article.title_ar = article.original_title
+                if not article.summary:
+                    article.summary = (article.original_content or article.original_title)[:300]
+            else:
+                # Need AI for classification
+                try:
+                    analysis = await ai_service.analyze_news(
+                        text[:4000],
+                        source=article.source_name or "",
+                    )
+                    stats["ai_calls"] += 1
+                    await cache_service.increment_counter("ai_calls_today")
 
-                # Apply AI results
-                was_breaking = bool(article.is_breaking)
-                ai_breaking = bool(analysis.is_breaking) and self._is_article_fresh_for_breaking(article)
-                article.title_ar = analysis.title_ar
-                article.summary = analysis.summary
-                article.category = NewsCategory(analysis.category) if analysis.category in [e.value for e in NewsCategory] else NewsCategory.LOCAL_ALGERIA
-                article.importance_score = analysis.importance_score
-                article.is_breaking = was_breaking or ai_breaking
-                article.sentiment = analysis.sentiment
-                article.entities = analysis.entities
-                article.keywords = analysis.keywords
-                article.ai_model_used = settings.gemini_model_flash
+                    # Apply AI results
+                    was_breaking = bool(article.is_breaking)
+                    ai_breaking = bool(analysis.is_breaking) and self._is_article_fresh_for_breaking(article)
+                    article.title_ar = analysis.title_ar
+                    article.summary = analysis.summary
+                    article.category = NewsCategory(analysis.category) if analysis.category in [e.value for e in NewsCategory] else NewsCategory.LOCAL_ALGERIA
+                    article.importance_score = analysis.importance_score
+                    article.is_breaking = was_breaking or ai_breaking
+                    article.sentiment = analysis.sentiment
+                    article.entities = analysis.entities
+                    article.keywords = analysis.keywords
+                    article.ai_model_used = settings.gemini_model_flash
 
-                if ai_breaking and not was_breaking:
-                    article.urgency = UrgencyLevel.BREAKING
-                    stats["breaking"] += 1
+                    if ai_breaking and not was_breaking:
+                        article.urgency = UrgencyLevel.BREAKING
+                        stats["breaking"] += 1
 
-                # Guardrail: avoid classifying clearly non-local stories as local_algeria.
-                source_name = source.name if source and source.name else (article.source_name or "")
-                local_text = f"{article.original_title or ''} {article.original_content or ''}".lower()
-                if article.category == NewsCategory.LOCAL_ALGERIA and self._looks_non_local(local_text, source_name):
-                    article.category = NewsCategory.INTERNATIONAL
+                    # Guardrail: avoid classifying clearly non-local stories as local_algeria.
+                    source_name = source.name if source and source.name else (article.source_name or "")
+                    local_text = f"{article.original_title or ''} {article.original_content or ''}".lower()
+                    if article.category == NewsCategory.LOCAL_ALGERIA and self._looks_non_local(local_text, source_name):
+                        article.category = NewsCategory.INTERNATIONAL
 
-            except Exception as e:
-                logger.warning("ai_classification_failed", error=str(e))
-                article.category = NewsCategory.LOCAL_ALGERIA
-                article.importance_score = 5
+                except Exception as e:
+                    logger.warning("ai_classification_failed", error=str(e))
+                    article.category = NewsCategory.LOCAL_ALGERIA
+                    article.importance_score = 5
         else:
             # Rule-based category was sufficient
             article.category = category

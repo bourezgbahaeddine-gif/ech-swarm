@@ -247,7 +247,7 @@ async def list_articles(
     if is_breaking is not None:
         filters.append(Article.is_breaking == is_breaking)
         if is_breaking:
-            filters.append(Article.crawled_at >= breaking_cutoff)
+            filters.append(func.coalesce(Article.published_at, Article.crawled_at) >= breaking_cutoff)
             if not status:
                 filters.append(Article.status.in_(actionable_breaking_statuses))
     if search:

@@ -146,9 +146,23 @@ async def _run_pipeline_once():
         )
 
 
+async def _new_backlog_count(db) -> int:
+    row = await db.execute(select(func.count(Article.id)).where(Article.status == NewsStatus.NEW))
+    return int(row.scalar() or 0)
+
+
 async def _run_trends_once():
     tick_id = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     async with async_session() as db:
+        if settings.defer_noncritical_jobs_when_backlog_high:
+            new_backlog = await _new_backlog_count(db)
+            if new_backlog >= max(100, int(settings.noncritical_backlog_threshold)):
+                logger.info(
+                    "auto_trends_deferred_backlog_pressure",
+                    new_backlog=new_backlog,
+                    threshold=settings.noncritical_backlog_threshold,
+                )
+                return
         active_job = await job_queue_service.find_active_job(
             db,
             job_type="trends_scan",
@@ -185,6 +199,15 @@ async def _run_trends_once():
 async def _run_published_monitor_once():
     tick_id = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     async with async_session() as db:
+        if settings.defer_noncritical_jobs_when_backlog_high:
+            new_backlog = await _new_backlog_count(db)
+            if new_backlog >= max(100, int(settings.noncritical_backlog_threshold)):
+                logger.info(
+                    "auto_published_monitor_deferred_backlog_pressure",
+                    new_backlog=new_backlog,
+                    threshold=settings.noncritical_backlog_threshold,
+                )
+                return
         allowed, depth, limit_depth = await job_queue_service.check_backpressure("ai_quality")
         if not allowed:
             logger.warning("auto_published_monitor_backpressure", depth=depth, limit=limit_depth)

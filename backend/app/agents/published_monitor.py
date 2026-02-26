@@ -153,7 +153,7 @@ class PublishedContentMonitorAgent:
                         body_text=body_text,
                         url=url,
                         published_at=published_at,
-                        use_llm=(idx < 8),
+                        use_llm=(idx < max(0, settings.published_monitor_llm_items_limit)),
                     )
                 )
 

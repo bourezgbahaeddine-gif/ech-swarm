@@ -12,11 +12,11 @@ import asyncio
 import random
 import ssl
 import calendar
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 from types import SimpleNamespace
 from typing import Optional, Iterable
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlunparse
 
 import feedparser
 import aiohttp
@@ -240,6 +240,61 @@ class ScoutAgent:
             if blocked in source_name_l:
                 return True
         return False
+
+    @staticmethod
+    def _canonicalize_url(url: str) -> str:
+        if not url:
+            return ""
+        try:
+            parsed = urlparse(url.strip())
+            # Normalize tracking-heavy URLs (Google RSS links often differ only by query params).
+            return urlunparse(parsed._replace(query="", fragment=""))
+        except Exception:
+            return (url or "").strip()
+
+    def _is_aggregator_entry(self, source_name: str | None, link: str | None) -> bool:
+        if self._is_aggregator_source_name(source_name):
+            return True
+        host = self._normalized_host(link or "")
+        return host in {"news.google.com"}
+
+    async def _is_cross_source_duplicate(
+        self,
+        db: AsyncSession,
+        title: str,
+        published_at: Optional[datetime],
+    ) -> bool:
+        if not settings.scout_cross_source_dedup_enabled:
+            return False
+
+        from app.utils.hashing import is_duplicate_title
+
+        now = datetime.utcnow()
+        cutoff = now - timedelta(hours=max(1, settings.scout_cross_source_dedup_window_hours))
+        stmt = (
+            select(Article.original_title)
+            .where(Article.created_at >= cutoff)
+            .where(Article.status != NewsStatus.ARCHIVED)
+            .order_by(Article.created_at.desc())
+            .limit(max(10, settings.scout_cross_source_dedup_candidates_limit))
+        )
+        if published_at:
+            tolerance = timedelta(hours=max(1, settings.scout_cross_source_publish_tolerance_hours))
+            stmt = stmt.where(
+                func.coalesce(Article.published_at, Article.crawled_at) >= (published_at - tolerance),
+                func.coalesce(Article.published_at, Article.crawled_at) <= (published_at + tolerance),
+            )
+
+        rows = await db.execute(stmt)
+        existing_titles = [t for t in rows.scalars().all() if t]
+        if not existing_titles:
+            return False
+
+        threshold = max(
+            float(settings.dedup_similarity_threshold),
+            float(settings.scout_cross_source_title_similarity_threshold),
+        )
+        return is_duplicate_title(title, existing_titles, threshold)
 
     @staticmethod
     def _entry_source_name(entry) -> str:
@@ -497,6 +552,12 @@ class ScoutAgent:
         if not title or not link:
             return
 
+        # Parse publication date early so timing and dedup gates share event time.
+        published_at = self._extract_entry_datetime(entry)
+        raw_link = link.strip()
+        canonical_link = self._canonicalize_url(raw_link)
+        link = canonical_link or raw_link
+
         if self._is_blocked_source_entry(source.name, link):
             stats["duplicates"] += 1
             logger.info(
@@ -525,17 +586,35 @@ class ScoutAgent:
             await cache_service.mark_url_processed(unique_hash)
             return
 
-        # Step 2: Fuzzy title dedup (Levenshtein)
+        # Step 2: URL-level dedup across sources.
+        url_candidates = [u for u in {raw_link, canonical_link} if u]
+        if url_candidates:
+            existing_url = await db.execute(
+                select(Article.id).where(Article.original_url.in_(url_candidates)).limit(1)
+            )
+            if existing_url.scalar_one_or_none():
+                stats["duplicates"] += 1
+                await cache_service.mark_url_processed(unique_hash)
+                return
+
+        # Step 3: Fuzzy title dedup (Levenshtein)
         from app.utils.hashing import is_duplicate_title
-        recent_titles = await cache_service.get_recent_titles(50)
+        recent_titles = await cache_service.get_recent_titles(200)
         if is_duplicate_title(title, recent_titles, settings.dedup_similarity_threshold):
             stats["duplicates"] += 1
             return
 
-        # ── Normalize & Store ──
+        # Step 4: Cross-source title/time dedup.
+        if await self._is_cross_source_duplicate(db, title, published_at):
+            stats["duplicates"] += 1
+            logger.info(
+                "entry_skipped_cross_source_duplicate",
+                source=source.name,
+                title=title[:80],
+            )
+            return
 
-        # Parse publication date (works for FeedParserDict and objects)
-        published_at = self._extract_entry_datetime(entry)
+        # ── Normalize & Store ──
 
         # Freshness gate: skip very old items to avoid flooding newsroom with backlog.
         if published_at:
@@ -554,7 +633,7 @@ class ScoutAgent:
                     future_minutes=round(future_minutes, 2),
                 )
                 return
-        elif settings.scout_require_timestamp_for_aggregator and self._is_aggregator_source_name(source.name):
+        elif settings.scout_require_timestamp_for_aggregator and self._is_aggregator_entry(source.name, link):
             # Aggregator feeds without timestamps are noisy and often replay stale items.
             stats["duplicates"] += 1
             logger.info(

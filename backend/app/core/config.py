@@ -96,6 +96,7 @@ class Settings(BaseSettings):
     published_monitor_interval_minutes: int = 15
     published_monitor_feed_url: str = "https://www.echoroukonline.com/feed"
     published_monitor_limit: int = 12
+    published_monitor_llm_items_limit: int = 4
     published_monitor_fetch_timeout: int = 12
     published_monitor_alert_threshold: int = 75
     competitor_xray_enabled: bool = True
@@ -133,8 +134,11 @@ class Settings(BaseSettings):
     router_candidate_source_quota: int = 10
     router_rule_min_hits: int = 1
     router_skip_ai_for_non_local_aggregator: bool = True
+    router_ai_calls_per_batch_cap: int = 24
     auto_pipeline_router_burst_max: int = 4
     auto_pipeline_router_burst_backlog_threshold: int = 400
+    defer_noncritical_jobs_when_backlog_high: bool = True
+    noncritical_backlog_threshold: int = 1200
 
     # Provider routing / circuit breaker
     provider_health_window_sec: int = 180
@@ -142,6 +146,7 @@ class Settings(BaseSettings):
     provider_circuit_open_sec: int = 60
     provider_weight_gemini: float = 0.7
     provider_weight_groq: float = 0.3
+    provider_prefer_configured_only: bool = True
 
     # FreshRSS / RSS-Bridge
     scout_use_freshrss: bool = False
@@ -166,6 +171,11 @@ class Settings(BaseSettings):
     scout_max_article_age_hours: int = 72
     scout_max_article_future_minutes: int = 30
     scout_require_timestamp_for_aggregator: bool = True
+    scout_cross_source_dedup_enabled: bool = True
+    scout_cross_source_dedup_window_hours: int = 18
+    scout_cross_source_publish_tolerance_hours: int = 6
+    scout_cross_source_title_similarity_threshold: float = 0.88
+    scout_cross_source_dedup_candidates_limit: int = 250
     scout_blocked_domains: str = "echoroukonline.com,www.echoroukonline.com"
 
     # TTS

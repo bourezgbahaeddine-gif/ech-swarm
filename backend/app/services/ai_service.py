@@ -30,6 +30,11 @@ class AIService:
         self._groq_client = None
 
     @staticmethod
+    def _is_rate_limited_error(exc: Exception) -> bool:
+        message = str(exc).lower()
+        return "429" in message or "rate limit" in message or "resource exhausted" in message
+
+    @staticmethod
     def _resolve_gemini_model(model_name: str, use_pro_default: bool = False) -> str:
         """Map retired Gemini 1.5 model names to supported 2.x defaults."""
         fallback = "gemini-2.5-pro" if use_pro_default else "gemini-2.5-flash"
@@ -119,6 +124,10 @@ Output Schema (JSON only, no markdown):
             logger.error("ai_json_parse_error", error=str(e))
             return AIAnalysisResult()
         except Exception as e:
+            if self._is_rate_limited_error(e):
+                # Fast-fail for quota saturation to avoid expensive retry storms.
+                logger.warning("ai_analysis_rate_limited", error=str(e))
+                return AIAnalysisResult()
             logger.error("ai_analysis_error", error=str(e))
             raise
 
