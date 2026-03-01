@@ -148,7 +148,7 @@ export default function EventsPage() {
     });
 
     const importMutation = useMutation({
-        mutationFn: (overwrite = false) => eventsApi.importDb({ overwrite }),
+        mutationFn: ({ overwrite }: { overwrite: boolean }) => eventsApi.importDb({ overwrite }),
         onSuccess: async (res) => {
             const d = res.data;
             setError(null);
@@ -198,7 +198,7 @@ export default function EventsPage() {
                 {canManage && (
                     <div className="flex gap-2">
                         <button
-                            onClick={() => importMutation.mutate(false)}
+                            onClick={() => importMutation.mutate({ overwrite: false })}
                             disabled={importMutation.isPending}
                             className="h-10 px-3 rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-xs inline-flex items-center gap-1 disabled:opacity-60"
                         >
@@ -206,7 +206,7 @@ export default function EventsPage() {
                             استيراد event_db
                         </button>
                         <button
-                            onClick={() => importMutation.mutate(true)}
+                            onClick={() => importMutation.mutate({ overwrite: true })}
                             disabled={importMutation.isPending}
                             className="h-10 px-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-200 text-xs disabled:opacity-60"
                         >
@@ -504,4 +504,3 @@ function StatCard({ label, value }: { label: string; value: number }) {
         </div>
     );
 }
-
