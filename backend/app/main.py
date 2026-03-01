@@ -56,6 +56,7 @@ from app.api.routes.competitor_xray import router as competitor_xray_router
 from app.api.routes.jobs import router as jobs_router
 from app.api.routes.stories import router as stories_router
 from app.api.routes.scripts import router as scripts_router
+from app.api.routes.events import router as events_router
 from app.msi.scheduler import start_msi_scheduler, stop_msi_scheduler
 from app.services.competitor_xray_service import competitor_xray_service
 from app.services.job_queue_service import job_queue_service
@@ -504,6 +505,7 @@ app.include_router(competitor_xray_router, prefix="/api/v1")
 app.include_router(jobs_router, prefix="/api/v1")
 app.include_router(stories_router, prefix="/api/v1")
 app.include_router(scripts_router, prefix="/api/v1")
+app.include_router(events_router, prefix="/api/v1")
 
 
 # ── Health Check ──

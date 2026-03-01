@@ -66,6 +66,7 @@ from app.models.script import (
     ScriptOutput,
     ScriptOutputFormat,
 )
+from app.models.event_memo import EventMemoItem
 
 __all__ = [
     "Source", "Article", "EditorDecision", "EditorialDraft", "FeedbackLog",
@@ -127,4 +128,5 @@ __all__ = [
     "ScriptProjectStatus",
     "ScriptOutput",
     "ScriptOutputFormat",
+    "EventMemoItem",
 ]

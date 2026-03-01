@@ -875,6 +875,65 @@ export interface ProjectMemoryListResponse {
     pages: number;
 }
 
+export type EventMemoScope = 'national' | 'international' | 'religious';
+export type EventMemoStatus = 'planned' | 'monitoring' | 'covered' | 'dismissed';
+
+export interface EventMemoItem {
+    id: number;
+    scope: EventMemoScope | string;
+    title: string;
+    summary: string | null;
+    coverage_plan: string | null;
+    starts_at: string;
+    ends_at: string | null;
+    timezone: string;
+    country_code: string | null;
+    is_all_day: boolean;
+    lead_time_hours: number;
+    priority: number;
+    status: EventMemoStatus | string;
+    source_url: string | null;
+    tags: string[];
+    prep_starts_at: string;
+    is_due_soon: boolean;
+    is_overdue: boolean;
+    created_by_user_id: number | null;
+    created_by_username: string | null;
+    updated_by_user_id: number | null;
+    updated_by_username: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface EventMemoListResponse {
+    items: EventMemoItem[];
+    total: number;
+    page: number;
+    per_page: number;
+    pages: number;
+}
+
+export interface EventMemoOverview {
+    window_days: number;
+    total: number;
+    upcoming_24h: number;
+    upcoming_7d: number;
+    overdue: number;
+    by_scope: Record<string, number>;
+    by_status: Record<string, number>;
+}
+
+export interface EventMemoImportResult {
+    message: string;
+    file: string;
+    total_records: number;
+    created: number;
+    updated: number;
+    skipped: number;
+    errors_count: number;
+    errors: Array<{ index: number; error: string }>;
+}
+
 export interface MsiProfileInfo {
     id: string;
     display_name: string;
@@ -1267,6 +1326,58 @@ export const memoryApi = {
         api.post<ProjectMemoryEvent>(`/memory/items/${itemId}/use`, { note }),
     events: (itemId: number, limit = 50) =>
         api.get<ProjectMemoryEvent[]>(`/memory/items/${itemId}/events`, { params: { limit } }),
+};
+
+export const eventsApi = {
+    overview: (params?: { window_days?: number }) =>
+        api.get<EventMemoOverview>('/events/overview', { params }),
+    list: (params?: {
+        q?: string;
+        scope?: EventMemoScope;
+        status?: EventMemoStatus;
+        only_active?: boolean;
+        from_at?: string;
+        to_at?: string;
+        page?: number;
+        per_page?: number;
+    }) => api.get<EventMemoListResponse>('/events/', { params }),
+    upcoming: (params?: { hours?: number; limit?: number }) =>
+        api.get<EventMemoItem[]>('/events/upcoming', { params }),
+    create: (payload: {
+        scope: EventMemoScope;
+        title: string;
+        summary?: string | null;
+        coverage_plan?: string | null;
+        starts_at: string;
+        ends_at?: string | null;
+        timezone?: string;
+        country_code?: string | null;
+        is_all_day?: boolean;
+        lead_time_hours?: number;
+        priority?: number;
+        status?: EventMemoStatus;
+        source_url?: string | null;
+        tags?: string[];
+    }) => api.post<EventMemoItem>('/events/', payload),
+    update: (eventId: number, payload: Partial<{
+        scope: EventMemoScope;
+        title: string;
+        summary: string | null;
+        coverage_plan: string | null;
+        starts_at: string;
+        ends_at: string | null;
+        timezone: string;
+        country_code: string | null;
+        is_all_day: boolean;
+        lead_time_hours: number;
+        priority: number;
+        status: EventMemoStatus;
+        source_url: string | null;
+        tags: string[];
+    }>) => api.patch<EventMemoItem>(`/events/${eventId}`, payload),
+    remove: (eventId: number) => api.delete<{ message: string }>(`/events/${eventId}`),
+    importDb: (params?: { overwrite?: boolean }) =>
+        api.post<EventMemoImportResult>('/events/import-db', null, { params }),
 };
 
 export const msiApi = {
