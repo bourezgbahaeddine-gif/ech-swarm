@@ -28,8 +28,14 @@ class EventMemoItem(Base):
     lead_time_hours = Column(Integer, nullable=False, default=24)
     priority = Column(Integer, nullable=False, default=3)
     status = Column(String(24), nullable=False, default="planned", index=True)
+    readiness_status = Column(String(24), nullable=False, default="idea", index=True)
     source_url = Column(String(2048), nullable=True)
     tags = Column(JSON, default=list)
+    checklist = Column(JSON, default=list)
+    preparation_started_at = Column(DateTime, nullable=True)
+
+    owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    owner_username = Column(String(64), nullable=True)
 
     created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     created_by_username = Column(String(64), nullable=True)
@@ -41,5 +47,5 @@ class EventMemoItem(Base):
     __table_args__ = (
         Index("ix_event_memo_scope_status_start", "scope", "status", "starts_at"),
         Index("ix_event_memo_status_start", "status", "starts_at"),
+        Index("ix_event_memo_owner_status_start", "owner_user_id", "status", "starts_at"),
     )
-

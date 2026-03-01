@@ -877,6 +877,7 @@ export interface ProjectMemoryListResponse {
 
 export type EventMemoScope = 'national' | 'international' | 'religious';
 export type EventMemoStatus = 'planned' | 'monitoring' | 'covered' | 'dismissed';
+export type EventMemoReadiness = 'idea' | 'assigned' | 'prepared' | 'ready' | 'covered';
 
 export interface EventMemoItem {
     id: number;
@@ -892,11 +893,16 @@ export interface EventMemoItem {
     lead_time_hours: number;
     priority: number;
     status: EventMemoStatus | string;
+    readiness_status: EventMemoReadiness | string;
     source_url: string | null;
     tags: string[];
+    checklist: string[];
     prep_starts_at: string;
     is_due_soon: boolean;
     is_overdue: boolean;
+    preparation_started_at: string | null;
+    owner_user_id: number | null;
+    owner_username: string | null;
     created_by_user_id: number | null;
     created_by_username: string | null;
     updated_by_user_id: number | null;
@@ -921,6 +927,13 @@ export interface EventMemoOverview {
     overdue: number;
     by_scope: Record<string, number>;
     by_status: Record<string, number>;
+    reminders: Record<string, number>;
+    kpi: Record<string, number>;
+}
+
+export interface EventMemoRemindersResponse {
+    t24: EventMemoItem[];
+    t6: EventMemoItem[];
 }
 
 export interface EventMemoImportResult {
@@ -1331,6 +1344,8 @@ export const memoryApi = {
 export const eventsApi = {
     overview: (params?: { window_days?: number }) =>
         api.get<EventMemoOverview>('/events/overview', { params }),
+    reminders: (params?: { limit?: number }) =>
+        api.get<EventMemoRemindersResponse>('/events/reminders', { params }),
     list: (params?: {
         q?: string;
         scope?: EventMemoScope;
@@ -1356,8 +1371,11 @@ export const eventsApi = {
         lead_time_hours?: number;
         priority?: number;
         status?: EventMemoStatus;
+        readiness_status?: EventMemoReadiness;
         source_url?: string | null;
         tags?: string[];
+        checklist?: string[];
+        owner_user_id?: number | null;
     }) => api.post<EventMemoItem>('/events/', payload),
     update: (eventId: number, payload: Partial<{
         scope: EventMemoScope;
@@ -1372,8 +1390,12 @@ export const eventsApi = {
         lead_time_hours: number;
         priority: number;
         status: EventMemoStatus;
+        readiness_status: EventMemoReadiness;
         source_url: string | null;
         tags: string[];
+        checklist: string[];
+        owner_user_id: number | null;
+        preparation_started_at: string | null;
     }>) => api.patch<EventMemoItem>(`/events/${eventId}`, payload),
     remove: (eventId: number) => api.delete<{ message: string }>(`/events/${eventId}`),
     importDb: (params?: { overwrite?: boolean }) =>

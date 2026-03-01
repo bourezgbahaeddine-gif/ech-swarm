@@ -18,8 +18,11 @@ class EventMemoCreateRequest(BaseModel):
     lead_time_hours: int = Field(default=24, ge=1, le=336)
     priority: int = Field(default=3, ge=1, le=5)
     status: str = Field(default="planned", pattern="^(planned|monitoring|covered|dismissed)$")
+    readiness_status: str = Field(default="idea", pattern="^(idea|assigned|prepared|ready|covered)$")
     source_url: str | None = Field(default=None, max_length=2048)
     tags: list[str] = Field(default_factory=list)
+    checklist: list[str] = Field(default_factory=list)
+    owner_user_id: int | None = Field(default=None, ge=1)
 
 
 class EventMemoUpdateRequest(BaseModel):
@@ -35,8 +38,12 @@ class EventMemoUpdateRequest(BaseModel):
     lead_time_hours: int | None = Field(default=None, ge=1, le=336)
     priority: int | None = Field(default=None, ge=1, le=5)
     status: str | None = Field(default=None, pattern="^(planned|monitoring|covered|dismissed)$")
+    readiness_status: str | None = Field(default=None, pattern="^(idea|assigned|prepared|ready|covered)$")
     source_url: str | None = Field(default=None, max_length=2048)
     tags: list[str] | None = None
+    checklist: list[str] | None = None
+    owner_user_id: int | None = Field(default=None, ge=1)
+    preparation_started_at: datetime | None = None
 
 
 class EventMemoResponse(BaseModel):
@@ -53,11 +60,16 @@ class EventMemoResponse(BaseModel):
     lead_time_hours: int
     priority: int
     status: str
+    readiness_status: str
     source_url: str | None = None
     tags: list[str] = Field(default_factory=list)
+    checklist: list[str] = Field(default_factory=list)
     prep_starts_at: datetime
     is_due_soon: bool
     is_overdue: bool
+    preparation_started_at: datetime | None = None
+    owner_user_id: int | None = None
+    owner_username: str | None = None
     created_by_user_id: int | None = None
     created_by_username: str | None = None
     updated_by_user_id: int | None = None
@@ -82,4 +94,10 @@ class EventMemoOverviewResponse(BaseModel):
     overdue: int
     by_scope: dict[str, int] = Field(default_factory=dict)
     by_status: dict[str, int] = Field(default_factory=dict)
+    reminders: dict[str, int] = Field(default_factory=dict)
+    kpi: dict[str, float | int] = Field(default_factory=dict)
 
+
+class EventMemoRemindersResponse(BaseModel):
+    t24: list[EventMemoResponse] = Field(default_factory=list)
+    t6: list[EventMemoResponse] = Field(default_factory=list)

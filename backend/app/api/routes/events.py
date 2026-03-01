@@ -21,6 +21,7 @@ from app.schemas.events import (
     EventMemoCreateRequest,
     EventMemoListResponse,
     EventMemoOverviewResponse,
+    EventMemoRemindersResponse,
     EventMemoResponse,
     EventMemoUpdateRequest,
 )
@@ -46,6 +47,7 @@ MANAGE_ROLES = {
     UserRole.editor_chief,
 }
 ACTIVE_STATUSES = {"planned", "monitoring"}
+READINESS_STATES = {"idea", "assigned", "prepared", "ready", "covered"}
 EVENT_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "events" / "event_db.json"
 
 
@@ -116,6 +118,34 @@ def _normalize_tags(values: list[str] | None) -> list[str]:
     return items
 
 
+def _normalize_string_list(values: list[str] | None, max_items: int = 20, max_len: int = 140) -> list[str]:
+    if not values:
+        return []
+    items: list[str] = []
+    seen = set()
+    for value in values[:max_items]:
+        clean = (value or "").strip()
+        if not clean:
+            continue
+        clean = clean[:max_len]
+        key = clean.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(clean)
+    return items
+
+
+async def _resolve_owner(db: AsyncSession, owner_user_id: int | None) -> tuple[int | None, str | None]:
+    if owner_user_id is None:
+        return None, None
+    row = await db.execute(select(User).where(User.id == owner_user_id))
+    user = row.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=400, detail="المستخدم المسؤول غير موجود.")
+    return user.id, user.username
+
+
 def _as_response(item: EventMemoItem, now: datetime | None = None) -> EventMemoResponse:
     now = now or datetime.utcnow()
     prep_starts_at = item.starts_at - timedelta(hours=max(1, int(item.lead_time_hours or 24)))
@@ -135,11 +165,16 @@ def _as_response(item: EventMemoItem, now: datetime | None = None) -> EventMemoR
         lead_time_hours=item.lead_time_hours,
         priority=item.priority,
         status=item.status,
+        readiness_status=item.readiness_status,
         source_url=item.source_url,
         tags=item.tags or [],
+        checklist=item.checklist or [],
         prep_starts_at=prep_starts_at,
         is_due_soon=is_due_soon,
         is_overdue=is_overdue,
+        preparation_started_at=item.preparation_started_at,
+        owner_user_id=item.owner_user_id,
+        owner_username=item.owner_username,
         created_by_user_id=item.created_by_user_id,
         created_by_username=item.created_by_username,
         updated_by_user_id=item.updated_by_user_id,
@@ -192,6 +227,12 @@ async def overview(
     upcoming_7d = 0
     overdue = 0
     total = 0
+    reminder_t24 = 0
+    reminder_t6 = 0
+    due_total = 0
+    covered_due = 0
+    prep_eligible = 0
+    prep_on_time = 0
     for item in items:
         by_scope[item.scope] = by_scope.get(item.scope, 0) + 1
         by_status[item.status] = by_status.get(item.status, 0) + 1
@@ -203,6 +244,24 @@ async def overview(
                 upcoming_24h += 1
             if now <= item.starts_at <= now + timedelta(days=7):
                 upcoming_7d += 1
+            if now < item.starts_at <= now + timedelta(hours=24):
+                reminder_t24 += 1
+            if now < item.starts_at <= now + timedelta(hours=6):
+                reminder_t6 += 1
+
+        if item.starts_at <= now:
+            due_total += 1
+            if item.status == "covered":
+                covered_due += 1
+            if item.status != "dismissed":
+                prep_eligible += 1
+                if item.preparation_started_at:
+                    prep_deadline = item.starts_at - timedelta(hours=max(1, int(item.lead_time_hours or 24)))
+                    if item.preparation_started_at <= prep_deadline:
+                        prep_on_time += 1
+
+    coverage_rate = round((covered_due / due_total) * 100, 1) if due_total else 0.0
+    on_time_preparation_rate = round((prep_on_time / prep_eligible) * 100, 1) if prep_eligible else 0.0
 
     return EventMemoOverviewResponse(
         window_days=window_days,
@@ -212,7 +271,48 @@ async def overview(
         overdue=overdue,
         by_scope=by_scope,
         by_status=by_status,
+        reminders={"t24_due": reminder_t24, "t6_due": reminder_t6},
+        kpi={
+            "due_total": due_total,
+            "covered_due": covered_due,
+            "coverage_rate": coverage_rate,
+            "missed_events": overdue,
+            "prep_eligible": prep_eligible,
+            "prep_on_time": prep_on_time,
+            "on_time_preparation_rate": on_time_preparation_rate,
+        },
     )
+
+
+@router.get("/reminders", response_model=EventMemoRemindersResponse)
+async def reminders(
+    limit: int = Query(default=50, ge=1, le=300),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _assert_read(current_user)
+    await _ensure_events_table(db)
+    now = datetime.utcnow()
+    window_end = now + timedelta(hours=24)
+    rows = await db.execute(
+        select(EventMemoItem)
+        .where(
+            EventMemoItem.status.in_(list(ACTIVE_STATUSES)),
+            EventMemoItem.starts_at > now,
+            EventMemoItem.starts_at <= window_end,
+        )
+        .order_by(EventMemoItem.starts_at.asc(), EventMemoItem.priority.desc())
+        .limit(limit)
+    )
+    t24: list[EventMemoResponse] = []
+    t6: list[EventMemoResponse] = []
+    for item in rows.scalars().all():
+        response = _as_response(item, now=now)
+        if item.starts_at <= now + timedelta(hours=6):
+            t6.append(response)
+        else:
+            t24.append(response)
+    return EventMemoRemindersResponse(t24=t24, t6=t6)
 
 
 @router.get("/", response_model=EventMemoListResponse)
@@ -301,6 +401,14 @@ async def create_event(
     ends_at = _normalize_dt(payload.ends_at)
     assert starts_at is not None
     _validate_dates(starts_at, ends_at)
+    owner_user_id, owner_username = await _resolve_owner(db, payload.owner_user_id)
+    readiness_status = payload.readiness_status if payload.readiness_status in READINESS_STATES else "idea"
+    preparation_started_at = None
+    if readiness_status in {"prepared", "ready", "covered"}:
+        preparation_started_at = datetime.utcnow()
+    if payload.status == "covered":
+        readiness_status = "covered"
+
     item = EventMemoItem(
         scope=payload.scope,
         title=_clean_title(payload.title),
@@ -314,8 +422,13 @@ async def create_event(
         lead_time_hours=payload.lead_time_hours,
         priority=payload.priority,
         status=payload.status,
+        readiness_status=readiness_status,
         source_url=_normalize_text(payload.source_url),
         tags=_normalize_tags(payload.tags),
+        checklist=_normalize_string_list(payload.checklist, max_items=30),
+        preparation_started_at=preparation_started_at,
+        owner_user_id=owner_user_id,
+        owner_username=owner_username,
         created_by_user_id=current_user.id,
         created_by_username=current_user.username,
         updated_by_user_id=current_user.id,
@@ -377,10 +490,28 @@ async def update_event(
         item.priority = int(data["priority"])
     if "status" in data:
         item.status = data["status"]
+        if item.status == "covered":
+            item.readiness_status = "covered"
+            if item.preparation_started_at is None:
+                item.preparation_started_at = datetime.utcnow()
     if "source_url" in data:
         item.source_url = _normalize_text(data["source_url"])
     if "tags" in data:
         item.tags = _normalize_tags(data["tags"])
+    if "checklist" in data:
+        item.checklist = _normalize_string_list(data["checklist"], max_items=30)
+    if "owner_user_id" in data:
+        owner_user_id, owner_username = await _resolve_owner(db, data["owner_user_id"])
+        item.owner_user_id = owner_user_id
+        item.owner_username = owner_username
+    if "readiness_status" in data:
+        item.readiness_status = data["readiness_status"]
+        if item.readiness_status in {"prepared", "ready", "covered"} and item.preparation_started_at is None:
+            item.preparation_started_at = datetime.utcnow()
+        if item.readiness_status == "covered":
+            item.status = "covered"
+    if "preparation_started_at" in data:
+        item.preparation_started_at = _normalize_dt(data["preparation_started_at"])
 
     item.updated_by_user_id = current_user.id
     item.updated_by_username = current_user.username
@@ -466,13 +597,23 @@ async def import_events_db(
                 "lead_time_hours": int(item.get("lead_time_hours", 24)),
                 "priority": int(item.get("priority", 3)),
                 "status": str(item.get("status") or "planned").strip().lower() or "planned",
+                "readiness_status": str(item.get("readiness_status") or "idea").strip().lower() or "idea",
                 "source_url": _normalize_text(item.get("source_url")),
                 "tags": _normalize_tags(item.get("tags") if isinstance(item.get("tags"), list) else []),
+                "checklist": _normalize_string_list(item.get("checklist") if isinstance(item.get("checklist"), list) else [], max_items=30),
             }
             if record["status"] not in {"planned", "monitoring", "covered", "dismissed"}:
                 record["status"] = "planned"
+            if record["readiness_status"] not in READINESS_STATES:
+                record["readiness_status"] = "idea"
+            if record["status"] == "covered":
+                record["readiness_status"] = "covered"
             record["lead_time_hours"] = max(1, min(336, record["lead_time_hours"]))
             record["priority"] = max(1, min(5, record["priority"]))
+            prep_started_raw = _parse_seed_datetime(item.get("preparation_started_at"))
+            if prep_started_raw is None and record["readiness_status"] in {"prepared", "ready", "covered"}:
+                prep_started_raw = datetime.utcnow()
+            record["preparation_started_at"] = prep_started_raw
 
             if existing is None:
                 created += 1

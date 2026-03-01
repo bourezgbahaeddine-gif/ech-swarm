@@ -19,6 +19,7 @@ import {
 import {
     eventsApi,
     type EventMemoItem,
+    type EventMemoReadiness,
     type EventMemoScope,
     type EventMemoStatus,
 } from '@/lib/api';
@@ -63,6 +64,17 @@ function statusClass(status: string): string {
     return 'border-gray-500/30 bg-gray-500/10 text-gray-300';
 }
 
+function readinessLabel(readiness: string): string {
+    const labels: Record<string, string> = {
+        idea: 'فكرة',
+        assigned: 'مُسنَد',
+        prepared: 'قيد التحضير',
+        ready: 'جاهز للتغطية',
+        covered: 'مكتمل',
+    };
+    return labels[readiness] || readiness;
+}
+
 export default function EventsPage() {
     const { user } = useAuth();
     const role = (user?.role || '').toLowerCase();
@@ -83,10 +95,13 @@ export default function EventsPage() {
     const [formPlan, setFormPlan] = useState('');
     const [formSourceUrl, setFormSourceUrl] = useState('');
     const [formScope, setFormScope] = useState<EventMemoScope>('national');
+    const [formReadiness, setFormReadiness] = useState<EventMemoReadiness>('idea');
     const [formStartsAt, setFormStartsAt] = useState('');
     const [formLeadHours, setFormLeadHours] = useState(24);
     const [formPriority, setFormPriority] = useState(3);
     const [formTags, setFormTags] = useState('');
+    const [formChecklist, setFormChecklist] = useState('');
+    const [formOwnerUserId, setFormOwnerUserId] = useState('');
 
     const overviewQuery = useQuery({
         queryKey: ['events-overview'],
@@ -107,6 +122,12 @@ export default function EventsPage() {
             }),
     });
 
+    const remindersQuery = useQuery({
+        queryKey: ['events-reminders'],
+        queryFn: () => eventsApi.reminders({ limit: 30 }),
+        refetchInterval: 30000,
+    });
+
     const items = useMemo(() => (listQuery.data?.data?.items || []) as EventMemoItem[], [listQuery.data?.data?.items]);
     const selected = useMemo(() => items.find((item) => item.id === selectedId) || null, [items, selectedId]);
     const listError = listQuery.isError ? apiErrorMessage(listQuery.error, 'Failed to load events list.') : null;
@@ -114,6 +135,7 @@ export default function EventsPage() {
     const refreshBoard = async () => {
         await queryClient.invalidateQueries({ queryKey: ['events-list'] });
         await queryClient.invalidateQueries({ queryKey: ['events-overview'] });
+        await queryClient.invalidateQueries({ queryKey: ['events-reminders'] });
     };
 
     const createMutation = useMutation({
@@ -129,7 +151,13 @@ export default function EventsPage() {
                 starts_at: parsed.toISOString(),
                 lead_time_hours: formLeadHours,
                 priority: formPriority,
+                readiness_status: formReadiness,
                 tags: formTags.split(',').map((v) => v.trim()).filter(Boolean),
+                checklist: formChecklist
+                    .split('\n')
+                    .map((v) => v.trim())
+                    .filter(Boolean),
+                owner_user_id: formOwnerUserId && Number.isFinite(Number(formOwnerUserId)) ? Number(formOwnerUserId) : null,
                 timezone: 'Africa/Algiers',
             });
         },
@@ -141,6 +169,9 @@ export default function EventsPage() {
             setFormSourceUrl('');
             setFormStartsAt('');
             setFormTags('');
+            setFormChecklist('');
+            setFormOwnerUserId('');
+            setFormReadiness('idea');
             setError(null);
             setMessage('تمت إضافة الحدث إلى لوحة المتابعة.');
             await refreshBoard();
@@ -170,6 +201,16 @@ export default function EventsPage() {
         onError: (err) => setError(apiErrorMessage(err, 'تعذر تحديث حالة الحدث.')),
     });
 
+    const readinessMutation = useMutation({
+        mutationFn: ({ id, readiness_status }: { id: number; readiness_status: EventMemoReadiness }) =>
+            eventsApi.update(id, { readiness_status }),
+        onSuccess: async () => {
+            setError(null);
+            await refreshBoard();
+        },
+        onError: (err) => setError(apiErrorMessage(err, 'Failed to update readiness status.')),
+    });
+
     const deleteMutation = useMutation({
         mutationFn: (id: number) => eventsApi.remove(id),
         onSuccess: async () => {
@@ -183,6 +224,9 @@ export default function EventsPage() {
 
     const byScope = overviewQuery.data?.data?.by_scope || {};
     const byStatus = overviewQuery.data?.data?.by_status || {};
+    const reminderStats = overviewQuery.data?.data?.reminders || {};
+    const kpi = overviewQuery.data?.data?.kpi || {};
+    const reminderItems = remindersQuery.data?.data || { t24: [], t6: [] };
 
     return (
         <div className="space-y-5">
@@ -229,6 +273,45 @@ export default function EventsPage() {
                 <StatCard label="دولي" value={byScope.international || 0} />
                 <StatCard label="ديني" value={byScope.religious || 0} />
                 <StatCard label="مراقبة" value={byStatus.monitoring || 0} />
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
+                <div className="rounded-xl border border-white/10 bg-gray-900/35 px-4 py-3">
+                    <p className="text-xs text-gray-400">KPI</p>
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                        <span className="px-2 py-1 rounded-lg border border-emerald-500/30 text-emerald-200 bg-emerald-500/10">
+                            Coverage Rate: {Number(kpi.coverage_rate || 0).toFixed(1)}%
+                        </span>
+                        <span className="px-2 py-1 rounded-lg border border-amber-500/30 text-amber-200 bg-amber-500/10">
+                            On-time Prep: {Number(kpi.on_time_preparation_rate || 0).toFixed(1)}%
+                        </span>
+                        <span className="px-2 py-1 rounded-lg border border-rose-500/30 text-rose-200 bg-rose-500/10">
+                            Missed Events: {kpi.missed_events || 0}
+                        </span>
+                    </div>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-gray-900/35 px-4 py-3">
+                    <p className="text-xs text-gray-400">Reminder Windows</p>
+                    <div className="mt-2 flex gap-2 text-xs">
+                        <span className="px-2 py-1 rounded-lg border border-cyan-500/30 text-cyan-200 bg-cyan-500/10">
+                            T-24: {reminderStats.t24_due || 0}
+                        </span>
+                        <span className="px-2 py-1 rounded-lg border border-red-500/30 text-red-200 bg-red-500/10">
+                            T-6: {reminderStats.t6_due || 0}
+                        </span>
+                    </div>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-gray-900/35 px-4 py-3 text-xs text-gray-300 max-h-28 overflow-auto">
+                    {reminderItems.t6.length === 0 && reminderItems.t24.length === 0 ? (
+                        <p className="text-gray-500">No reminders scheduled now.</p>
+                    ) : (
+                        [...reminderItems.t6.slice(0, 2), ...reminderItems.t24.slice(0, 2)].map((item) => (
+                            <p key={item.id} className="truncate">
+                                {formatDate(item.starts_at)} - {item.title}
+                            </p>
+                        ))
+                    )}
+                </div>
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
@@ -307,6 +390,9 @@ export default function EventsPage() {
                                         <span className="text-[10px] px-2 py-0.5 rounded border border-cyan-500/30 text-cyan-200 bg-cyan-500/10">
                                             {scopeLabel(item.scope)}
                                         </span>
+                                        <span className="text-[10px] px-2 py-0.5 rounded border border-white/10 text-gray-200 bg-white/[0.04]">
+                                            {readinessLabel(item.readiness_status)}
+                                        </span>
                                         {item.is_due_soon && (
                                             <span className="text-[10px] px-2 py-0.5 rounded border border-amber-500/30 text-amber-200 bg-amber-500/10">
                                                 نافذة التحضير مفتوحة
@@ -336,12 +422,27 @@ export default function EventsPage() {
                             <p className="text-xs text-gray-300">النطاق: {scopeLabel(selected.scope)}</p>
                             <p className="text-xs text-gray-300">تاريخ الحدث: {formatDate(selected.starts_at)}</p>
                             <p className="text-xs text-gray-300">بدء التحضير: {formatDate(selected.prep_starts_at)}</p>
+                            <p className="text-xs text-gray-300">Readiness: {readinessLabel(selected.readiness_status)}</p>
+                            <p className="text-xs text-gray-300">Owner: {selected.owner_username || '-'}</p>
+                            <p className="text-xs text-gray-300">Prep Started: {selected.preparation_started_at ? formatDate(selected.preparation_started_at) : '-'}</p>
                             <p className="text-xs text-gray-400">آخر تحديث: {formatRelativeTime(selected.updated_at)}</p>
                             {selected.summary && <p className="text-sm text-gray-200 whitespace-pre-wrap">{selected.summary}</p>}
                             {selected.coverage_plan && (
                                 <div className="rounded-xl border border-white/10 bg-black/20 p-3">
                                     <p className="text-xs text-gray-400 mb-1">خطة التغطية:</p>
                                     <p className="text-sm text-gray-200 whitespace-pre-wrap">{selected.coverage_plan}</p>
+                                </div>
+                            )}
+                            {selected.checklist.length > 0 && (
+                                <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                                    <p className="text-xs text-gray-400 mb-1">Checklist:</p>
+                                    <ul className="space-y-1">
+                                        {selected.checklist.map((item, index) => (
+                                            <li key={`${selected.id}-${index}`} className="text-sm text-gray-200">
+                                                - {item}
+                                            </li>
+                                        ))}
+                                    </ul>
                                 </div>
                             )}
                             {selected.source_url && (
@@ -372,6 +473,14 @@ export default function EventsPage() {
                                     >
                                         <CheckCircle2 className="w-3.5 h-3.5" />
                                         تم التغطية
+                                    </button>
+                                    <button
+                                        onClick={() => readinessMutation.mutate({ id: selected.id, readiness_status: 'ready' })}
+                                        disabled={readinessMutation.isPending}
+                                        className="px-3 py-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-xs inline-flex items-center gap-1"
+                                    >
+                                        <CheckCircle2 className="w-3.5 h-3.5" />
+                                        Ready
                                     </button>
                                     {canManage && (
                                         <>
@@ -451,6 +560,17 @@ export default function EventsPage() {
                                 <option value="international">دولي</option>
                                 <option value="religious">ديني</option>
                             </select>
+                            <select
+                                value={formReadiness}
+                                onChange={(e) => setFormReadiness(e.target.value as EventMemoReadiness)}
+                                className="w-full h-10 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-gray-200"
+                            >
+                                <option value="idea">Idea</option>
+                                <option value="assigned">Assigned</option>
+                                <option value="prepared">Prepared</option>
+                                <option value="ready">Ready</option>
+                                <option value="covered">Covered</option>
+                            </select>
                             <input
                                 type="datetime-local"
                                 value={formStartsAt}
@@ -483,6 +603,21 @@ export default function EventsPage() {
                                 placeholder="وسوم: election, summit, ramadan"
                                 className="w-full h-10 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder:text-gray-500"
                                 dir="ltr"
+                            />
+                            <input
+                                type="number"
+                                min={1}
+                                value={formOwnerUserId}
+                                onChange={(e) => setFormOwnerUserId(e.target.value)}
+                                placeholder="Owner User ID (optional)"
+                                className="w-full h-10 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-gray-200"
+                            />
+                            <textarea
+                                value={formChecklist}
+                                onChange={(e) => setFormChecklist(e.target.value)}
+                                placeholder="Checklist: one item per line"
+                                className="w-full min-h-[70px] px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder:text-gray-500"
+                                dir="rtl"
                             />
                             <button
                                 onClick={() => createMutation.mutate()}
