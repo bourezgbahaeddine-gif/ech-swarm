@@ -103,12 +103,13 @@ export default function EventsPage() {
                 status: statusFilter === 'all' ? undefined : statusFilter,
                 only_active: onlyActive,
                 page: 1,
-                per_page: 500,
+                per_page: 300,
             }),
     });
 
     const items = useMemo(() => (listQuery.data?.data?.items || []) as EventMemoItem[], [listQuery.data?.data?.items]);
     const selected = useMemo(() => items.find((item) => item.id === selectedId) || null, [items, selectedId]);
+    const listError = listQuery.isError ? apiErrorMessage(listQuery.error, 'Failed to load events list.') : null;
 
     const refreshBoard = async () => {
         await queryClient.invalidateQueries({ queryKey: ['events-list'] });
@@ -278,6 +279,8 @@ export default function EventsPage() {
                     <div className="space-y-2 max-h-[560px] overflow-auto pr-1">
                         {listQuery.isLoading ? (
                             <div className="text-sm text-gray-400 p-3">جاري تحميل الأحداث...</div>
+                        ) : listError ? (
+                            <div className="text-sm text-red-300 p-3">{listError}</div>
                         ) : items.length === 0 ? (
                             <div className="text-sm text-gray-500 p-3">لا توجد أحداث مطابقة.</div>
                         ) : (
