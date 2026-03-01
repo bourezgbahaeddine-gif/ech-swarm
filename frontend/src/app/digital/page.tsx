@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { isAxiosError } from 'axios';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarDays, CheckCircle2, Megaphone, PlusCircle, RefreshCcw, Sparkles, UploadCloud } from 'lucide-react';
+import { CalendarDays, CheckCircle2, Copy, Megaphone, PlusCircle, RefreshCcw, Sparkles, UploadCloud } from 'lucide-react';
 
 import {
     authApi,
@@ -21,6 +21,7 @@ import { cn, formatDate, formatRelativeTime } from '@/lib/utils';
 const READ_ROLES = new Set(['director', 'editor_chief', 'social_media', 'journalist', 'print_editor']);
 const WRITE_ROLES = new Set(['director', 'editor_chief', 'social_media']);
 const MANAGE_ROLES = new Set(['director', 'editor_chief']);
+const PLATFORM_OPTIONS = ['facebook', 'x', 'youtube', 'tiktok', 'instagram'];
 
 function apiErrorMessage(error: unknown, fallback: string): string {
     if (isAxiosError(error)) {
@@ -108,6 +109,11 @@ export default function DigitalPage() {
     const [scopeTv, setScopeTv] = useState(true);
 
     const [publishUrlDraft, setPublishUrlDraft] = useState<Record<number, string>>({});
+    const [composerSlotId, setComposerSlotId] = useState('');
+    const [composerDraft, setComposerDraft] = useState('');
+    const [composerPlatforms, setComposerPlatforms] = useState<string[]>(['facebook']);
+    const [composerTaskId, setComposerTaskId] = useState<number | null>(null);
+    const [composerGenerated, setComposerGenerated] = useState<Record<string, { text: string; hashtags: string[] }>>({});
 
     const overviewQuery = useQuery({
         queryKey: ['digital-overview'],
@@ -179,6 +185,23 @@ export default function DigitalPage() {
         await queryClient.invalidateQueries({ queryKey: ['digital-calendar'] });
         await queryClient.invalidateQueries({ queryKey: ['digital-posts'] });
         await queryClient.invalidateQueries({ queryKey: ['digital-scopes'] });
+    };
+
+    const toggleComposerPlatform = (platform: string) => {
+        setComposerPlatforms((prev) => {
+            if (prev.includes(platform)) return prev.filter((p) => p !== platform);
+            return [...prev, platform];
+        });
+    };
+
+    const copySimple = async (text: string) => {
+        try {
+            await navigator.clipboard.writeText(text || '');
+            setError(null);
+            setMessage('تم النسخ.');
+        } catch {
+            setError('تعذر النسخ التلقائي من المتصفح.');
+        }
     };
 
     const generateMutation = useMutation({
@@ -268,6 +291,69 @@ export default function DigitalPage() {
             setMessage(`تمت صياغة منشور تلقائي من مصدر: ${data.source?.title || 'المهمة'}`);
         },
         onError: (err) => setError(apiErrorMessage(err, 'تعذرت صياغة المنشور تلقائياً.')),
+    });
+
+    const generateFromProgramMutation = useMutation({
+        mutationFn: async () => {
+            const slotId = Number(composerSlotId);
+            if (!slotId || Number.isNaN(slotId)) throw new Error('اختر برنامجاً أو مسلسلاً أولاً.');
+            if (!composerPlatforms.length) throw new Error('اختر منصة واحدة على الأقل.');
+
+            const slot = (slotsQuery.data?.data || []).find((s) => s.id === slotId);
+            if (!slot) throw new Error('تعذر تحميل البرنامج المختار.');
+
+            const taskRes = await digitalApi.createTask({
+                channel: slot.channel,
+                title: `منشور مقطع | ${slot.program_title}`,
+                brief: composerDraft.trim() || slot.social_focus || slot.description || null,
+                platform: 'all',
+                priority: 3,
+                program_slot_id: slot.id,
+            });
+
+            const taskId = taskRes.data.id;
+            const composed = await Promise.all(
+                composerPlatforms.map(async (platform) => {
+                    const res = await digitalApi.composeTask(taskId, { platform, max_hashtags: 6 });
+                    return [platform, { text: res.data.recommended_text, hashtags: res.data.hashtags || [] }] as const;
+                })
+            );
+
+            return { taskId, map: Object.fromEntries(composed) as Record<string, { text: string; hashtags: string[] }> };
+        },
+        onSuccess: async (res) => {
+            setComposerTaskId(res.taskId);
+            setSelectedTaskId(res.taskId);
+            setComposerGenerated(res.map);
+            setError(null);
+            setMessage('تم توليد صياغات مخصصة حسب المنصات المختارة.');
+            await refreshAll();
+        },
+        onError: (err) => setError(apiErrorMessage(err, 'تعذر توليد منشورات البرنامج.')),
+    });
+
+    const saveGeneratedPostsMutation = useMutation({
+        mutationFn: async () => {
+            if (!composerTaskId) throw new Error('لا توجد مهمة صياغة محفوظة بعد.');
+            const entries = Object.entries(composerGenerated || {}).filter(([, value]) => value.text.trim());
+            if (!entries.length) throw new Error('لا توجد صياغات جاهزة للحفظ.');
+            await Promise.all(
+                entries.map(([platform, value]) =>
+                    digitalApi.createTaskPost(composerTaskId, {
+                        platform,
+                        content_text: value.text,
+                        hashtags: value.hashtags || [],
+                        status: 'ready',
+                    })
+                )
+            );
+        },
+        onSuccess: async () => {
+            setError(null);
+            setMessage('تم حفظ الصياغات في المهمة المختارة.');
+            await refreshAll();
+        },
+        onError: (err) => setError(apiErrorMessage(err, 'تعذر حفظ الصياغات المولدة.')),
     });
 
     const publishPostMutation = useMutation({
@@ -384,6 +470,112 @@ export default function DigitalPage() {
                     </div>
                 </section>
             </div>
+
+            <section className="rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
+                <h2 className="text-sm font-semibold text-slate-200">مولّد منشورات البرامج/المسلسلات</h2>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                    <select
+                        value={composerSlotId}
+                        onChange={(e) => setComposerSlotId(e.target.value)}
+                        className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white md:col-span-2"
+                    >
+                        <option value="">اختر البرنامج أو المسلسل</option>
+                        {(slotsQuery.data?.data || []).map((slot) => (
+                            <option key={slot.id} value={String(slot.id)}>
+                                {slot.program_title} - {channelLabel(slot.channel)} - {slot.start_time}
+                            </option>
+                        ))}
+                    </select>
+                    <button
+                        onClick={() => generateFromProgramMutation.mutate()}
+                        disabled={!canWrite || generateFromProgramMutation.isPending}
+                        className="h-10 rounded-xl border border-indigo-500/30 bg-indigo-500/10 text-indigo-200 text-sm disabled:opacity-50"
+                    >
+                        توليد حسب المنصات
+                    </button>
+                </div>
+                <textarea
+                    value={composerDraft}
+                    onChange={(e) => setComposerDraft(e.target.value)}
+                    rows={3}
+                    placeholder="المسودة التي تشرح المقطع..."
+                    className="w-full rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-white"
+                />
+                <div className="flex flex-wrap gap-2">
+                    {PLATFORM_OPTIONS.map((platform) => {
+                        const active = composerPlatforms.includes(platform);
+                        return (
+                            <button
+                                key={platform}
+                                onClick={() => toggleComposerPlatform(platform)}
+                                type="button"
+                                className={cn(
+                                    'px-3 h-9 rounded-xl border text-xs',
+                                    active
+                                        ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200'
+                                        : 'border-slate-700 bg-slate-900/60 text-slate-300'
+                                )}
+                            >
+                                {platform}
+                            </button>
+                        );
+                    })}
+                </div>
+
+                {!!Object.keys(composerGenerated || {}).length && (
+                    <div className="space-y-2">
+                        {Object.entries(composerGenerated).map(([platform, value]) => (
+                            <div key={platform} className="rounded-xl border border-slate-800 bg-slate-900/50 p-3 space-y-2">
+                                <div className="flex items-center justify-between gap-2">
+                                    <div className="text-sm text-white font-medium">{platform}</div>
+                                    <button
+                                        onClick={() => copySimple(value.text)}
+                                        className="h-8 px-2 rounded-lg border border-slate-600 bg-slate-800/60 text-slate-200 text-xs inline-flex items-center gap-1"
+                                    >
+                                        <Copy className="w-3 h-3" />
+                                        نسخ
+                                    </button>
+                                </div>
+                                <textarea
+                                    value={value.text}
+                                    onChange={(e) =>
+                                        setComposerGenerated((prev) => ({
+                                            ...prev,
+                                            [platform]: { ...prev[platform], text: e.target.value },
+                                        }))
+                                    }
+                                    rows={3}
+                                    className="w-full rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-white"
+                                />
+                                <input
+                                    value={(value.hashtags || []).join(', ')}
+                                    onChange={(e) =>
+                                        setComposerGenerated((prev) => ({
+                                            ...prev,
+                                            [platform]: {
+                                                ...prev[platform],
+                                                hashtags: e.target.value
+                                                    .split(',')
+                                                    .map((s) => s.trim())
+                                                    .filter(Boolean),
+                                            },
+                                        }))
+                                    }
+                                    placeholder="وسوم"
+                                    className="h-9 w-full rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-xs text-white"
+                                />
+                            </div>
+                        ))}
+                        <button
+                            onClick={() => saveGeneratedPostsMutation.mutate()}
+                            disabled={!canWrite || saveGeneratedPostsMutation.isPending}
+                            className="h-10 w-full rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-sm disabled:opacity-50"
+                        >
+                            حفظ كل الصياغات
+                        </button>
+                    </div>
+                )}
+            </section>
 
             <section className="rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
                 <h2 className="text-sm font-semibold text-slate-200">مواد السوشيال للمهمة المحددة</h2>
