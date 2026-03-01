@@ -1075,6 +1075,19 @@ export interface DigitalCalendarResponse {
     items: DigitalCalendarItem[];
 }
 
+export interface DigitalComposeResult {
+    task_id: number;
+    platform: string;
+    recommended_text: string;
+    hashtags: string[];
+    variants: Record<string, string>;
+    source: {
+        type: string;
+        id: number | null;
+        title: string;
+    };
+}
+
 export interface MsiProfileInfo {
     id: string;
     display_name: string;
@@ -1630,6 +1643,13 @@ export const digitalApi = {
             owner_user_id: number | null;
         }>
     ) => api.patch<DigitalTask>(`/digital/tasks/${taskId}`, payload),
+    composeTask: (
+        taskId: number,
+        payload?: {
+            platform?: string;
+            max_hashtags?: number;
+        }
+    ) => api.post<DigitalComposeResult>(`/digital/tasks/${taskId}/compose`, payload || {}),
     listTaskPosts: (taskId: number) => api.get<{ items: DigitalPost[]; total: number }>(`/digital/tasks/${taskId}/posts`),
     createTaskPost: (
         taskId: number,

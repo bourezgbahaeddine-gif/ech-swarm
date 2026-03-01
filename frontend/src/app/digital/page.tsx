@@ -254,6 +254,22 @@ export default function DigitalPage() {
         onError: (err) => setError(apiErrorMessage(err, 'تعذر حفظ المادة.')),
     });
 
+    const composePostMutation = useMutation({
+        mutationFn: () =>
+            digitalApi.composeTask(selectedTaskId as number, {
+                platform: postPlatform,
+                max_hashtags: 6,
+            }),
+        onSuccess: (res) => {
+            const data = res.data;
+            setPostContent(data.recommended_text || '');
+            setPostHashtags((data.hashtags || []).join(', '));
+            setError(null);
+            setMessage(`تمت صياغة منشور تلقائي من مصدر: ${data.source?.title || 'المهمة'}`);
+        },
+        onError: (err) => setError(apiErrorMessage(err, 'تعذرت صياغة المنشور تلقائياً.')),
+    });
+
     const publishPostMutation = useMutation({
         mutationFn: ({ postId, publishedUrl }: { postId: number; publishedUrl?: string }) =>
             digitalApi.markPostPublished(postId, { published_url: publishedUrl || undefined }),
@@ -381,6 +397,15 @@ export default function DigitalPage() {
                             <input value={postHashtags} onChange={(e) => setPostHashtags(e.target.value)} placeholder="وسوم" className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white" />
                             <input type="datetime-local" value={postScheduledAt} onChange={(e) => setPostScheduledAt(e.target.value)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white" />
                         </div>
+                        {canWrite && (
+                            <button
+                                onClick={() => composePostMutation.mutate()}
+                                disabled={composePostMutation.isPending}
+                                className="h-10 rounded-xl border border-indigo-500/30 bg-indigo-500/10 text-indigo-200 text-sm disabled:opacity-50"
+                            >
+                                صياغة تلقائية للمنشور
+                            </button>
+                        )}
                         <textarea value={postContent} onChange={(e) => setPostContent(e.target.value)} rows={3} placeholder="نص المنشور" className="w-full rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-white" />
                         <button onClick={() => createPostMutation.mutate()} disabled={!canWrite || !postContent.trim()} className="h-10 rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-sm disabled:opacity-50">حفظ المادة</button>
                         <div className="space-y-2">

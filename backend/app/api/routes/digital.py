@@ -17,6 +17,8 @@ from app.models import EventMemoItem
 from app.models.digital_team import ProgramSlot, SocialPost, SocialTask
 from app.models.user import User, UserRole
 from app.schemas.digital import (
+    DigitalComposeRequest,
+    DigitalComposeResponse,
     DigitalCalendarItem,
     DigitalCalendarResponse,
     DigitalGenerationResponse,
@@ -752,6 +754,37 @@ async def update_task(
     await db.commit()
     await db.refresh(task)
     return _task_response(task)
+
+
+@router.post("/tasks/{task_id:int}/compose", response_model=DigitalComposeResponse)
+async def compose_task_post(
+    task_id: int,
+    payload: DigitalComposeRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _assert_read(current_user)
+    await _ensure_digital_tables(db)
+
+    row = await db.execute(select(SocialTask).where(SocialTask.id == task_id))
+    task = row.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    scope = await _get_scope_for_user(db, current_user)
+    _ensure_channel_allowed(task.channel, scope)
+
+    try:
+        data = await digital_team_service.compose_for_task(
+            db,
+            task_id=task_id,
+            platform=payload.platform,
+            max_hashtags=payload.max_hashtags,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return DigitalComposeResponse(**data)
 
 
 @router.get("/tasks/{task_id:int}/posts", response_model=SocialPostListResponse)

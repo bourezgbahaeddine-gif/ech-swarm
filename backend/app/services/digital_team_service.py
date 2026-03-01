@@ -17,6 +17,7 @@ from app.core.logging import get_logger
 from app.models import Article, EventMemoItem, NewsStatus
 from app.models.digital_team import DigitalTeamScope, ProgramSlot, SocialPost, SocialTask
 from app.models.user import User, UserRole
+from app.services.smart_editor_service import smart_editor_service
 
 logger = get_logger("digital_team_service")
 
@@ -520,7 +521,136 @@ class DigitalTeamService:
             if task.completed_at is None:
                 task.completed_at = datetime.utcnow()
         task.updated_at = datetime.utcnow()
-        await db.flush()
+
+    async def compose_for_task(
+        self,
+        db: AsyncSession,
+        *,
+        task_id: int,
+        platform: str = "facebook",
+        max_hashtags: int = 6,
+    ) -> dict:
+        task_row = await db.execute(select(SocialTask).where(SocialTask.id == task_id))
+        task = task_row.scalar_one_or_none()
+        if not task:
+            raise ValueError("Task not found")
+
+        source_type = "task"
+        source_id: int | None = task.id
+        source_title = task.title
+        draft_title = task.title
+        draft_html = task.brief or ""
+        source_text = task.brief or task.title
+        candidate_tags: list[str] = []
+
+        if task.article_id:
+            article_row = await db.execute(select(Article).where(Article.id == task.article_id))
+            article = article_row.scalar_one_or_none()
+            if article:
+                source_type = "article"
+                source_id = article.id
+                source_title = article.title_ar or article.original_title or task.title
+                draft_title = source_title
+                draft_html = (
+                    article.body_html
+                    or article.original_content
+                    or article.summary
+                    or task.brief
+                    or task.title
+                )
+                source_text = (
+                    article.summary
+                    or article.original_content
+                    or article.body_html
+                    or task.brief
+                    or task.title
+                )
+                candidate_tags.extend([str(x).strip() for x in (article.keywords or []) if str(x).strip()])
+
+        elif task.event_id:
+            event_row = await db.execute(select(EventMemoItem).where(EventMemoItem.id == task.event_id))
+            event = event_row.scalar_one_or_none()
+            if event:
+                source_type = "event"
+                source_id = event.id
+                source_title = event.title
+                draft_title = event.title
+                draft_html = "\n".join(
+                    part for part in [event.summary or "", event.coverage_plan or "", task.brief or ""] if part
+                )
+                source_text = "\n".join(
+                    part for part in [event.summary or "", event.coverage_plan or "", event.title] if part
+                )
+                candidate_tags.extend([str(x).strip() for x in (event.tags or []) if str(x).strip()])
+
+        elif task.program_slot_id:
+            slot_row = await db.execute(select(ProgramSlot).where(ProgramSlot.id == task.program_slot_id))
+            slot = slot_row.scalar_one_or_none()
+            if slot:
+                source_type = "program"
+                source_id = slot.id
+                source_title = slot.program_title
+                draft_title = slot.program_title
+                draft_html = "\n".join(
+                    part
+                    for part in [
+                        slot.description or "",
+                        slot.social_focus or "",
+                        task.brief or "",
+                        f"وقت العرض: {slot.start_time}",
+                    ]
+                    if part
+                )
+                source_text = "\n".join(
+                    part
+                    for part in [slot.program_title, slot.description or "", slot.social_focus or ""]
+                    if part
+                )
+                candidate_tags.extend([str(x).strip() for x in (slot.tags or []) if str(x).strip()])
+
+        variants: dict[str, str] = {}
+        try:
+            variants = await smart_editor_service.social_variants(
+                source_text=source_text or draft_title,
+                draft_title=draft_title,
+                draft_html=draft_html or source_text or draft_title,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("digital_compose_ai_failed", task_id=task_id, error=str(exc))
+            variants = {}
+
+        platform_key = (platform or "").strip().lower()
+        if platform_key in {"twitter", "x"}:
+            platform_key = "x"
+        if platform_key in {"notification", "mobile_push"}:
+            platform_key = "push"
+
+        recommended_text = (
+            variants.get(platform_key)
+            or variants.get("facebook")
+            or variants.get("x")
+            or _fallback_social_text(task=task, source_title=source_title, source_text=source_text)
+        )
+
+        hashtags = _build_hashtag_list(
+            source_title=source_title,
+            tags=candidate_tags,
+            channel=task.channel,
+            max_items=max_hashtags,
+        )
+
+        return {
+            "task_id": task.id,
+            "platform": platform_key or "facebook",
+            "recommended_text": recommended_text.strip(),
+            "hashtags": hashtags,
+            "variants": {k: (v or "").strip() for k, v in variants.items() if (v or "").strip()},
+            "source": {
+                "type": source_type,
+                "id": source_id,
+                "title": source_title,
+            },
+        }
 
 
 def _normalize_channel(value: object) -> str:
@@ -618,6 +748,47 @@ def _build_event_brief(event: EventMemoItem) -> str:
         f"Starts: {event.starts_at.isoformat()} | Scope: {event.scope}\n"
         f"Coverage plan: {event.coverage_plan or 'Not provided'}"
     )
+
+
+def _fallback_social_text(*, task: SocialTask, source_title: str, source_text: str) -> str:
+    headline = source_title.strip() or task.title
+    body = (source_text or task.brief or "").strip()
+    if len(body) > 320:
+        body = body[:317].rstrip() + "..."
+    if body:
+        return f"{headline}\n\n{body}\n\nتابعوا التغطية عبر منصات الشروق."
+    return f"{headline}\n\nتابعوا التغطية عبر منصات الشروق."
+
+
+def _build_hashtag_list(*, source_title: str, tags: list[str], channel: str, max_items: int) -> list[str]:
+    seeds: list[str] = []
+    if channel == "news":
+        seeds.extend(["الشروق_نيوز", "الجزائر"])
+    elif channel == "tv":
+        seeds.extend(["الشروق_تي_في", "برامج_الشروق"])
+    for tag in tags:
+        clean = str(tag or "").strip().replace("#", "")
+        if clean:
+            seeds.append(clean)
+    for token in str(source_title or "").split():
+        token = token.strip().replace("#", "")
+        if len(token) >= 3:
+            seeds.append(token)
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in seeds:
+        normalized = "".join(ch for ch in item if ch.isalnum() or ch == "_")
+        if not normalized:
+            continue
+        key = normalized.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(normalized)
+        if len(out) >= max(1, min(max_items, 12)):
+            break
+    return out
 
 
 digital_team_service = DigitalTeamService()

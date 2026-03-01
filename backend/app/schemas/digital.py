@@ -204,6 +204,20 @@ class DigitalGenerationResponse(BaseModel):
     skipped_duplicates: int = 0
 
 
+class DigitalComposeRequest(BaseModel):
+    platform: str = Field(default="facebook", min_length=1, max_length=32)
+    max_hashtags: int = Field(default=6, ge=1, le=12)
+
+
+class DigitalComposeResponse(BaseModel):
+    task_id: int
+    platform: str
+    recommended_text: str
+    hashtags: list[str] = Field(default_factory=list)
+    variants: dict[str, str] = Field(default_factory=dict)
+    source: dict
+
+
 class DigitalCalendarItem(BaseModel):
     item_type: str
     channel: str
