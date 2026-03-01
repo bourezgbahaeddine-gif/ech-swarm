@@ -12,6 +12,7 @@ import asyncio
 import random
 import ssl
 import calendar
+import re
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 from types import SimpleNamespace
@@ -39,6 +40,7 @@ from app.services.settings_service import settings_service
 logger = get_logger("agent.scout")
 settings = get_settings()
 DEFAULT_HEADERS = {"User-Agent": "Mozilla/5.0 (EchoroukSwarm/1.0)"}
+SCOUT_HARD_MAX_ARTICLE_AGE_HOURS = 24 * 31  # newsroom safety rail: never ingest older than 31 days
 
 
 def _aiohttp_ssl_context():
@@ -73,6 +75,7 @@ class ScoutAgent:
         try:
             self._blocked_domains = await self._load_blocked_domains()
             self._freshrss_per_source_cap = await self._load_freshrss_source_cap()
+            self._max_article_age_hours = self._resolve_max_article_age_hours()
             connector = aiohttp.TCPConnector(ssl=_aiohttp_ssl_context())
             async with aiohttp.ClientSession(connector=connector) as session:
                 if settings.scout_use_freshrss:
@@ -147,6 +150,8 @@ class ScoutAgent:
         return stats
 
     async def _load_blocked_domains(self) -> set[str]:
+        if not settings.scout_ingest_filters_enabled:
+            return set()
         raw = await settings_service.get_value(
             "SCOUT_BLOCKED_DOMAINS",
             settings.scout_blocked_domains,
@@ -168,6 +173,23 @@ class ScoutAgent:
         except (TypeError, ValueError):
             cap = settings.scout_freshrss_max_per_source_per_run
         return max(1, min(cap, 100))
+
+    @staticmethod
+    def _resolve_max_article_age_hours() -> int:
+        try:
+            configured = int(settings.scout_max_article_age_hours)
+        except (TypeError, ValueError):
+            configured = 72
+        configured = max(1, configured)
+        effective = min(configured, SCOUT_HARD_MAX_ARTICLE_AGE_HOURS)
+        if effective != configured:
+            logger.warning(
+                "scout_max_age_clamped_for_safety",
+                configured_hours=configured,
+                effective_hours=effective,
+                hard_cap_hours=SCOUT_HARD_MAX_ARTICLE_AGE_HOURS,
+            )
+        return effective
 
     async def _fetch_from_freshrss(
         self,
@@ -194,7 +216,7 @@ class ScoutAgent:
             source_name = self._entry_source_name(entry)
             source_key = source_name.strip().lower()
             source_count = source_new_counts.get(source_key, 0)
-            if source_count >= per_source_cap:
+            if settings.scout_ingest_filters_enabled and source_count >= per_source_cap:
                 stats["duplicates"] += 1
                 logger.info(
                     "freshrss_entry_skipped_diversity_cap",
@@ -553,12 +575,12 @@ class ScoutAgent:
             return
 
         # Parse publication date early so timing and dedup gates share event time.
-        published_at = self._extract_entry_datetime(entry)
         raw_link = link.strip()
         canonical_link = self._canonicalize_url(raw_link)
         link = canonical_link or raw_link
+        published_at = self._extract_entry_datetime(entry) or self._extract_datetime_from_url(link)
 
-        if self._is_blocked_source_entry(source.name, link):
+        if settings.scout_ingest_filters_enabled and self._is_blocked_source_entry(source.name, link):
             stats["duplicates"] += 1
             logger.info(
                 "entry_skipped_blocked_source",
@@ -598,32 +620,42 @@ class ScoutAgent:
                 return
 
         # Step 3: Fuzzy title dedup (Levenshtein)
-        from app.utils.hashing import is_duplicate_title
-        recent_titles = await cache_service.get_recent_titles(200)
-        if is_duplicate_title(title, recent_titles, settings.dedup_similarity_threshold):
-            stats["duplicates"] += 1
-            return
+        if settings.scout_ingest_filters_enabled:
+            from app.utils.hashing import is_duplicate_title
+            recent_titles = await cache_service.get_recent_titles(200)
+            if is_duplicate_title(title, recent_titles, settings.dedup_similarity_threshold):
+                stats["duplicates"] += 1
+                return
 
         # Step 4: Cross-source title/time dedup.
-        if await self._is_cross_source_duplicate(db, title, published_at):
-            stats["duplicates"] += 1
-            logger.info(
-                "entry_skipped_cross_source_duplicate",
-                source=source.name,
-                title=title[:80],
-            )
-            return
+        if settings.scout_ingest_filters_enabled:
+            if await self._is_cross_source_duplicate(db, title, published_at):
+                stats["duplicates"] += 1
+                logger.info(
+                    "entry_skipped_cross_source_duplicate",
+                    source=source.name,
+                    title=title[:80],
+                )
+                return
 
         # ── Normalize & Store ──
 
-        # Freshness gate: skip very old items to avoid flooding newsroom with backlog.
+        # Freshness gate (always ON): protect newsroom from stale or replayed backlog.
+        max_age = getattr(self, "_max_article_age_hours", self._resolve_max_article_age_hours())
         if published_at:
-            max_age = settings.scout_max_article_age_hours
-            age_hours = (datetime.utcnow() - published_at).total_seconds() / 3600.0
+            now = datetime.utcnow()
+            age_hours = (now - published_at).total_seconds() / 3600.0
             if age_hours > max_age:
                 stats["duplicates"] += 1
+                logger.info(
+                    "entry_skipped_stale",
+                    source=source.name,
+                    title=title[:80],
+                    age_hours=round(age_hours, 2),
+                    max_age_hours=max_age,
+                )
                 return
-            future_minutes = (published_at - datetime.utcnow()).total_seconds() / 60.0
+            future_minutes = (published_at - now).total_seconds() / 60.0
             if future_minutes > settings.scout_max_article_future_minutes:
                 stats["duplicates"] += 1
                 logger.info(
@@ -638,6 +670,15 @@ class ScoutAgent:
             stats["duplicates"] += 1
             logger.info(
                 "entry_skipped_missing_timestamp_aggregator",
+                source=source.name,
+                title=title[:80],
+            )
+            return
+        elif getattr(source, "method", "").lower() == "scraper":
+            # Scraped links without dates are frequently archive links; keep them out of newsroom.
+            stats["duplicates"] += 1
+            logger.info(
+                "entry_skipped_missing_timestamp_scraper",
                 source=source.name,
                 title=title[:80],
             )
@@ -770,6 +811,34 @@ class ScoutAgent:
                 if dt.tzinfo is not None:
                     return dt.astimezone(timezone.utc).replace(tzinfo=None)
                 return dt
+            except ValueError:
+                continue
+        return None
+
+    @staticmethod
+    def _extract_datetime_from_url(url: str) -> Optional[datetime]:
+        """
+        Best-effort date extraction from article URLs:
+        - /YYYY/MM/DD/
+        - /YYYY-MM-DD/
+        - /YYYYMMDD/
+        """
+        text = (url or "").strip()
+        if not text:
+            return None
+        patterns = (
+            r"(?P<y>20\d{2})[/-](?P<m>0[1-9]|1[0-2])[/-](?P<d>0[1-9]|[12]\d|3[01])",
+            r"(?P<y>20\d{2})(?P<m>0[1-9]|1[0-2])(?P<d>0[1-9]|[12]\d|3[01])",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if not match:
+                continue
+            try:
+                year = int(match.group("y"))
+                month = int(match.group("m"))
+                day = int(match.group("d"))
+                return datetime(year, month, day)
             except ValueError:
                 continue
         return None
