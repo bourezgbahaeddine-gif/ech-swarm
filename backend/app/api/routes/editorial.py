@@ -141,7 +141,7 @@ def _require_roles(user: User, allowed: set[UserRole]) -> None:
 
 def _can_review_decision(user: User, decision: str) -> None:
     if decision in {"approve", "reject"}:
-        _require_roles(user, {UserRole.director, UserRole.editor_chief})
+        _require_roles(user, {UserRole.director, UserRole.editor_chief, UserRole.journalist})
         return
     if decision == "rewrite":
         _require_roles(
@@ -678,24 +678,40 @@ async def _submit_draft_for_chief_approval(
         decision = "reservations"
 
     blockers = [issue.message for issue in gate_result.blockers]
-    if decision == "approved":
+    journalist_direct_path = current_user.role == UserRole.journalist
+    submitted_for_chief_approval = False
+    transition_action = "submit_for_chief_approval"
+
+    if decision == "approved" and journalist_direct_path:
+        target_status = NewsStatus.READY_FOR_MANUAL_PUBLISH
+        status_message = "تم اعتماد النسخة من الصحفي وأصبحت جاهزة للنشر اليدوي."
+        transition_action = "journalist_direct_approval"
+    elif decision == "approved":
         target_status = NewsStatus.READY_FOR_CHIEF_APPROVAL
         status_message = "جاهز لاعتماد رئيس التحرير"
+        submitted_for_chief_approval = True
     else:
-        target_status = NewsStatus.APPROVAL_REQUEST_WITH_RESERVATIONS
-        status_message = "طلب اعتماد مع تحفظات"
+        if journalist_direct_path:
+            target_status = NewsStatus.DRAFT_GENERATED
+            status_message = "النسخة تحتوي تحفظات جودة. عالج الملاحظات ثم أعد الاعتماد."
+            transition_action = "journalist_direct_revision_required"
+        else:
+            target_status = NewsStatus.APPROVAL_REQUEST_WITH_RESERVATIONS
+            status_message = "طلب اعتماد مع تحفظات"
+            submitted_for_chief_approval = True
 
     await _transition_article_status(
         db=db,
         article=article,
         target_status=target_status,
         actor=current_user,
-        action="submit_for_chief_approval",
+        action=transition_action,
         reason=f"policy_decision:{decision}",
         details={
             "work_id": draft.work_id,
             "policy_score": policy_report.get("score"),
             "blocking_reasons": blockers,
+            "journalist_direct_path": journalist_direct_path,
         },
     )
 
@@ -703,9 +719,15 @@ async def _submit_draft_for_chief_approval(
     draft.applied_by = current_user.full_name_ar
     draft.applied_at = datetime.utcnow()
     draft.updated_by = current_user.full_name_ar
+    draft_audit_action = "draft_submit_for_chief" if submitted_for_chief_approval else "draft_submit_direct_publish_flow"
+    decision_action = (
+        "process:submit_for_chief_approval"
+        if submitted_for_chief_approval
+        else "process:submit_for_manual_publish"
+    )
     await audit_service.log_action(
         db,
-        action="draft_submit_for_chief",
+        action=draft_audit_action,
         entity_type="editorial_draft",
         entity_id=draft.id,
         actor=current_user,
@@ -717,7 +739,7 @@ async def _submit_draft_for_chief_approval(
         EditorDecision(
             article_id=article.id,
             editor_name=current_user.full_name_ar,
-            decision="process:submit_for_chief_approval",
+            decision=decision_action,
             reason=f"policy_decision:{decision}",
             edited_title=draft.title,
             edited_body=draft.body,
@@ -740,6 +762,8 @@ async def _submit_draft_for_chief_approval(
         "policy_decision": decision,
         "status": article.status.value,
         "status_message": status_message,
+        "submitted_for_chief_approval": submitted_for_chief_approval,
+        "journalist_direct_path": journalist_direct_path,
         "blocking_reasons": blockers or policy_report.get("blocking_reasons", []),
         "actionable_fixes": policy_report.get("actionable_fixes", []),
     }
@@ -1072,7 +1096,7 @@ async def process_article(
         return {"article_id": article_id, "action": payload.action, "updated": True}
 
     if payload.action in {"publish_now", "unpublish"}:
-        _require_roles(current_user, {UserRole.director})
+        _require_roles(current_user, {UserRole.director, UserRole.editor_chief, UserRole.journalist})
         if payload.action == "publish_now":
             fact_report = await _latest_stage_report(db, article_id=article_id, stage="FACT_CHECK")
             if not fact_report or not bool(fact_report.passed):
@@ -1118,7 +1142,7 @@ async def process_article(
                 article_id=article_id,
                 editor_name=current_user.full_name_ar,
                 decision=f"process:{payload.action}",
-                reason="director_override",
+                reason=f"{current_user.role.value}_override",
             )
         )
         await db.commit()
@@ -2065,8 +2089,12 @@ async def apply_draft_by_work_id(
     )
     return {
         **submission,
-        "submitted_for_chief_approval": True,
-        "message": "تم إرسال النسخة إلى رئيس التحرير بعد فحص وكيل السياسة.",
+        "submitted_for_chief_approval": bool(submission.get("submitted_for_chief_approval", False)),
+        "message": (
+            "تم إرسال النسخة إلى رئيس التحرير بعد فحص وكيل السياسة."
+            if submission.get("submitted_for_chief_approval")
+            else "تم اعتماد النسخة داخل المسار المباشر بدون تصعيد لرئيس التحرير."
+        ),
     }
 
 
@@ -2087,8 +2115,12 @@ async def submit_draft_for_chief_approval(
     )
     return {
         **submission,
-        "submitted_for_chief_approval": True,
-        "message": "تم إرسال النسخة إلى رئيس التحرير بعد فحص وكيل السياسة.",
+        "submitted_for_chief_approval": bool(submission.get("submitted_for_chief_approval", False)),
+        "message": (
+            "تم إرسال النسخة إلى رئيس التحرير بعد فحص وكيل السياسة."
+            if submission.get("submitted_for_chief_approval")
+            else "تم اعتماد النسخة داخل المسار المباشر بدون تصعيد لرئيس التحرير."
+        ),
     }
 
 
@@ -2566,7 +2598,7 @@ async def apply_draft(
         **submission,
         "article_id": article_id,
         "draft_id": draft_id,
-        "submitted_for_chief_approval": True,
+        "submitted_for_chief_approval": bool(submission.get("submitted_for_chief_approval", False)),
     }
 
 

@@ -20,6 +20,7 @@ from app.api.routes.auth import get_current_user
 from app.schemas import DashboardStats, PipelineRunResponse
 from app.services.cache_service import cache_service
 from app.agents import published_content_monitor_agent
+from app.services.event_reminder_service import event_reminder_service
 from app.services.job_queue_service import job_queue_service
 
 logger = get_logger("api.dashboard")
@@ -858,6 +859,26 @@ async def dashboard_notifications(
                 }
             )
 
+    reminder_items = await event_reminder_service.get_feed(limit=20)
+    for reminder in reminder_items:
+        starts_at = reminder.get("starts_at")
+        scope = reminder.get("scope")
+        scope_suffix = f" [{scope}]" if scope else ""
+        message = str(reminder.get("message") or "Upcoming event requires preparation.")
+        if starts_at:
+            message = f"{message} الموعد: {starts_at}"
+        items.append(
+            {
+                "id": reminder.get("id") or f"event-reminder-{reminder.get('event_id')}",
+                "type": "event_reminder",
+                "title": f"{reminder.get('title') or 'حدث قادم'}{scope_suffix}",
+                "message": message,
+                "event_id": reminder.get("event_id"),
+                "created_at": reminder.get("created_at") or now.isoformat(),
+                "severity": reminder.get("severity") or "medium",
+            }
+        )
+
     trend_payload = await cache_service.get_json("trends:last:DZ:all")
     seen_trends: set[str] = set()
     for idx, alert in enumerate((trend_payload or {}).get("alerts", [])[:12]):
@@ -904,6 +925,9 @@ async def dashboard_notifications(
         article_id = item.get("article_id")
         if article_id:
             return f"article:{article_id}"
+        event_id = item.get("event_id")
+        if event_id:
+            return f"event:{event_id}:{item.get('type', 'event')}"
         normalized_title = " ".join(str(item.get("title", "")).lower().split())
         return f"{item.get('type', 'generic')}:{normalized_title}"
 

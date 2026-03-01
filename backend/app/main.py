@@ -59,6 +59,7 @@ from app.api.routes.scripts import router as scripts_router
 from app.api.routes.events import router as events_router
 from app.msi.scheduler import start_msi_scheduler, stop_msi_scheduler
 from app.services.competitor_xray_service import competitor_xray_service
+from app.services.event_reminder_service import event_reminder_service
 from app.services.job_queue_service import job_queue_service
 from app.api.envelope import error_envelope
 
@@ -72,6 +73,7 @@ _pipeline_task: asyncio.Task | None = None
 _trends_task: asyncio.Task | None = None
 _published_monitor_task: asyncio.Task | None = None
 _competitor_xray_task: asyncio.Task | None = None
+_event_reminders_task: asyncio.Task | None = None
 
 
 async def _run_pipeline_once():
@@ -239,6 +241,15 @@ async def _run_competitor_xray_once():
     logger.info("auto_competitor_xray_tick_done", run_id=run_id)
 
 
+async def _run_event_reminders_once():
+    async with async_session() as db:
+        stats = await event_reminder_service.scan_and_publish(
+            db,
+            limit=max(100, settings.router_batch_limit),
+        )
+    logger.info("auto_event_reminders_tick_done", **stats)
+
+
 async def _periodic_loop(name: str, interval_seconds: int, job):
     logger.info("periodic_loop_started", loop=name, interval_seconds=interval_seconds)
     while not _shutdown_event.is_set():
@@ -273,7 +284,7 @@ async def lifespan(app: FastAPI):
     await cache_service.connect()
 
     # Start periodic pipeline loops (optional)
-    global _pipeline_task, _trends_task, _published_monitor_task, _competitor_xray_task
+    global _pipeline_task, _trends_task, _published_monitor_task, _competitor_xray_task, _event_reminders_task
     _shutdown_event.clear()
     if settings.auto_pipeline_enabled:
         newsroom_interval_seconds = 20 * 60
@@ -334,6 +345,19 @@ async def lifespan(app: FastAPI):
             hours_window=settings.competitor_xray_hours_window,
         )
 
+    if settings.event_reminders_enabled:
+        _event_reminders_task = asyncio.create_task(
+            _periodic_loop(
+                "event_reminders",
+                max(300, settings.event_reminders_interval_minutes * 60),
+                _run_event_reminders_once,
+            )
+        )
+        logger.info(
+            "event_reminders_enabled",
+            interval_minutes=settings.event_reminders_interval_minutes,
+        )
+
     if settings.msi_enabled and settings.msi_scheduler_enabled:
         start_msi_scheduler()
 
@@ -347,11 +371,11 @@ async def lifespan(app: FastAPI):
 
     # ── Shutdown ──
     _shutdown_event.set()
-    for task in (_pipeline_task, _trends_task, _published_monitor_task, _competitor_xray_task):
+    for task in (_pipeline_task, _trends_task, _published_monitor_task, _competitor_xray_task, _event_reminders_task):
         if task:
             task.cancel()
     await asyncio.gather(
-        *[t for t in (_pipeline_task, _trends_task, _published_monitor_task, _competitor_xray_task) if t],
+        *[t for t in (_pipeline_task, _trends_task, _published_monitor_task, _competitor_xray_task, _event_reminders_task) if t],
         return_exceptions=True,
     )
     if settings.msi_enabled and settings.msi_scheduler_enabled:
