@@ -28,6 +28,7 @@ import {
     Library,
     ScrollText,
     CalendarClock,
+    Megaphone,
 } from 'lucide-react';
 
 type Role =
@@ -72,6 +73,7 @@ const navItems = [
     { href: '/scripts', label: 'استوديو السكربت', icon: ScrollText, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
     { href: '/trends', label: 'رادار التراند', icon: TrendingUp, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
     { href: '/events', label: 'لوحة الأحداث', icon: CalendarClock, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
+    { href: '/digital', label: 'فريق الديجيتال', icon: Megaphone, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
     { href: '/constitution', label: 'الدستور', icon: FileText, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor', 'fact_checker'] as Role[] },
     { href: '/msi', label: 'مؤشر MSI', icon: Gauge, roles: ['director'] as Role[] },
     { href: '/simulator', label: 'محاكي الجمهور', icon: MessagesSquare, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },

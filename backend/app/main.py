@@ -57,8 +57,10 @@ from app.api.routes.jobs import router as jobs_router
 from app.api.routes.stories import router as stories_router
 from app.api.routes.scripts import router as scripts_router
 from app.api.routes.events import router as events_router
+from app.api.routes.digital import router as digital_router
 from app.msi.scheduler import start_msi_scheduler, stop_msi_scheduler
 from app.services.competitor_xray_service import competitor_xray_service
+from app.services.digital_team_service import digital_team_service
 from app.services.event_reminder_service import event_reminder_service
 from app.services.job_queue_service import job_queue_service
 from app.api.envelope import error_envelope
@@ -74,6 +76,7 @@ _trends_task: asyncio.Task | None = None
 _published_monitor_task: asyncio.Task | None = None
 _competitor_xray_task: asyncio.Task | None = None
 _event_reminders_task: asyncio.Task | None = None
+_digital_generation_task: asyncio.Task | None = None
 
 
 async def _run_pipeline_once():
@@ -250,6 +253,19 @@ async def _run_event_reminders_once():
     logger.info("auto_event_reminders_tick_done", **stats)
 
 
+async def _run_digital_generation_once():
+    async with async_session() as db:
+        stats = await digital_team_service.generate_all(
+            db,
+            actor=None,
+            hours_ahead=max(6, settings.digital_team_auto_generation_hours_ahead),
+            include_events=settings.digital_team_auto_include_events,
+            include_breaking=settings.digital_team_auto_include_breaking,
+        )
+        await db.commit()
+    logger.info("auto_digital_generation_tick_done", **stats)
+
+
 async def _periodic_loop(name: str, interval_seconds: int, job):
     logger.info("periodic_loop_started", loop=name, interval_seconds=interval_seconds)
     while not _shutdown_event.is_set():
@@ -284,7 +300,7 @@ async def lifespan(app: FastAPI):
     await cache_service.connect()
 
     # Start periodic pipeline loops (optional)
-    global _pipeline_task, _trends_task, _published_monitor_task, _competitor_xray_task, _event_reminders_task
+    global _pipeline_task, _trends_task, _published_monitor_task, _competitor_xray_task, _event_reminders_task, _digital_generation_task
     _shutdown_event.clear()
     if settings.auto_pipeline_enabled:
         newsroom_interval_seconds = 20 * 60
@@ -358,6 +374,22 @@ async def lifespan(app: FastAPI):
             interval_minutes=settings.event_reminders_interval_minutes,
         )
 
+    if settings.digital_team_auto_generation_enabled:
+        _digital_generation_task = asyncio.create_task(
+            _periodic_loop(
+                "digital_generation",
+                max(300, settings.digital_team_auto_generation_interval_minutes * 60),
+                _run_digital_generation_once,
+            )
+        )
+        logger.info(
+            "digital_team_auto_generation_enabled",
+            interval_minutes=settings.digital_team_auto_generation_interval_minutes,
+            hours_ahead=settings.digital_team_auto_generation_hours_ahead,
+            include_events=settings.digital_team_auto_include_events,
+            include_breaking=settings.digital_team_auto_include_breaking,
+        )
+
     if settings.msi_enabled and settings.msi_scheduler_enabled:
         start_msi_scheduler()
 
@@ -371,11 +403,29 @@ async def lifespan(app: FastAPI):
 
     # ── Shutdown ──
     _shutdown_event.set()
-    for task in (_pipeline_task, _trends_task, _published_monitor_task, _competitor_xray_task, _event_reminders_task):
+    for task in (
+        _pipeline_task,
+        _trends_task,
+        _published_monitor_task,
+        _competitor_xray_task,
+        _event_reminders_task,
+        _digital_generation_task,
+    ):
         if task:
             task.cancel()
     await asyncio.gather(
-        *[t for t in (_pipeline_task, _trends_task, _published_monitor_task, _competitor_xray_task, _event_reminders_task) if t],
+        *[
+            t
+            for t in (
+                _pipeline_task,
+                _trends_task,
+                _published_monitor_task,
+                _competitor_xray_task,
+                _event_reminders_task,
+                _digital_generation_task,
+            )
+            if t
+        ],
         return_exceptions=True,
     )
     if settings.msi_enabled and settings.msi_scheduler_enabled:
@@ -530,6 +580,7 @@ app.include_router(jobs_router, prefix="/api/v1")
 app.include_router(stories_router, prefix="/api/v1")
 app.include_router(scripts_router, prefix="/api/v1")
 app.include_router(events_router, prefix="/api/v1")
+app.include_router(digital_router, prefix="/api/v1")
 
 
 # ── Health Check ──

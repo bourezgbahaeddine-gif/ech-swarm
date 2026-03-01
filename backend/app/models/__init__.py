@@ -67,6 +67,12 @@ from app.models.script import (
     ScriptOutputFormat,
 )
 from app.models.event_memo import EventMemoItem
+from app.models.digital_team import (
+    DigitalTeamScope,
+    ProgramSlot,
+    SocialTask,
+    SocialPost,
+)
 
 __all__ = [
     "Source", "Article", "EditorDecision", "EditorialDraft", "FeedbackLog",
@@ -129,4 +135,8 @@ __all__ = [
     "ScriptOutput",
     "ScriptOutputFormat",
     "EventMemoItem",
+    "DigitalTeamScope",
+    "ProgramSlot",
+    "SocialTask",
+    "SocialPost",
 ]

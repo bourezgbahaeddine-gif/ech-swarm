@@ -101,6 +101,11 @@ class Settings(BaseSettings):
     published_monitor_alert_threshold: int = 75
     event_reminders_enabled: bool = True
     event_reminders_interval_minutes: int = 15
+    digital_team_auto_generation_enabled: bool = True
+    digital_team_auto_generation_interval_minutes: int = 20
+    digital_team_auto_generation_hours_ahead: int = 36
+    digital_team_auto_include_events: bool = True
+    digital_team_auto_include_breaking: bool = True
     competitor_xray_enabled: bool = True
     competitor_xray_interval_minutes: int = 30
     competitor_xray_limit_per_source: int = 6

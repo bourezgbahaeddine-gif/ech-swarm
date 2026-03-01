@@ -947,6 +947,134 @@ export interface EventMemoImportResult {
     errors: Array<{ index: number; error: string }>;
 }
 
+export type DigitalChannel = 'news' | 'tv';
+export type DigitalTaskStatus = 'todo' | 'in_progress' | 'review' | 'done' | 'cancelled';
+export type DigitalPostStatus = 'draft' | 'ready' | 'approved' | 'scheduled' | 'published' | 'failed';
+
+export interface DigitalScope {
+    id: number;
+    user_id: number;
+    username: string | null;
+    full_name_ar: string | null;
+    can_manage_news: boolean;
+    can_manage_tv: boolean;
+    platforms: string[];
+    notes: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface DigitalProgramSlot {
+    id: number;
+    channel: DigitalChannel;
+    program_title: string;
+    program_type: string | null;
+    description: string | null;
+    day_of_week: number | null;
+    start_time: string;
+    duration_minutes: number;
+    timezone: string;
+    priority: number;
+    is_active: boolean;
+    social_focus: string | null;
+    tags: string[];
+    source_ref: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface DigitalTask {
+    id: number;
+    channel: DigitalChannel;
+    platform: string;
+    task_type: string;
+    title: string;
+    brief: string | null;
+    status: DigitalTaskStatus | string;
+    priority: number;
+    due_at: string | null;
+    scheduled_at: string | null;
+    started_at: string | null;
+    completed_at: string | null;
+    dedupe_key: string | null;
+    program_slot_id: number | null;
+    event_id: number | null;
+    article_id: number | null;
+    owner_user_id: number | null;
+    owner_username: string | null;
+    published_posts_count: number;
+    last_published_at: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface DigitalTaskListResponse {
+    items: DigitalTask[];
+    total: number;
+    page: number;
+    per_page: number;
+    pages: number;
+}
+
+export interface DigitalPost {
+    id: number;
+    task_id: number;
+    channel: DigitalChannel;
+    platform: string;
+    content_text: string;
+    hashtags: string[];
+    media_urls: string[];
+    status: DigitalPostStatus | string;
+    scheduled_at: string | null;
+    published_at: string | null;
+    published_url: string | null;
+    external_post_id: string | null;
+    error_message: string | null;
+    created_by_username: string | null;
+    updated_by_username: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface DigitalOverview {
+    total_tasks: number;
+    due_today: number;
+    overdue: number;
+    in_progress: number;
+    done_today: number;
+    by_channel: Record<string, number>;
+    by_status: Record<string, number>;
+    scheduled_posts_next_24h: number;
+    published_posts_24h: number;
+    on_time_rate: number;
+}
+
+export interface DigitalGenerateResult {
+    generated_program_tasks: number;
+    generated_event_tasks: number;
+    generated_breaking_tasks: number;
+    total_generated: number;
+    skipped_duplicates: number;
+}
+
+export interface DigitalCalendarItem {
+    item_type: string;
+    channel: DigitalChannel;
+    title: string;
+    starts_at: string;
+    ends_at: string | null;
+    reference_id: number | null;
+    status: string | null;
+    priority: number | null;
+    source: string | null;
+}
+
+export interface DigitalCalendarResponse {
+    from_date: string;
+    days: number;
+    items: DigitalCalendarItem[];
+}
+
 export interface MsiProfileInfo {
     id: string;
     display_name: string;
@@ -1400,6 +1528,140 @@ export const eventsApi = {
     remove: (eventId: number) => api.delete<{ message: string }>(`/events/${eventId}`),
     importDb: (params?: { overwrite?: boolean }) =>
         api.post<EventMemoImportResult>('/events/import-db', null, { params }),
+};
+
+export const digitalApi = {
+    overview: () => api.get<DigitalOverview>('/digital/overview'),
+    scopes: () => api.get<DigitalScope[]>('/digital/scopes'),
+    updateScope: (
+        userId: number,
+        payload: {
+            can_manage_news: boolean;
+            can_manage_tv: boolean;
+            platforms?: string[];
+            notes?: string | null;
+        }
+    ) => api.put<DigitalScope>(`/digital/scopes/${userId}`, payload),
+    importProgramSlots: (params?: { overwrite?: boolean }) =>
+        api.post<{
+            file: string;
+            total_records: number;
+            created: number;
+            updated: number;
+            skipped: number;
+            errors_count: number;
+            errors: Array<{ index: number; error: string }>;
+        }>('/digital/program-slots/import', null, { params }),
+    listProgramSlots: (params?: {
+        channel?: DigitalChannel | 'all';
+        active_only?: boolean;
+        q?: string;
+        limit?: number;
+    }) => api.get<DigitalProgramSlot[]>('/digital/program-slots', { params }),
+    createProgramSlot: (payload: {
+        channel: DigitalChannel;
+        program_title: string;
+        program_type?: string | null;
+        description?: string | null;
+        day_of_week?: number | null;
+        start_time: string;
+        duration_minutes?: number;
+        timezone?: string;
+        priority?: number;
+        is_active?: boolean;
+        social_focus?: string | null;
+        tags?: string[];
+        source_ref?: string | null;
+    }) => api.post<DigitalProgramSlot>('/digital/program-slots', payload),
+    updateProgramSlot: (
+        slotId: number,
+        payload: Partial<{
+            program_title: string;
+            program_type: string | null;
+            description: string | null;
+            day_of_week: number | null;
+            start_time: string;
+            duration_minutes: number;
+            timezone: string;
+            priority: number;
+            is_active: boolean;
+            social_focus: string | null;
+            tags: string[];
+            source_ref: string | null;
+        }>
+    ) => api.patch<DigitalProgramSlot>(`/digital/program-slots/${slotId}`, payload),
+    deleteProgramSlot: (slotId: number) => api.delete<{ message: string }>(`/digital/program-slots/${slotId}`),
+    generate: (params?: { hours_ahead?: number; include_events?: boolean; include_breaking?: boolean }) =>
+        api.post<DigitalGenerateResult>('/digital/generate', null, { params }),
+    listTasks: (params?: {
+        channel?: DigitalChannel | 'all';
+        status?: DigitalTaskStatus | 'all';
+        owner_user_id?: number;
+        due_before?: string;
+        q?: string;
+        page?: number;
+        per_page?: number;
+    }) => api.get<DigitalTaskListResponse>('/digital/tasks', { params }),
+    createTask: (payload: {
+        channel: DigitalChannel;
+        platform?: string;
+        task_type?: string;
+        title: string;
+        brief?: string | null;
+        priority?: number;
+        due_at?: string | null;
+        scheduled_at?: string | null;
+        owner_user_id?: number | null;
+        program_slot_id?: number | null;
+        event_id?: number | null;
+        article_id?: number | null;
+    }) => api.post<DigitalTask>('/digital/tasks', payload),
+    updateTask: (
+        taskId: number,
+        payload: Partial<{
+            platform: string;
+            task_type: string;
+            title: string;
+            brief: string | null;
+            status: DigitalTaskStatus;
+            priority: number;
+            due_at: string | null;
+            scheduled_at: string | null;
+            owner_user_id: number | null;
+        }>
+    ) => api.patch<DigitalTask>(`/digital/tasks/${taskId}`, payload),
+    listTaskPosts: (taskId: number) => api.get<{ items: DigitalPost[]; total: number }>(`/digital/tasks/${taskId}/posts`),
+    createTaskPost: (
+        taskId: number,
+        payload: {
+            platform: string;
+            content_text: string;
+            hashtags?: string[];
+            media_urls?: string[];
+            status?: DigitalPostStatus;
+            scheduled_at?: string | null;
+            published_url?: string | null;
+            external_post_id?: string | null;
+        }
+    ) => api.post<DigitalPost>(`/digital/tasks/${taskId}/posts`, payload),
+    updatePost: (
+        postId: number,
+        payload: Partial<{
+            content_text: string;
+            hashtags: string[];
+            media_urls: string[];
+            status: DigitalPostStatus;
+            scheduled_at: string | null;
+            published_at: string | null;
+            published_url: string | null;
+            external_post_id: string | null;
+            error_message: string | null;
+        }>
+    ) => api.patch<DigitalPost>(`/digital/posts/${postId}`, payload),
+    markPostPublished: (postId: number, params?: { published_url?: string; external_post_id?: string }) =>
+        api.post<DigitalPost>(`/digital/posts/${postId}/mark-published`, null, { params }),
+    calendar: (params?: { from_date?: string; days?: number; channel?: DigitalChannel | 'all' }) =>
+        api.get<DigitalCalendarResponse>('/digital/calendar', { params }),
 };
 
 export const msiApi = {

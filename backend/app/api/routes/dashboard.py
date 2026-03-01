@@ -21,11 +21,23 @@ from app.schemas import DashboardStats, PipelineRunResponse
 from app.services.cache_service import cache_service
 from app.agents import published_content_monitor_agent
 from app.services.event_reminder_service import event_reminder_service
+from app.services.digital_team_service import ChannelScope, digital_team_service
 from app.services.job_queue_service import job_queue_service
 
 logger = get_logger("api.dashboard")
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 settings = get_settings()
+
+
+async def _digital_tables_ready(db: AsyncSession) -> bool:
+    row = await db.execute(
+        select(
+            func.to_regclass("public.digital_team_scopes"),
+            func.to_regclass("public.social_tasks"),
+        )
+    )
+    scopes_tbl, tasks_tbl = row.one()
+    return bool(scopes_tbl and tasks_tbl)
 
 
 async def _expire_stale_breaking_flags(db: AsyncSession) -> None:
@@ -878,6 +890,24 @@ async def dashboard_notifications(
                 "severity": reminder.get("severity") or "medium",
             }
         )
+
+    if await _digital_tables_ready(db):
+        try:
+            if current_user.role in {UserRole.director, UserRole.editor_chief, UserRole.journalist, UserRole.print_editor}:
+                digital_scope = ChannelScope(can_news=True, can_tv=True)
+            elif current_user.role == UserRole.social_media:
+                digital_scope = await digital_team_service.resolve_scope(db, current_user)
+            else:
+                digital_scope = ChannelScope(can_news=False, can_tv=False)
+
+            digital_items = await digital_team_service.due_task_notifications(
+                db,
+                scope=digital_scope,
+                limit=20,
+            )
+            items.extend(digital_items)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("dashboard_digital_notifications_skipped", error=str(exc))
 
     trend_payload = await cache_service.get_json("trends:last:DZ:all")
     seen_trends: set[str] = set()
