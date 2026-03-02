@@ -43,6 +43,26 @@ function postLengthState(platform: string, text: string): { count: number; limit
     return { count, limit, over: count > limit };
 }
 
+function composeCopyText(text: string, hashtags: string[] = []): string {
+    const cleanText = (text || '').trim();
+    const cleanTags = (hashtags || [])
+        .map((tag) => String(tag || '').trim().replace(/^#/, ''))
+        .filter(Boolean)
+        .map((tag) => `#${tag}`);
+    if (!cleanTags.length) return cleanText;
+    return `${cleanText}\n\n${cleanTags.join(' ')}`.trim();
+}
+
+function platformComposeUrl(platform: string): string {
+    const key = normalizePlatform(platform);
+    if (key === 'x') return 'https://x.com/compose/post';
+    if (key === 'facebook') return 'https://www.facebook.com/';
+    if (key === 'instagram') return 'https://www.instagram.com/';
+    if (key === 'tiktok') return 'https://www.tiktok.com/upload';
+    if (key === 'youtube') return 'https://studio.youtube.com/';
+    return 'https://www.facebook.com/';
+}
+
 function apiErrorMessage(error: unknown, fallback: string): string {
     if (isAxiosError(error)) {
         const detail = error.response?.data?.detail;
@@ -111,6 +131,8 @@ export default function DigitalPage() {
     const [q, setQ] = useState('');
     const [channel, setChannel] = useState<'all' | DigitalChannel>('all');
     const [status, setStatus] = useState<'all' | DigitalTaskStatus>('all');
+    const [taskTypeFilter, setTaskTypeFilter] = useState<string>('all');
+    const [onlyMine, setOnlyMine] = useState(false);
     const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
 
     const [taskTitle, setTaskTitle] = useState('');
@@ -181,7 +203,19 @@ export default function DigitalPage() {
     });
 
     const tasks = useMemo(() => (tasksQuery.data?.data?.items || []) as DigitalTask[], [tasksQuery.data?.data?.items]);
-    const selectedTask = useMemo(() => tasks.find((t) => t.id === selectedTaskId) || null, [tasks, selectedTaskId]);
+    const taskTypeOptions = useMemo(() => {
+        const uniq = Array.from(new Set(tasks.map((t) => (t.task_type || '').trim()).filter(Boolean)));
+        uniq.sort((a, b) => a.localeCompare(b));
+        return uniq;
+    }, [tasks]);
+    const filteredTasks = useMemo(() => {
+        return tasks.filter((task) => {
+            if (taskTypeFilter !== 'all' && task.task_type !== taskTypeFilter) return false;
+            if (onlyMine && (!user?.id || task.owner_user_id !== user.id)) return false;
+            return true;
+        });
+    }, [onlyMine, taskTypeFilter, tasks, user?.id]);
+    const selectedTask = useMemo(() => filteredTasks.find((t) => t.id === selectedTaskId) || null, [filteredTasks, selectedTaskId]);
 
     const postsQuery = useQuery({
         queryKey: ['digital-posts', selectedTaskId],
@@ -262,6 +296,17 @@ export default function DigitalPage() {
         }
     };
 
+    const openComposer = (platform: string) => {
+        if (typeof window === 'undefined') return;
+        const url = platformComposeUrl(platform);
+        window.open(url, '_blank', 'noopener,noreferrer');
+    };
+
+    const copyAndOpenComposer = async (platform: string, text: string, hashtags?: string[]) => {
+        await copySimple(composeCopyText(text, hashtags || []));
+        openComposer(platform);
+    };
+
     const generateMutation = useMutation({
         mutationFn: () => digitalApi.generate({ hours_ahead: 36, include_events: true, include_breaking: true }),
         onSuccess: async (res) => {
@@ -312,6 +357,19 @@ export default function DigitalPage() {
             await refreshAll();
         },
         onError: (err) => setError(apiErrorMessage(err, 'تعذر تحديث حالة المهمة.')),
+    });
+
+    const claimTaskMutation = useMutation({
+        mutationFn: (taskId: number) => {
+            if (!user?.id) throw new Error('تعذر تحديد حسابك.');
+            return digitalApi.updateTask(taskId, { owner_user_id: user.id });
+        },
+        onSuccess: async () => {
+            setError(null);
+            setMessage('تم استلام المهمة.');
+            await refreshAll();
+        },
+        onError: (err) => setError(apiErrorMessage(err, 'تعذر استلام المهمة.')),
     });
 
     const createPostMutation = useMutation({
@@ -453,6 +511,16 @@ export default function DigitalPage() {
         onError: (err) => setError(apiErrorMessage(err, 'تعذر تحديث حالة المادة.')),
     });
 
+    const quickPostStatusMutation = useMutation({
+        mutationFn: ({ postId, status }: { postId: number; status: DigitalPostStatus }) =>
+            digitalApi.updatePost(postId, { status }),
+        onSuccess: async () => {
+            setError(null);
+            await refreshAll();
+        },
+        onError: (err) => setError(apiErrorMessage(err, 'تعذر تحديث حالة المنشور.')),
+    });
+
     const saveScopeMutation = useMutation({
         mutationFn: () =>
             digitalApi.updateScope(Number(scopeUserId), {
@@ -509,19 +577,34 @@ export default function DigitalPage() {
                         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="بحث..." className="h-10 w-full md:w-72 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white" />
                         <select value={channel} onChange={(e) => setChannel(e.target.value as 'all' | DigitalChannel)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white"><option value="all">كل القنوات</option><option value="news">نيوز</option><option value="tv">TV</option></select>
                         <select value={status} onChange={(e) => setStatus(e.target.value as 'all' | DigitalTaskStatus)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white"><option value="all">كل الحالات</option><option value="todo">جديد</option><option value="in_progress">قيد التنفيذ</option><option value="review">مراجعة</option><option value="done">منجز</option><option value="cancelled">ملغي</option></select>
+                        <select value={taskTypeFilter} onChange={(e) => setTaskTypeFilter(e.target.value)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white">
+                            <option value="all">كل أنواع المهام</option>
+                            {taskTypeOptions.map((type) => (
+                                <option key={type} value={type}>{type}</option>
+                            ))}
+                        </select>
+                        <label className="inline-flex items-center gap-2 px-3 h-10 rounded-xl border border-slate-700 bg-slate-900/60 text-xs text-slate-300">
+                            <input type="checkbox" checked={onlyMine} onChange={(e) => setOnlyMine(e.target.checked)} />
+                            مهامي فقط
+                        </label>
                     </div>
                     <div className="max-h-[520px] overflow-auto rounded-xl border border-slate-800">
                         <table className="w-full text-sm">
                             <thead className="bg-slate-900/80 text-slate-300 sticky top-0"><tr><th className="text-right px-3 py-2">المهمة</th><th className="text-right px-3 py-2">القناة</th><th className="text-right px-3 py-2">الحالة</th><th className="text-right px-3 py-2">الاستحقاق</th><th className="text-right px-3 py-2">إجراءات</th></tr></thead>
                             <tbody>
-                                {tasks.map((task) => (
+                                {filteredTasks.map((task) => (
                                     <tr key={task.id} className={cn('border-t border-slate-800 hover:bg-slate-900/50 cursor-pointer', selectedTaskId === task.id && 'bg-cyan-500/10')} onClick={() => setSelectedTaskId(task.id)}>
-                                        <td className="px-3 py-2"><div className="text-white font-medium">{task.title}</div><div className="text-xs text-slate-500 mt-1">{task.brief || 'بدون وصف'}</div></td>
+                                        <td className="px-3 py-2">
+                                            <div className="text-white font-medium">{task.title}</div>
+                                            <div className="text-xs text-slate-500 mt-1">{task.brief || 'بدون وصف'}</div>
+                                            <div className="text-[11px] text-slate-500 mt-1">{task.task_type} {task.owner_username ? `• ${task.owner_username}` : ''}</div>
+                                        </td>
                                         <td className="px-3 py-2 text-slate-300">{channelLabel(task.channel)}</td>
                                         <td className="px-3 py-2"><span className={cn('inline-flex px-2 py-0.5 rounded-lg border text-xs', taskStatusClass(task.status))}>{taskStatusLabel(task.status)}</span></td>
                                         <td className="px-3 py-2 text-slate-300">{task.due_at ? <div><div>{formatDate(task.due_at)}</div><div className="text-xs text-slate-500">{formatRelativeTime(task.due_at)}</div></div> : '—'}</td>
                                         <td className="px-3 py-2">
                                             {canWrite && <div className="flex gap-1 flex-wrap">
+                                                {user?.id && task.owner_user_id !== user.id && <button onClick={(e) => { e.stopPropagation(); claimTaskMutation.mutate(task.id); }} className="text-xs px-2 py-1 rounded-lg border border-slate-500/30 bg-slate-500/10 text-slate-200">استلام</button>}
                                                 {task.status !== 'in_progress' && <button onClick={(e) => { e.stopPropagation(); updateTaskMutation.mutate({ taskId: task.id, nextStatus: 'in_progress' }); }} className="text-xs px-2 py-1 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-200">بدء</button>}
                                                 {task.status !== 'review' && task.status !== 'done' && <button onClick={(e) => { e.stopPropagation(); updateTaskMutation.mutate({ taskId: task.id, nextStatus: 'review' }); }} className="text-xs px-2 py-1 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-200">مراجعة</button>}
                                                 {task.status !== 'done' && <button onClick={(e) => { e.stopPropagation(); updateTaskMutation.mutate({ taskId: task.id, nextStatus: 'done' }); }} className="text-xs px-2 py-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-200">إغلاق</button>}
@@ -529,7 +612,7 @@ export default function DigitalPage() {
                                         </td>
                                     </tr>
                                 ))}
-                                {!tasks.length && <tr><td colSpan={5} className="px-3 py-8 text-center text-slate-500">لا توجد مهام.</td></tr>}
+                                {!filteredTasks.length && <tr><td colSpan={5} className="px-3 py-8 text-center text-slate-500">لا توجد مهام مطابقة للفلاتر.</td></tr>}
                             </tbody>
                         </table>
                     </div>
@@ -634,6 +717,12 @@ export default function DigitalPage() {
                                             <Copy className="w-3 h-3" />
                                             نسخ
                                         </button>
+                                        <button
+                                            onClick={() => copySimple(composeCopyText(value.text, value.hashtags || []))}
+                                            className="h-8 px-2 rounded-lg border border-cyan-600/40 bg-cyan-900/20 text-cyan-200 text-xs"
+                                        >
+                                            نسخ كامل
+                                        </button>
                                     </div>
                                 </div>
                                 <textarea
@@ -708,6 +797,17 @@ export default function DigitalPage() {
                                 <div key={post.id} className="rounded-xl border border-slate-800 bg-slate-900/50 p-3">
                                     <div className="flex flex-wrap items-center justify-between gap-2"><div className="text-sm text-white">{post.platform}</div><span className={cn('inline-flex px-2 py-0.5 rounded-lg border text-xs', postStatusClass(post.status))}>{postStatusLabel(post.status)}</span></div>
                                     <p className="text-sm text-slate-200 mt-2 whitespace-pre-wrap">{post.content_text}</p>
+                                    {!!(post.hashtags || []).length && (
+                                        <div className="text-xs text-slate-400 mt-2">{(post.hashtags || []).map((tag) => `#${String(tag).replace(/^#/, '')}`).join(' ')}</div>
+                                    )}
+                                    <div className="mt-2 flex flex-wrap gap-2">
+                                        <button onClick={() => copySimple(post.content_text)} className="h-8 px-2 rounded-lg border border-slate-600 bg-slate-800/60 text-slate-200 text-xs inline-flex items-center gap-1"><Copy className="w-3 h-3" />نسخ النص</button>
+                                        <button onClick={() => copySimple(composeCopyText(post.content_text, post.hashtags || []))} className="h-8 px-2 rounded-lg border border-cyan-600/40 bg-cyan-900/20 text-cyan-200 text-xs">نسخ كامل</button>
+                                        <button onClick={() => openComposer(post.platform)} className="h-8 px-2 rounded-lg border border-indigo-600/40 bg-indigo-900/20 text-indigo-200 text-xs">فتح المنصة</button>
+                                        <button onClick={() => copyAndOpenComposer(post.platform, post.content_text, post.hashtags || [])} className="h-8 px-2 rounded-lg border border-emerald-600/40 bg-emerald-900/20 text-emerald-200 text-xs">نسخ + فتح</button>
+                                        {canWrite && post.status === 'draft' && <button onClick={() => quickPostStatusMutation.mutate({ postId: post.id, status: 'ready' })} className="h-8 px-2 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-200 text-xs">جاهز</button>}
+                                        {canWrite && (post.status === 'ready' || post.status === 'draft') && <button onClick={() => quickPostStatusMutation.mutate({ postId: post.id, status: 'approved' })} className="h-8 px-2 rounded-lg border border-blue-500/30 bg-blue-500/10 text-blue-200 text-xs">اعتماد</button>}
+                                    </div>
                                     <div className="mt-2 flex flex-wrap gap-2">
                                         <input value={publishUrlDraft[post.id] || ''} onChange={(e) => setPublishUrlDraft((prev) => ({ ...prev, [post.id]: e.target.value }))} placeholder="رابط المنشور" className="h-9 min-w-[260px] flex-1 rounded-lg border border-slate-700 bg-slate-900/60 px-3 text-xs text-white" />
                                         {canWrite && post.status !== 'published' && <button onClick={() => publishPostMutation.mutate({ postId: post.id, publishedUrl: publishUrlDraft[post.id] })} className="h-9 px-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-xs inline-flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />تم النشر</button>}
