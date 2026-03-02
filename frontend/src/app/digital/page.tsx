@@ -22,6 +22,26 @@ const READ_ROLES = new Set(['director', 'editor_chief', 'social_media', 'journal
 const WRITE_ROLES = new Set(['director', 'editor_chief', 'social_media']);
 const MANAGE_ROLES = new Set(['director', 'editor_chief']);
 const PLATFORM_OPTIONS = ['facebook', 'x', 'youtube', 'tiktok', 'instagram'];
+const PLATFORM_CHAR_LIMITS: Record<string, number> = {
+    x: 280,
+    facebook: 5000,
+    instagram: 2200,
+    tiktok: 2200,
+    youtube: 5000,
+};
+
+function normalizePlatform(platform: string): string {
+    const key = (platform || '').trim().toLowerCase();
+    if (key === 'twitter') return 'x';
+    return key;
+}
+
+function postLengthState(platform: string, text: string): { count: number; limit: number; over: boolean } {
+    const key = normalizePlatform(platform);
+    const limit = PLATFORM_CHAR_LIMITS[key] || 5000;
+    const count = (text || '').trim().length;
+    return { count, limit, over: count > limit };
+}
 
 function apiErrorMessage(error: unknown, fallback: string): string {
     if (isAxiosError(error)) {
@@ -177,6 +197,44 @@ export default function DigitalPage() {
                 .sort((a, b) => (a.full_name_ar || a.username).localeCompare(b.full_name_ar || b.username)),
         [usersQuery.data?.data]
     );
+    const postDraftLength = useMemo(() => postLengthState(postPlatform, postContent), [postPlatform, postContent]);
+    const composerHasOverLimit = useMemo(
+        () =>
+            Object.entries(composerGenerated || {}).some(([platform, value]) =>
+                postLengthState(platform, value.text || '').over
+            ),
+        [composerGenerated]
+    );
+
+    const buildProgramDrafts = async (): Promise<{
+        taskId: number;
+        map: Record<string, { text: string; hashtags: string[] }>;
+    }> => {
+        const slotId = Number(composerSlotId);
+        if (!slotId || Number.isNaN(slotId)) throw new Error('اختر برنامجاً أو مسلسلاً أولاً.');
+        if (!composerPlatforms.length) throw new Error('اختر منصة واحدة على الأقل.');
+
+        const slot = (slotsQuery.data?.data || []).find((s) => s.id === slotId);
+        if (!slot) throw new Error('تعذر تحميل البرنامج المختار.');
+
+        const taskRes = await digitalApi.createTask({
+            channel: slot.channel,
+            title: `منشور مقطع | ${slot.program_title}`,
+            brief: composerDraft.trim() || slot.social_focus || slot.description || null,
+            platform: 'all',
+            priority: 3,
+            program_slot_id: slot.id,
+        });
+
+        const taskId = taskRes.data.id;
+        const composed = await Promise.all(
+            composerPlatforms.map(async (platform) => {
+                const res = await digitalApi.composeTask(taskId, { platform, max_hashtags: 6 });
+                return [platform, { text: res.data.recommended_text, hashtags: res.data.hashtags || [] }] as const;
+            })
+        );
+        return { taskId, map: Object.fromEntries(composed) as Record<string, { text: string; hashtags: string[] }> };
+    };
 
     const refreshAll = async () => {
         await queryClient.invalidateQueries({ queryKey: ['digital-overview'] });
@@ -257,14 +315,20 @@ export default function DigitalPage() {
     });
 
     const createPostMutation = useMutation({
-        mutationFn: () =>
-            digitalApi.createTaskPost(selectedTaskId as number, {
+        mutationFn: () => {
+            const draft = postContent.trim();
+            const length = postLengthState(postPlatform, draft);
+            if (length.over) {
+                throw new Error(`تجاوزت الحد لمنصة ${normalizePlatform(postPlatform)}: ${length.count}/${length.limit}`);
+            }
+            return digitalApi.createTaskPost(selectedTaskId as number, {
                 platform: postPlatform,
-                content_text: postContent.trim(),
+                content_text: draft,
                 hashtags: postHashtags.split(',').map((s) => s.trim()).filter(Boolean),
                 status: postStatus,
                 scheduled_at: postScheduledAt ? new Date(postScheduledAt).toISOString() : null,
-            }),
+            });
+        },
         onSuccess: async () => {
             setPostContent('');
             setPostHashtags('');
@@ -294,33 +358,7 @@ export default function DigitalPage() {
     });
 
     const generateFromProgramMutation = useMutation({
-        mutationFn: async () => {
-            const slotId = Number(composerSlotId);
-            if (!slotId || Number.isNaN(slotId)) throw new Error('اختر برنامجاً أو مسلسلاً أولاً.');
-            if (!composerPlatforms.length) throw new Error('اختر منصة واحدة على الأقل.');
-
-            const slot = (slotsQuery.data?.data || []).find((s) => s.id === slotId);
-            if (!slot) throw new Error('تعذر تحميل البرنامج المختار.');
-
-            const taskRes = await digitalApi.createTask({
-                channel: slot.channel,
-                title: `منشور مقطع | ${slot.program_title}`,
-                brief: composerDraft.trim() || slot.social_focus || slot.description || null,
-                platform: 'all',
-                priority: 3,
-                program_slot_id: slot.id,
-            });
-
-            const taskId = taskRes.data.id;
-            const composed = await Promise.all(
-                composerPlatforms.map(async (platform) => {
-                    const res = await digitalApi.composeTask(taskId, { platform, max_hashtags: 6 });
-                    return [platform, { text: res.data.recommended_text, hashtags: res.data.hashtags || [] }] as const;
-                })
-            );
-
-            return { taskId, map: Object.fromEntries(composed) as Record<string, { text: string; hashtags: string[] }> };
-        },
+        mutationFn: buildProgramDrafts,
         onSuccess: async (res) => {
             setComposerTaskId(res.taskId);
             setSelectedTaskId(res.taskId);
@@ -337,6 +375,16 @@ export default function DigitalPage() {
             if (!composerTaskId) throw new Error('لا توجد مهمة صياغة محفوظة بعد.');
             const entries = Object.entries(composerGenerated || {}).filter(([, value]) => value.text.trim());
             if (!entries.length) throw new Error('لا توجد صياغات جاهزة للحفظ.');
+            const invalid = entries
+                .map(([platform, value]) => ({
+                    platform: normalizePlatform(platform),
+                    state: postLengthState(platform, value.text || ''),
+                }))
+                .filter((item) => item.state.over);
+            if (invalid.length) {
+                const list = invalid.map((item) => `${item.platform} (${item.state.count}/${item.state.limit})`).join('، ');
+                throw new Error(`يوجد تجاوز لطول النص في: ${list}`);
+            }
             await Promise.all(
                 entries.map(([platform, value]) =>
                     digitalApi.createTaskPost(composerTaskId, {
@@ -354,6 +402,44 @@ export default function DigitalPage() {
             await refreshAll();
         },
         onError: (err) => setError(apiErrorMessage(err, 'تعذر حفظ الصياغات المولدة.')),
+    });
+
+    const generateAndSaveMutation = useMutation({
+        mutationFn: async () => {
+            const res = await buildProgramDrafts();
+            const entries = Object.entries(res.map).filter(([, value]) => (value.text || '').trim());
+            if (!entries.length) throw new Error('فشل التوليد: لا توجد صياغات صالحة للحفظ.');
+            const invalid = entries
+                .map(([platform, value]) => ({
+                    platform: normalizePlatform(platform),
+                    state: postLengthState(platform, value.text || ''),
+                }))
+                .filter((item) => item.state.over);
+            if (invalid.length) {
+                const list = invalid.map((item) => `${item.platform} (${item.state.count}/${item.state.limit})`).join('، ');
+                throw new Error(`تم التوليد لكن يوجد تجاوز لطول النص في: ${list}`);
+            }
+            await Promise.all(
+                entries.map(([platform, value]) =>
+                    digitalApi.createTaskPost(res.taskId, {
+                        platform,
+                        content_text: value.text,
+                        hashtags: value.hashtags || [],
+                        status: 'ready',
+                    })
+                )
+            );
+            return { taskId: res.taskId, map: res.map, count: entries.length };
+        },
+        onSuccess: async (res) => {
+            setComposerTaskId(res.taskId);
+            setSelectedTaskId(res.taskId);
+            setComposerGenerated(res.map);
+            setError(null);
+            setMessage(`تم توليد وحفظ ${res.count} منشور مباشرة.`);
+            await refreshAll();
+        },
+        onError: (err) => setError(apiErrorMessage(err, 'تعذر تنفيذ التوليد والحفظ المباشر.')),
     });
 
     const publishPostMutation = useMutation({
@@ -473,7 +559,7 @@ export default function DigitalPage() {
 
             <section className="rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
                 <h2 className="text-sm font-semibold text-slate-200">مولّد منشورات البرامج/المسلسلات</h2>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
                     <select
                         value={composerSlotId}
                         onChange={(e) => setComposerSlotId(e.target.value)}
@@ -492,6 +578,13 @@ export default function DigitalPage() {
                         className="h-10 rounded-xl border border-indigo-500/30 bg-indigo-500/10 text-indigo-200 text-sm disabled:opacity-50"
                     >
                         توليد حسب المنصات
+                    </button>
+                    <button
+                        onClick={() => generateAndSaveMutation.mutate()}
+                        disabled={!canWrite || generateAndSaveMutation.isPending}
+                        className="h-10 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-sm disabled:opacity-50"
+                    >
+                        توليد + حفظ مباشر
                     </button>
                 </div>
                 <textarea
@@ -524,17 +617,24 @@ export default function DigitalPage() {
 
                 {!!Object.keys(composerGenerated || {}).length && (
                     <div className="space-y-2">
-                        {Object.entries(composerGenerated).map(([platform, value]) => (
+                        {Object.entries(composerGenerated).map(([platform, value]) => {
+                            const length = postLengthState(platform, value.text || '');
+                            return (
                             <div key={platform} className="rounded-xl border border-slate-800 bg-slate-900/50 p-3 space-y-2">
                                 <div className="flex items-center justify-between gap-2">
                                     <div className="text-sm text-white font-medium">{platform}</div>
-                                    <button
-                                        onClick={() => copySimple(value.text)}
-                                        className="h-8 px-2 rounded-lg border border-slate-600 bg-slate-800/60 text-slate-200 text-xs inline-flex items-center gap-1"
-                                    >
-                                        <Copy className="w-3 h-3" />
-                                        نسخ
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <span className={cn('text-[11px]', length.over ? 'text-rose-300' : 'text-slate-400')}>
+                                            {length.count}/{length.limit}
+                                        </span>
+                                        <button
+                                            onClick={() => copySimple(value.text)}
+                                            className="h-8 px-2 rounded-lg border border-slate-600 bg-slate-800/60 text-slate-200 text-xs inline-flex items-center gap-1"
+                                        >
+                                            <Copy className="w-3 h-3" />
+                                            نسخ
+                                        </button>
+                                    </div>
                                 </div>
                                 <textarea
                                     value={value.text}
@@ -565,10 +665,10 @@ export default function DigitalPage() {
                                     className="h-9 w-full rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-xs text-white"
                                 />
                             </div>
-                        ))}
+                        )})}
                         <button
                             onClick={() => saveGeneratedPostsMutation.mutate()}
-                            disabled={!canWrite || saveGeneratedPostsMutation.isPending}
+                            disabled={!canWrite || saveGeneratedPostsMutation.isPending || composerHasOverLimit}
                             className="h-10 w-full rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-sm disabled:opacity-50"
                         >
                             حفظ كل الصياغات
@@ -599,7 +699,10 @@ export default function DigitalPage() {
                             </button>
                         )}
                         <textarea value={postContent} onChange={(e) => setPostContent(e.target.value)} rows={3} placeholder="نص المنشور" className="w-full rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-white" />
-                        <button onClick={() => createPostMutation.mutate()} disabled={!canWrite || !postContent.trim()} className="h-10 rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-sm disabled:opacity-50">حفظ المادة</button>
+                        <div className={cn('text-xs', postDraftLength.over ? 'text-rose-300' : 'text-slate-400')}>
+                            طول النص: {postDraftLength.count}/{postDraftLength.limit}
+                        </div>
+                        <button onClick={() => createPostMutation.mutate()} disabled={!canWrite || !postContent.trim() || postDraftLength.over} className="h-10 rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-sm disabled:opacity-50">حفظ المادة</button>
                         <div className="space-y-2">
                             {posts.map((post) => (
                                 <div key={post.id} className="rounded-xl border border-slate-800 bg-slate-900/50 p-3">
