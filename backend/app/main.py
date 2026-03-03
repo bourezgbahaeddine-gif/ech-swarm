@@ -63,6 +63,7 @@ from app.services.competitor_xray_service import competitor_xray_service
 from app.services.digital_team_service import digital_team_service
 from app.services.event_reminder_service import event_reminder_service
 from app.services.job_queue_service import job_queue_service
+from app.services.time_integrity_service import time_integrity_service
 from app.api.envelope import error_envelope
 
 settings = get_settings()
@@ -77,6 +78,7 @@ _published_monitor_task: asyncio.Task | None = None
 _competitor_xray_task: asyncio.Task | None = None
 _event_reminders_task: asyncio.Task | None = None
 _digital_generation_task: asyncio.Task | None = None
+_time_integrity_cleanup_task: asyncio.Task | None = None
 
 
 async def _run_pipeline_once():
@@ -266,6 +268,16 @@ async def _run_digital_generation_once():
     logger.info("auto_digital_generation_tick_done", **stats)
 
 
+async def _run_time_integrity_cleanup_once():
+    async with async_session() as db:
+        result = await time_integrity_service.archive_stale_non_published(
+            db,
+            max_age_hours=settings.scout_max_article_age_hours,
+            dry_run=False,
+        )
+    logger.info("auto_time_integrity_cleanup_tick_done", **result)
+
+
 async def _periodic_loop(name: str, interval_seconds: int, job):
     logger.info("periodic_loop_started", loop=name, interval_seconds=interval_seconds)
     while not _shutdown_event.is_set():
@@ -300,10 +312,11 @@ async def lifespan(app: FastAPI):
     await cache_service.connect()
 
     # Start periodic pipeline loops (optional)
-    global _pipeline_task, _trends_task, _published_monitor_task, _competitor_xray_task, _event_reminders_task, _digital_generation_task
+    global _pipeline_task, _trends_task, _published_monitor_task, _competitor_xray_task, _event_reminders_task, _digital_generation_task, _time_integrity_cleanup_task
     _shutdown_event.clear()
     if settings.auto_pipeline_enabled:
-        newsroom_interval_seconds = 20 * 60
+        scout_interval_minutes = max(1, int(settings.scout_interval_minutes))
+        newsroom_interval_seconds = scout_interval_minutes * 60
         _pipeline_task = asyncio.create_task(
             _periodic_loop(
                 "pipeline",
@@ -313,7 +326,7 @@ async def lifespan(app: FastAPI):
         )
         logger.info(
             "auto_pipeline_enabled",
-            scout_interval_minutes=20,
+            scout_interval_minutes=scout_interval_minutes,
             auto_scribe_enabled=settings.auto_scribe_enabled,
         )
 
@@ -390,6 +403,20 @@ async def lifespan(app: FastAPI):
             include_breaking=settings.digital_team_auto_include_breaking,
         )
 
+    if settings.time_integrity_cleanup_enabled:
+        _time_integrity_cleanup_task = asyncio.create_task(
+            _periodic_loop(
+                "time_integrity_cleanup",
+                max(300, settings.time_integrity_cleanup_interval_minutes * 60),
+                _run_time_integrity_cleanup_once,
+            )
+        )
+        logger.info(
+            "time_integrity_cleanup_enabled",
+            interval_minutes=settings.time_integrity_cleanup_interval_minutes,
+            max_age_hours=settings.scout_max_article_age_hours,
+        )
+
     if settings.msi_enabled and settings.msi_scheduler_enabled:
         start_msi_scheduler()
 
@@ -410,6 +437,7 @@ async def lifespan(app: FastAPI):
         _competitor_xray_task,
         _event_reminders_task,
         _digital_generation_task,
+        _time_integrity_cleanup_task,
     ):
         if task:
             task.cancel()
@@ -423,6 +451,7 @@ async def lifespan(app: FastAPI):
                 _competitor_xray_task,
                 _event_reminders_task,
                 _digital_generation_task,
+                _time_integrity_cleanup_task,
             )
             if t
         ],

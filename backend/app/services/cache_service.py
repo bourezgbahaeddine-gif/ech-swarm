@@ -173,6 +173,27 @@ class CacheService:
         except Exception:
             return 0
 
+    async def list_counters(self, prefix: str, limit: int = 200) -> dict[str, int]:
+        """List counters by prefix (prefix without `counter:`)."""
+        client = await self._ensure_client()
+        if not client:
+            return {}
+        pattern = f"counter:{prefix}*"
+        result: dict[str, int] = {}
+        try:
+            async for key in client.scan_iter(match=pattern, count=min(max(limit, 10), 1000)):
+                if len(result) >= limit:
+                    break
+                value = await client.get(key)
+                normalized_key = str(key).replace("counter:", "", 1)
+                try:
+                    result[normalized_key] = int(value or 0)
+                except (TypeError, ValueError):
+                    result[normalized_key] = 0
+        except Exception:
+            return {}
+        return result
+
 
 # Singleton
 cache_service = CacheService()

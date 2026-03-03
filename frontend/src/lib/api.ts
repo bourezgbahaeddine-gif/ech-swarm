@@ -187,6 +187,38 @@ export interface OpsOverviewResponse {
     state_age_seconds: Array<{ status: string | null; avg_age_seconds: number; count: number }>;
 }
 
+export interface TimeIntegrityOverview {
+    generated_at: string;
+    policy: {
+        max_article_age_hours: number;
+        cutoff_iso: string;
+        require_timestamp_for_all_sources: boolean;
+        require_timestamp_for_aggregator: boolean;
+        allow_url_date_fallback: boolean;
+    };
+    oldest_candidate_age_hours: number | null;
+    oldest_ready_for_chief_age_hours: number | null;
+    stale_non_published_total: number;
+    stale_non_published_by_status: Array<{ status: string; count: number }>;
+    skip_reasons: Array<{ reason: string; count: number }>;
+    top_missing_timestamp_sources: Array<{ source: string; count: number }>;
+    url_date_fallback: {
+        accepted_count: number;
+        ingested_total: number;
+        acceptance_ratio: number;
+    };
+}
+
+export interface TimeIntegrityCleanupResponse {
+    message: string;
+    dry_run: boolean;
+    matched_rows: number;
+    archived_rows: number;
+    max_age_hours: number;
+    cutoff_iso: string;
+    reason: string;
+}
+
 export interface TrendAlert {
     keyword: string;
     source_signals: string[];
@@ -796,6 +828,10 @@ export const dashboardApi = {
         api.get<{ items: DashboardNotification[]; total: number }>('/dashboard/notifications', { params }),
     opsOverview: (params?: { lookback_hours?: number }) =>
         api.get<OpsOverviewResponse>('/dashboard/ops/overview', { params }),
+    timeIntegrity: (params?: { max_age_hours?: number; top_sources_limit?: number }) =>
+        api.get<TimeIntegrityOverview>('/dashboard/time-integrity', { params }),
+    timeIntegrityCleanup: (params?: { dry_run?: boolean; max_age_hours?: number }) =>
+        api.post<TimeIntegrityCleanupResponse>('/dashboard/time-integrity/cleanup', null, { params }),
 };
 
 export const jobsApi = {

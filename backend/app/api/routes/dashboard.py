@@ -23,6 +23,7 @@ from app.agents import published_content_monitor_agent
 from app.services.event_reminder_service import event_reminder_service
 from app.services.digital_team_service import ChannelScope, digital_team_service
 from app.services.job_queue_service import job_queue_service
+from app.services.time_integrity_service import time_integrity_service
 
 logger = get_logger("api.dashboard")
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
@@ -246,6 +247,42 @@ async def get_operational_overview(
         "failure_reasons": failure_distribution,
         "queue_depth": await job_queue_service.queue_depths(),
         "state_age_seconds": state_ages,
+    }
+
+
+@router.get("/time-integrity")
+async def get_time_integrity_overview(
+    max_age_hours: int | None = Query(default=None, ge=1, le=744),
+    top_sources_limit: int = Query(default=10, ge=3, le=50),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Time-integrity telemetry for newsroom freshness governance."""
+    _assert_agent_control_permission(current_user)
+    return await time_integrity_service.build_overview(
+        db,
+        max_age_hours=max_age_hours,
+        top_sources_limit=top_sources_limit,
+    )
+
+
+@router.post("/time-integrity/cleanup")
+async def run_time_integrity_cleanup(
+    dry_run: bool = Query(default=True),
+    max_age_hours: int | None = Query(default=None, ge=1, le=744),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Archive stale non-published newsroom items based on freshness policy."""
+    _assert_agent_control_permission(current_user)
+    result = await time_integrity_service.archive_stale_non_published(
+        db,
+        max_age_hours=max_age_hours,
+        dry_run=dry_run,
+    )
+    return {
+        "message": "Time integrity cleanup completed." if not dry_run else "Time integrity cleanup dry-run completed.",
+        **result,
     }
 
 

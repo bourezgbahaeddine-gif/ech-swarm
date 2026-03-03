@@ -10,6 +10,7 @@ import PipelineMonitor from '@/components/dashboard/PipelineMonitor';
 import AgentControl from '@/components/dashboard/AgentControl';
 import MsiWidget from '@/components/dashboard/MsiWidget';
 import CompetitorXrayWidget from '@/components/dashboard/CompetitorXrayWidget';
+import TimeIntegrityWidget from '@/components/dashboard/TimeIntegrityWidget';
 import { useAuth } from '@/lib/auth';
 
 export default function DashboardPage() {
@@ -105,6 +106,10 @@ export default function DashboardPage() {
 
           <div className="animate-fade-in-up" style={{ animationDelay: '380ms' }}>
             <PipelineMonitor runs={pipelineData?.data} isLoading={pipelineLoading} />
+          </div>
+
+          <div className="animate-fade-in-up" style={{ animationDelay: '400ms' }}>
+            <TimeIntegrityWidget />
           </div>
 
           <div className="animate-fade-in-up" style={{ animationDelay: '420ms' }}>

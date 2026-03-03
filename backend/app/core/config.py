@@ -101,6 +101,8 @@ class Settings(BaseSettings):
     published_monitor_alert_threshold: int = 75
     event_reminders_enabled: bool = True
     event_reminders_interval_minutes: int = 15
+    time_integrity_cleanup_enabled: bool = False
+    time_integrity_cleanup_interval_minutes: int = 15
     digital_team_auto_generation_enabled: bool = True
     digital_team_auto_generation_interval_minutes: int = 20
     digital_team_auto_generation_hours_ahead: int = 36
@@ -179,6 +181,8 @@ class Settings(BaseSettings):
     scout_max_article_age_hours: int = 72
     scout_max_article_future_minutes: int = 30
     scout_require_timestamp_for_aggregator: bool = True
+    scout_require_timestamp_for_all_sources: bool = False
+    scout_allow_url_date_fallback: bool = True
     scout_ingest_filters_enabled: bool = True
     scout_cross_source_dedup_enabled: bool = True
     scout_cross_source_dedup_window_hours: int = 18

@@ -69,6 +69,12 @@ class ScoutAgent:
             "new": 0,
             "duplicates": 0,
             "errors": 0,
+            "skipped_stale": 0,
+            "skipped_future_timestamp": 0,
+            "skipped_missing_timestamp": 0,
+            "skipped_missing_timestamp_aggregator": 0,
+            "skipped_missing_timestamp_scraper": 0,
+            "skipped_blocked_source": 0,
         }
         max_new_per_run = settings.scout_max_new_per_run
 
@@ -162,6 +168,23 @@ class ScoutAgent:
             if host:
                 blocked.add(host)
         return blocked
+
+    @staticmethod
+    def _normalize_source_counter_key(source_name: str | None) -> str:
+        source = (source_name or "").strip().lower()
+        source = re.sub(r"\s+", "_", source)
+        source = re.sub(r"[^a-z0-9._-]+", "", source)
+        return source[:120] or "unknown"
+
+    async def _track_skip(self, reason: str, source_name: str | None = None) -> None:
+        try:
+            await cache_service.increment_counter(f"time_integrity:skip:{reason}")
+            if reason.startswith("missing_timestamp"):
+                src_key = self._normalize_source_counter_key(source_name)
+                await cache_service.increment_counter(f"time_integrity:missing_timestamp_source:{src_key}")
+        except Exception:
+            # Non-blocking metrics path.
+            return
 
     async def _load_freshrss_source_cap(self) -> int:
         raw = await settings_service.get_value(
@@ -578,10 +601,16 @@ class ScoutAgent:
         raw_link = link.strip()
         canonical_link = self._canonicalize_url(raw_link)
         link = canonical_link or raw_link
-        published_at = self._extract_entry_datetime(entry) or self._extract_datetime_from_url(link)
+        published_at = self._extract_entry_datetime(entry)
+        used_url_date_fallback = False
+        if not published_at and settings.scout_allow_url_date_fallback:
+            published_at = self._extract_datetime_from_url(link)
+            used_url_date_fallback = published_at is not None
 
         if settings.scout_ingest_filters_enabled and self._is_blocked_source_entry(source.name, link):
             stats["duplicates"] += 1
+            stats["skipped_blocked_source"] += 1
+            await self._track_skip("blocked_source", source.name)
             logger.info(
                 "entry_skipped_blocked_source",
                 source=source.name,
@@ -647,6 +676,8 @@ class ScoutAgent:
             age_hours = (now - published_at).total_seconds() / 3600.0
             if age_hours > max_age:
                 stats["duplicates"] += 1
+                stats["skipped_stale"] += 1
+                await self._track_skip("stale", source.name)
                 logger.info(
                     "entry_skipped_stale",
                     source=source.name,
@@ -658,6 +689,8 @@ class ScoutAgent:
             future_minutes = (published_at - now).total_seconds() / 60.0
             if future_minutes > settings.scout_max_article_future_minutes:
                 stats["duplicates"] += 1
+                stats["skipped_future_timestamp"] += 1
+                await self._track_skip("future_timestamp", source.name)
                 logger.info(
                     "entry_skipped_future_timestamp",
                     source=source.name,
@@ -665,9 +698,21 @@ class ScoutAgent:
                     future_minutes=round(future_minutes, 2),
                 )
                 return
+        elif settings.scout_require_timestamp_for_all_sources:
+            stats["duplicates"] += 1
+            stats["skipped_missing_timestamp"] += 1
+            await self._track_skip("missing_timestamp", source.name)
+            logger.info(
+                "entry_skipped_missing_timestamp",
+                source=source.name,
+                title=title[:80],
+            )
+            return
         elif settings.scout_require_timestamp_for_aggregator and self._is_aggregator_entry(source.name, link):
             # Aggregator feeds without timestamps are noisy and often replay stale items.
             stats["duplicates"] += 1
+            stats["skipped_missing_timestamp_aggregator"] += 1
+            await self._track_skip("missing_timestamp_aggregator", source.name)
             logger.info(
                 "entry_skipped_missing_timestamp_aggregator",
                 source=source.name,
@@ -677,6 +722,8 @@ class ScoutAgent:
         elif getattr(source, "method", "").lower() == "scraper":
             # Scraped links without dates are frequently archive links; keep them out of newsroom.
             stats["duplicates"] += 1
+            stats["skipped_missing_timestamp_scraper"] += 1
+            await self._track_skip("missing_timestamp_scraper", source.name)
             logger.info(
                 "entry_skipped_missing_timestamp_scraper",
                 source=source.name,
@@ -733,6 +780,9 @@ class ScoutAgent:
             await cache_service.add_recent_title(title)
             
             stats["new"] += 1
+            await cache_service.increment_counter("time_integrity:ingested_total")
+            if used_url_date_fallback:
+                await cache_service.increment_counter("time_integrity:url_date_fallback_accepted")
             logger.info(
                 "article_ingested",
                 trace_id=trace_id,
