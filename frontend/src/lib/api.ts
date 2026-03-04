@@ -201,6 +201,7 @@ export interface TimeIntegrityOverview {
     stale_non_published_total: number;
     stale_non_published_by_status: Array<{ status: string; count: number }>;
     skip_reasons: Array<{ reason: string; count: number }>;
+    top_stale_sources: Array<{ source: string; count: number }>;
     top_missing_timestamp_sources: Array<{ source: string; count: number }>;
     url_date_fallback: {
         accepted_count: number;

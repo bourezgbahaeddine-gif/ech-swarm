@@ -93,6 +93,20 @@ class TimeIntegrityService:
         top_missing_timestamp_sources.sort(key=lambda item: item["count"], reverse=True)
         top_missing_timestamp_sources = top_missing_timestamp_sources[: max(1, top_sources_limit)]
 
+        stale_source_counters = await cache_service.list_counters(
+            "time_integrity:source_reason:stale:",
+            limit=1000,
+        )
+        top_stale_sources = [
+            {
+                "source": key.replace("time_integrity:source_reason:stale:", "", 1),
+                "count": int(value or 0),
+            }
+            for key, value in stale_source_counters.items()
+        ]
+        top_stale_sources.sort(key=lambda item: item["count"], reverse=True)
+        top_stale_sources = top_stale_sources[: max(1, top_sources_limit)]
+
         fallback_accepted = await cache_service.get_counter("time_integrity:url_date_fallback_accepted")
         ingested_total = await cache_service.get_counter("time_integrity:ingested_total")
         fallback_acceptance_ratio = round((fallback_accepted / ingested_total), 4) if ingested_total > 0 else 0.0
@@ -111,6 +125,7 @@ class TimeIntegrityService:
             "stale_non_published_total": stale_total,
             "stale_non_published_by_status": stale_by_status,
             "skip_reasons": skip_reasons,
+            "top_stale_sources": top_stale_sources,
             "top_missing_timestamp_sources": top_missing_timestamp_sources,
             "url_date_fallback": {
                 "accepted_count": int(fallback_accepted),
@@ -164,4 +179,3 @@ class TimeIntegrityService:
 
 
 time_integrity_service = TimeIntegrityService()
-

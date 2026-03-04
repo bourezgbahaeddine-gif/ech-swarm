@@ -179,8 +179,11 @@ class ScoutAgent:
     async def _track_skip(self, reason: str, source_name: str | None = None) -> None:
         try:
             await cache_service.increment_counter(f"time_integrity:skip:{reason}")
+            src_key = self._normalize_source_counter_key(source_name)
+            await cache_service.increment_counter(
+                f"time_integrity:source_reason:{reason}:{src_key}"
+            )
             if reason.startswith("missing_timestamp"):
-                src_key = self._normalize_source_counter_key(source_name)
                 await cache_service.increment_counter(f"time_integrity:missing_timestamp_source:{src_key}")
         except Exception:
             # Non-blocking metrics path.

@@ -27,6 +27,7 @@ export default function TimeIntegrityWidget() {
     const payload = data?.data;
     const topMissingSources = payload?.top_missing_timestamp_sources || [];
     const topSkipReasons = payload?.skip_reasons?.slice(0, 4) || [];
+    const topStaleSources = payload?.top_stale_sources || [];
 
     return (
         <div className="rounded-2xl border app-surface p-4">
@@ -73,6 +74,19 @@ export default function TimeIntegrityWidget() {
                             {topSkipReasons.map((item) => (
                                 <div key={item.reason} className="flex items-center justify-between text-xs">
                                     <span className="text-[var(--text-primary)] line-clamp-1">{item.reason}</span>
+                                    <span className="app-text-muted">{item.count}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="rounded-lg app-surface-soft border px-2 py-1.5">
+                        <p className="text-[11px] app-text-muted mb-1">Top Sources (Stale)</p>
+                        <div className="space-y-1">
+                            {topStaleSources.length === 0 && <p className="text-xs app-text-muted">No data yet.</p>}
+                            {topStaleSources.slice(0, 4).map((item) => (
+                                <div key={item.source} className="flex items-center justify-between text-xs">
+                                    <span className="text-[var(--text-primary)] line-clamp-1">{item.source}</span>
                                     <span className="app-text-muted">{item.count}</span>
                                 </div>
                             ))}
