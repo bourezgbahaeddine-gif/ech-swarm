@@ -708,6 +708,7 @@ If stale pressure persists while Google coverage is required:
     - `disable_temporarily`
     - `re_enable`
     - `require_manual_review`
+    - `monitor_duplicate_pressure` (advisory, no automatic change)
 
 - `POST /api/v1/dashboard/time-integrity/watchlist/apply`
   - Director-only action endpoint.

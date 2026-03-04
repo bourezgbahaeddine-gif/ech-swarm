@@ -128,8 +128,11 @@ class TimeIntegrityService:
         if has_signal and missing_timestamp_rate >= 0.20:
             actions.append("require_manual_review")
 
-        if source_known and has_signal and (stale_rate >= 0.35 or duplicate_rate >= 0.55) and priority > 2:
-            actions.append("decrease_priority")
+        if source_known and has_signal and priority > 2:
+            if stale_rate >= 0.35 or missing_timestamp_rate >= 0.20 or (duplicate_rate >= 0.65 and health_score < 65.0):
+                actions.append("decrease_priority")
+            elif duplicate_rate >= 0.80 and health_score >= 65.0:
+                actions.append("monitor_duplicate_pressure")
 
         if source_known and enabled and (
             fetch_error_rate >= 0.80 or (has_signal and stale_rate >= 0.75 and health_score <= 35.0)
