@@ -633,3 +633,64 @@
    - انخفاض واضح في زمن التحرير.
 4. مرحلة Reliability/Cost:
    - طوابير مستقرة + تكلفة متوقعة.
+
+
+---
+
+## 23) Google News Policy (Keep Coverage, Prevent Dominance)
+
+### 23.1 Decision
+
+- `Google News` remains enabled (do not disable).
+- Time-integrity remains strict:
+  - `SCOUT_MAX_ARTICLE_AGE_HOURS=24`
+  - `SCOUT_REQUIRE_TIMESTAMP_FOR_ALL_SOURCES=true`
+  - `SCOUT_ALLOW_URL_DATE_FALLBACK=false`
+- Control focus is on `throttling + dedup + freshness`, not source removal.
+
+### 23.2 Why This Policy
+
+- Google News provides broad topic coverage and should stay in the mix.
+- Without throttling, aggregator replay can create stale noise and log spam.
+- The newsroom requirement is freshness and editorial value, not maximum raw volume.
+
+### 23.3 Runtime Controls
+
+Use these controls together:
+
+1. Feed window size:
+   - `FRESHRSS_FEED_URL=...&state=all&nb=600`
+2. Per-source cap in FreshRSS mode:
+   - `SCOUT_FRESHRSS_MAX_PER_SOURCE_PER_RUN=6`
+3. Cross-source dedup strictness:
+   - `SCOUT_CROSS_SOURCE_TITLE_SIMILARITY_THRESHOLD=0.92`
+   - `SCOUT_CROSS_SOURCE_PUBLISH_TOLERANCE_HOURS=2`
+
+### 23.4 Operational Command Set
+
+```bash
+set_kv_safe ECHOROUK_OS_FRESHRSS_FEED_URL "http://freshrss:80/i/?a=rss&state=all&nb=600"
+set_kv_safe ECHOROUK_OS_SCOUT_FRESHRSS_MAX_PER_SOURCE_PER_RUN 6
+set_kv_safe ECHOROUK_OS_SCOUT_CROSS_SOURCE_TITLE_SIMILARITY_THRESHOLD 0.92
+set_kv_safe ECHOROUK_OS_SCOUT_CROSS_SOURCE_PUBLISH_TOLERANCE_HOURS 2
+docker compose up -d --force-recreate backend worker
+```
+
+### 23.5 Validation Checklist
+
+- `GET /api/v1/dashboard/time-integrity` returns:
+  - `stale_non_published_total = 0` (or near zero after cleanup tick)
+  - rising `skip_reasons.stale` only when replay appears (expected)
+  - `url_date_fallback.acceptance_ratio = 0` under strict mode
+- Candidate queue remains fresh:
+  - `oldest_candidate_age_hours <= 24`
+- Coverage remains broad:
+  - no manual source disable for Google News feeds.
+
+### 23.6 Escalation Rule
+
+If stale pressure persists while Google coverage is required:
+
+1. Reduce `nb` gradually (`600 -> 500 -> 400`).
+2. Lower `SCOUT_FRESHRSS_MAX_PER_SOURCE_PER_RUN` (`6 -> 5 -> 4`).
+3. Keep strict time policy unchanged (`24h`, timestamp required, no URL fallback).
