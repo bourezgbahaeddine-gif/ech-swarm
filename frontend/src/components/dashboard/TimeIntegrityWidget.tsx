@@ -28,6 +28,7 @@ export default function TimeIntegrityWidget() {
     const topMissingSources = payload?.top_missing_timestamp_sources || [];
     const topSkipReasons = payload?.skip_reasons?.slice(0, 4) || [];
     const topStaleSources = payload?.top_stale_sources || [];
+    const watchlistItems = payload?.source_health_watchlist?.items?.slice(0, 4) || [];
 
     return (
         <div className="rounded-2xl border app-surface p-4">
@@ -88,6 +89,24 @@ export default function TimeIntegrityWidget() {
                                 <div key={item.source} className="flex items-center justify-between text-xs">
                                     <span className="text-[var(--text-primary)] line-clamp-1">{item.source}</span>
                                     <span className="app-text-muted">{item.count}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="rounded-lg app-surface-soft border px-2 py-1.5">
+                        <p className="text-[11px] app-text-muted mb-1">Source Health Watchlist</p>
+                        <div className="space-y-1">
+                            {watchlistItems.length === 0 && <p className="text-xs app-text-muted">No risky sources detected.</p>}
+                            {watchlistItems.map((item) => (
+                                <div key={item.source_key} className="text-xs">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-[var(--text-primary)] line-clamp-1">{item.name}</span>
+                                        <span className="app-text-muted">S{item.health_score.toFixed(1)}</span>
+                                    </div>
+                                    <div className="app-text-muted line-clamp-1">
+                                        {(item.actions || []).join(', ') || item.health_band}
+                                    </div>
                                 </div>
                             ))}
                         </div>

@@ -286,6 +286,50 @@ async def run_time_integrity_cleanup(
     }
 
 
+@router.get("/time-integrity/watchlist")
+async def get_time_integrity_watchlist(
+    top_sources_limit: int = Query(default=20, ge=5, le=100),
+    min_events: int = Query(default=10, ge=1, le=1000),
+    include_disabled: bool = Query(default=True),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return source watchlist derived from time-integrity counters."""
+    _assert_agent_control_permission(current_user)
+    return await time_integrity_service.build_source_watchlist(
+        db,
+        top_sources_limit=top_sources_limit,
+        min_events=min_events,
+        include_disabled=include_disabled,
+    )
+
+
+@router.post("/time-integrity/watchlist/apply")
+async def apply_time_integrity_watchlist_actions(
+    dry_run: bool = Query(default=True),
+    top_sources_limit: int = Query(default=30, ge=5, le=100),
+    min_events: int = Query(default=10, ge=1, le=1000),
+    max_changes: int = Query(default=100, ge=1, le=500),
+    include_disabled: bool = Query(default=True),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Apply watchlist actions (priority/enable tuning) to weak sources."""
+    _assert_director_permission(current_user)
+    result = await time_integrity_service.apply_source_watchlist_actions(
+        db,
+        dry_run=dry_run,
+        top_sources_limit=top_sources_limit,
+        min_events=min_events,
+        max_changes=max_changes,
+        include_disabled=include_disabled,
+    )
+    return {
+        "message": "Time integrity watchlist apply completed." if not dry_run else "Time integrity watchlist dry-run completed.",
+        **result,
+    }
+
+
 @router.get("/failed-jobs")
 async def get_failed_jobs(
     resolved: bool = False,
@@ -365,6 +409,11 @@ async def _enqueue_dashboard_job(
 def _assert_agent_control_permission(user: User) -> None:
     if user.role not in {UserRole.director, UserRole.editor_chief}:
         raise HTTPException(status_code=403, detail="غير مسموح لك بتشغيل هذا الوكيل.")
+
+
+def _assert_director_permission(user: User) -> None:
+    if user.role != UserRole.director:
+        raise HTTPException(status_code=403, detail="Only director can apply source control actions.")
 
 
 def _assert_newsroom_refresh_permission(user: User) -> None:

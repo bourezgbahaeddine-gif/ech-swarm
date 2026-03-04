@@ -694,3 +694,39 @@ If stale pressure persists while Google coverage is required:
 1. Reduce `nb` gradually (`600 -> 500 -> 400`).
 2. Lower `SCOUT_FRESHRSS_MAX_PER_SOURCE_PER_RUN` (`6 -> 5 -> 4`).
 3. Keep strict time policy unchanged (`24h`, timestamp required, no URL fallback).
+
+### 23.7 Time Integrity Watchlist APIs (Phase A Completion)
+
+- `GET /api/v1/dashboard/time-integrity/watchlist`
+  - Returns per-source risk scoring based on:
+    - `stale_rate`
+    - `missing_timestamp_rate`
+    - `duplicate_rate`
+    - `fetch_error_rate`
+  - Includes recommended actions:
+    - `decrease_priority`
+    - `disable_temporarily`
+    - `re_enable`
+    - `require_manual_review`
+
+- `POST /api/v1/dashboard/time-integrity/watchlist/apply`
+  - Director-only action endpoint.
+  - Supports:
+    - `dry_run=true|false`
+    - `max_changes`
+    - `min_events`
+  - Applies priority/enable tuning only; manual review remains advisory.
+
+- `GET /api/v1/dashboard/time-integrity` now includes:
+  - `source_health_watchlist` summary block for dashboard widget consumption.
+
+### 23.8 Redis Counters Used by Track A
+
+- Global:
+  - `counter:time_integrity:ingested_total`
+  - `counter:time_integrity:url_date_fallback_accepted`
+
+- Per source:
+  - `counter:time_integrity:source_ingested:<source_key>`
+  - `counter:time_integrity:source_reason:<reason>:<source_key>`
+  - `counter:time_integrity:missing_timestamp_source:<source_key>`

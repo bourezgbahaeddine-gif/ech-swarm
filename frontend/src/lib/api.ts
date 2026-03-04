@@ -203,11 +203,67 @@ export interface TimeIntegrityOverview {
     skip_reasons: Array<{ reason: string; count: number }>;
     top_stale_sources: Array<{ source: string; count: number }>;
     top_missing_timestamp_sources: Array<{ source: string; count: number }>;
+    source_health_watchlist: TimeIntegrityWatchlist;
     url_date_fallback: {
         accepted_count: number;
         ingested_total: number;
         acceptance_ratio: number;
     };
+}
+
+export interface TimeIntegrityWatchlistItem {
+    source_id: number | null;
+    source_key: string;
+    name: string;
+    enabled: boolean;
+    priority: number;
+    error_count: number;
+    source_known: boolean;
+    health_score: number;
+    health_band: 'excellent' | 'good' | 'review' | 'weak' | string;
+    total_events: number;
+    ingested_count: number;
+    duplicate_count: number;
+    stale_count: number;
+    missing_timestamp_count: number;
+    future_timestamp_count: number;
+    blocked_count: number;
+    stale_rate: number;
+    missing_timestamp_rate: number;
+    duplicate_rate: number;
+    fetch_error_rate: number;
+    actions: string[];
+}
+
+export interface TimeIntegrityWatchlist {
+    window_hours: number;
+    min_events: number;
+    total_sources_observed: number;
+    watchlist_total: number;
+    items: TimeIntegrityWatchlistItem[];
+}
+
+export interface TimeIntegrityWatchlistApplyResponse {
+    message: string;
+    dry_run: boolean;
+    max_changes: number;
+    candidate_changes: number;
+    applied_changes: number;
+    items: Array<{
+        source_id: number;
+        name: string;
+        actions: string[];
+        before: { enabled: boolean; priority: number };
+        after: { enabled: boolean; priority: number };
+        health_score: number;
+        health_band: string;
+    }>;
+    advisories: Array<{
+        source_id: number | null;
+        name: string;
+        actions: string[];
+        note: string;
+    }>;
 }
 
 export interface TimeIntegrityCleanupResponse {
@@ -833,6 +889,16 @@ export const dashboardApi = {
         api.get<TimeIntegrityOverview>('/dashboard/time-integrity', { params }),
     timeIntegrityCleanup: (params?: { dry_run?: boolean; max_age_hours?: number }) =>
         api.post<TimeIntegrityCleanupResponse>('/dashboard/time-integrity/cleanup', null, { params }),
+    timeIntegrityWatchlist: (params?: { top_sources_limit?: number; min_events?: number; include_disabled?: boolean }) =>
+        api.get<TimeIntegrityWatchlist>('/dashboard/time-integrity/watchlist', { params }),
+    timeIntegrityWatchlistApply: (params?: {
+        dry_run?: boolean;
+        top_sources_limit?: number;
+        min_events?: number;
+        max_changes?: number;
+        include_disabled?: boolean;
+    }) =>
+        api.post<TimeIntegrityWatchlistApplyResponse>('/dashboard/time-integrity/watchlist/apply', null, { params }),
 };
 
 export const jobsApi = {

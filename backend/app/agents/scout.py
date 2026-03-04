@@ -68,6 +68,7 @@ class ScoutAgent:
             "total": 0,
             "new": 0,
             "duplicates": 0,
+            "skipped_duplicate": 0,
             "errors": 0,
             "skipped_stale": 0,
             "skipped_future_timestamp": 0,
@@ -244,6 +245,8 @@ class ScoutAgent:
             source_count = source_new_counts.get(source_key, 0)
             if settings.scout_ingest_filters_enabled and source_count >= per_source_cap:
                 stats["duplicates"] += 1
+                stats["skipped_duplicate"] += 1
+                await self._track_skip("duplicate", source_name)
                 logger.info(
                     "freshrss_entry_skipped_diversity_cap",
                     source=source_name,
@@ -629,6 +632,8 @@ class ScoutAgent:
         # Check Redis cache first (fast path)
         if await cache_service.is_url_processed(unique_hash):
             stats["duplicates"] += 1
+            stats["skipped_duplicate"] += 1
+            await self._track_skip("duplicate", source.name)
             return
 
         # Check database (slow path)
@@ -637,6 +642,8 @@ class ScoutAgent:
         )
         if existing.scalar_one_or_none():
             stats["duplicates"] += 1
+            stats["skipped_duplicate"] += 1
+            await self._track_skip("duplicate", source.name)
             await cache_service.mark_url_processed(unique_hash)
             return
 
@@ -648,6 +655,8 @@ class ScoutAgent:
             )
             if existing_url.scalar_one_or_none():
                 stats["duplicates"] += 1
+                stats["skipped_duplicate"] += 1
+                await self._track_skip("duplicate", source.name)
                 await cache_service.mark_url_processed(unique_hash)
                 return
 
@@ -657,12 +666,16 @@ class ScoutAgent:
             recent_titles = await cache_service.get_recent_titles(200)
             if is_duplicate_title(title, recent_titles, settings.dedup_similarity_threshold):
                 stats["duplicates"] += 1
+                stats["skipped_duplicate"] += 1
+                await self._track_skip("duplicate", source.name)
                 return
 
         # Step 4: Cross-source title/time dedup.
         if settings.scout_ingest_filters_enabled:
             if await self._is_cross_source_duplicate(db, title, published_at):
                 stats["duplicates"] += 1
+                stats["skipped_duplicate"] += 1
+                await self._track_skip("duplicate", source.name)
                 logger.info(
                     "entry_skipped_cross_source_duplicate",
                     source=source.name,
@@ -784,6 +797,9 @@ class ScoutAgent:
             
             stats["new"] += 1
             await cache_service.increment_counter("time_integrity:ingested_total")
+            await cache_service.increment_counter(
+                f"time_integrity:source_ingested:{self._normalize_source_counter_key(source.name)}"
+            )
             if used_url_date_fallback:
                 await cache_service.increment_counter("time_integrity:url_date_fallback_accepted")
             logger.info(
@@ -797,6 +813,8 @@ class ScoutAgent:
             if "IntegrityError" in type(e).__name__ or "UniqueViolationError" in str(e):
                 await db.rollback()
                 stats["duplicates"] += 1
+                stats["skipped_duplicate"] += 1
+                await self._track_skip("duplicate", source.name)
                 await cache_service.mark_url_processed(unique_hash)
                 logger.info("duplicate_detected_on_insert", unique_hash=unique_hash)
             else:
