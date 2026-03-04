@@ -286,6 +286,29 @@ async def run_time_integrity_cleanup(
     }
 
 
+@router.post("/time-integrity/cleanup/restore")
+async def restore_time_integrity_cleanup(
+    dry_run: bool = Query(default=True),
+    lookback_hours: int = Query(default=24, ge=1, le=168),
+    max_rows: int = Query(default=200, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Restore recently auto-archived stale items (director only)."""
+    _assert_director_permission(current_user)
+    result = await time_integrity_service.restore_recent_auto_archived(
+        db,
+        lookback_hours=lookback_hours,
+        max_rows=max_rows,
+        dry_run=dry_run,
+        actor=current_user,
+    )
+    return {
+        "message": "Time integrity restore completed." if not dry_run else "Time integrity restore dry-run completed.",
+        **result,
+    }
+
+
 @router.get("/time-integrity/watchlist")
 async def get_time_integrity_watchlist(
     top_sources_limit: int = Query(default=20, ge=5, le=100),

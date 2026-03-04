@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from typing import Any
 from urllib.parse import urlparse
 
-from sqlalchemy import func, select, update
+from sqlalchemy import desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.models import Article, NewsStatus, Source
+from app.models import ActionAuditLog, Article, NewsStatus, Source
+from app.models.user import User
+from app.services.audit_service import audit_service
 from app.services.cache_service import cache_service
 
 settings = get_settings()
@@ -18,6 +21,10 @@ settings = get_settings()
 class TimeIntegrityService:
     """Build time-integrity telemetry and enforce stale cleanup policy."""
 
+    _AUTO_ARCHIVE_ACTION = "auto_archived_stale"
+    _AUTO_ARCHIVE_REASON_PREFIX = "auto_archived:strict_time_guard"
+    _AUTO_ARCHIVE_RESTORE_ACTION = "auto_archived_stale_restored"
+    _AUTO_ARCHIVE_RESTORE_REASON = "manual_restore_auto_archived_stale"
     _NON_PUBLISHED_STATUSES = [status for status in NewsStatus if status not in {NewsStatus.PUBLISHED, NewsStatus.ARCHIVED}]
     _CHIEF_STATUSES = [NewsStatus.READY_FOR_CHIEF_APPROVAL, NewsStatus.APPROVAL_REQUEST_WITH_RESERVATIONS]
     _EVENT_TIME = func.coalesce(Article.published_at, Article.crawled_at, Article.created_at)
@@ -59,6 +66,27 @@ class TimeIntegrityService:
         if host.startswith("www."):
             host = host[4:]
         return host
+
+    @staticmethod
+    def _coerce_status(value: Any) -> NewsStatus | None:
+        if isinstance(value, NewsStatus):
+            return value
+        if value is None:
+            return None
+        raw = str(value).strip()
+        if not raw:
+            return None
+        try:
+            return NewsStatus(raw)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _coerce_int(value: Any) -> int | None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
 
     def _source_aliases(self, source: Source) -> set[str]:
         aliases = {
@@ -549,25 +577,32 @@ class TimeIntegrityService:
         *,
         max_age_hours: int | None = None,
         dry_run: bool = False,
-        reason: str = "auto_archived:strict_time_guard",
+        reason: str = _AUTO_ARCHIVE_REASON_PREFIX,
     ) -> dict:
         now = datetime.utcnow()
         effective_max_age_hours = self._resolve_max_age_hours(max_age_hours)
         cutoff = now - timedelta(hours=effective_max_age_hours)
 
-        count_row = await db.execute(
-            select(func.count(Article.id))
+        stale_rows_result = await db.execute(
+            select(Article.id, Article.status, self._EVENT_TIME.label("event_time"))
             .where(Article.status.in_(self._NON_PUBLISHED_STATUSES))
             .where(self._EVENT_TIME < cutoff)
         )
-        matched = int(count_row.scalar_one_or_none() or 0)
+        stale_rows = stale_rows_result.all()
+        matched = len(stale_rows)
+
+        status_counts: dict[str, int] = {}
+        for _, status, _ in stale_rows:
+            status_value = status.value if isinstance(status, NewsStatus) else str(status or "unknown")
+            status_counts[status_value] = int(status_counts.get(status_value, 0) + 1)
 
         archived_rows = 0
         if not dry_run and matched > 0:
+            stale_article_ids = [int(article_id) for article_id, _, _ in stale_rows]
             result = await db.execute(
                 update(Article)
+                .where(Article.id.in_(stale_article_ids))
                 .where(Article.status.in_(self._NON_PUBLISHED_STATUSES))
-                .where(self._EVENT_TIME < cutoff)
                 .values(
                     status=NewsStatus.ARCHIVED,
                     rejection_reason=f"{reason}:{effective_max_age_hours}h",
@@ -575,6 +610,26 @@ class TimeIntegrityService:
                 )
             )
             archived_rows = int(result.rowcount or 0)
+
+            for article_id, status, event_time in stale_rows:
+                original_status = self._coerce_status(status)
+                age_hours = self._age_hours(now, event_time)
+                await audit_service.log_action(
+                    db,
+                    action=self._AUTO_ARCHIVE_ACTION,
+                    entity_type="article",
+                    entity_id=int(article_id),
+                    from_state=original_status.value if original_status else None,
+                    to_state=NewsStatus.ARCHIVED.value,
+                    reason=self._AUTO_ARCHIVE_ACTION,
+                    details={
+                        "original_status": original_status.value if original_status else None,
+                        "age_hours": age_hours,
+                        "max_age_hours": effective_max_age_hours,
+                        "event_time": event_time.isoformat() if isinstance(event_time, datetime) else None,
+                        "archived_at": now.isoformat(),
+                    },
+                )
             await db.commit()
 
         return {
@@ -584,6 +639,172 @@ class TimeIntegrityService:
             "max_age_hours": effective_max_age_hours,
             "cutoff_iso": cutoff.isoformat(),
             "reason": f"{reason}:{effective_max_age_hours}h",
+            "audit_action": self._AUTO_ARCHIVE_ACTION,
+            "matched_by_status": [{"status": k, "count": v} for k, v in sorted(status_counts.items())],
+        }
+
+    async def restore_recent_auto_archived(
+        self,
+        db: AsyncSession,
+        *,
+        lookback_hours: int = 24,
+        max_rows: int = 200,
+        dry_run: bool = True,
+        actor: User | None = None,
+    ) -> dict:
+        now = datetime.utcnow()
+        lookback_hours = max(1, min(int(lookback_hours), 168))
+        max_rows = max(1, min(int(max_rows), 1000))
+        cutoff = now - timedelta(hours=lookback_hours)
+
+        log_rows = await db.execute(
+            select(ActionAuditLog)
+            .where(ActionAuditLog.action == self._AUTO_ARCHIVE_ACTION)
+            .where(ActionAuditLog.entity_type == "article")
+            .where(ActionAuditLog.created_at >= cutoff)
+            .order_by(desc(ActionAuditLog.created_at))
+            .limit(max_rows * 10)
+        )
+        logs = log_rows.scalars().all()
+
+        recovery_plan: dict[int, dict[str, Any]] = {}
+        for log in logs:
+            article_id = self._coerce_int(log.entity_id)
+            if article_id is None or article_id in recovery_plan:
+                continue
+
+            details = log.details_json if isinstance(log.details_json, dict) else {}
+            original_status = self._coerce_status(details.get("original_status"))
+            if original_status is None:
+                original_status = self._coerce_status(log.from_state)
+            if original_status is None or original_status in {NewsStatus.ARCHIVED, NewsStatus.PUBLISHED}:
+                continue
+
+            recovery_plan[article_id] = {
+                "article_id": article_id,
+                "target_status": original_status,
+                "archived_at": log.created_at,
+                "source_audit_id": log.id,
+                "archive_reason": details.get("archive_reason") or log.reason,
+                "age_hours_at_archive": details.get("age_hours"),
+            }
+            if len(recovery_plan) >= max_rows:
+                break
+
+        if not recovery_plan:
+            return {
+                "dry_run": dry_run,
+                "lookback_hours": lookback_hours,
+                "max_rows": max_rows,
+                "candidate_logs": len(logs),
+                "restorable_candidates": 0,
+                "restored_rows": 0,
+                "items": [],
+                "advisories": [],
+            }
+
+        article_rows = await db.execute(
+            select(Article.id, Article.status, Article.rejection_reason).where(Article.id.in_(list(recovery_plan.keys())))
+        )
+        article_map = {int(article_id): (status, rejection_reason) for article_id, status, rejection_reason in article_rows.all()}
+
+        restorable_items: list[dict[str, Any]] = []
+        advisories: list[dict[str, Any]] = []
+        for article_id, plan in recovery_plan.items():
+            article_state = article_map.get(article_id)
+            if article_state is None:
+                advisories.append(
+                    {
+                        "article_id": article_id,
+                        "note": "article_not_found",
+                    }
+                )
+                continue
+
+            current_status, rejection_reason = article_state
+            current_status_enum = self._coerce_status(current_status)
+            if current_status_enum != NewsStatus.ARCHIVED:
+                advisories.append(
+                    {
+                        "article_id": article_id,
+                        "note": "article_not_archived",
+                        "current_status": current_status_enum.value if current_status_enum else str(current_status),
+                    }
+                )
+                continue
+
+            reason_text = str(rejection_reason or "")
+            if not reason_text.startswith(self._AUTO_ARCHIVE_REASON_PREFIX):
+                advisories.append(
+                    {
+                        "article_id": article_id,
+                        "note": "archive_reason_mismatch",
+                        "current_rejection_reason": reason_text,
+                    }
+                )
+                continue
+
+            target_status = plan["target_status"]
+            restorable_items.append(
+                {
+                    "article_id": article_id,
+                    "before_status": NewsStatus.ARCHIVED.value,
+                    "after_status": target_status.value,
+                    "source_audit_id": plan["source_audit_id"],
+                    "archived_at": plan["archived_at"].isoformat() if isinstance(plan["archived_at"], datetime) else None,
+                    "age_hours_at_archive": plan["age_hours_at_archive"],
+                }
+            )
+
+        restored_rows = 0
+        if not dry_run and restorable_items:
+            for item in restorable_items:
+                article_id = int(item["article_id"])
+                target_status = self._coerce_status(item["after_status"])
+                if target_status is None:
+                    continue
+                update_result = await db.execute(
+                    update(Article)
+                    .where(Article.id == article_id)
+                    .where(Article.status == NewsStatus.ARCHIVED)
+                    .values(
+                        status=target_status,
+                        rejection_reason=None,
+                        updated_at=now,
+                    )
+                )
+                if int(update_result.rowcount or 0) <= 0:
+                    continue
+
+                restored_rows += 1
+                await audit_service.log_action(
+                    db,
+                    action=self._AUTO_ARCHIVE_RESTORE_ACTION,
+                    entity_type="article",
+                    entity_id=article_id,
+                    actor=actor,
+                    from_state=NewsStatus.ARCHIVED.value,
+                    to_state=target_status.value,
+                    reason=self._AUTO_ARCHIVE_RESTORE_REASON,
+                    details={
+                        "source_audit_id": item["source_audit_id"],
+                        "lookback_hours": lookback_hours,
+                        "restored_at": now.isoformat(),
+                    },
+                )
+
+            if restored_rows > 0:
+                await db.commit()
+
+        return {
+            "dry_run": dry_run,
+            "lookback_hours": lookback_hours,
+            "max_rows": max_rows,
+            "candidate_logs": len(logs),
+            "restorable_candidates": len(restorable_items),
+            "restored_rows": restored_rows,
+            "items": restorable_items,
+            "advisories": advisories,
         }
 
 
