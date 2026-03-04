@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.domain.quality.gates import GateIssue, GateResult, GateSeverity
 from app.models import Article, ArticleQualityReport, EditorialDraft
@@ -58,6 +59,118 @@ class QualityGateService:
 
     def _is_aggregator_url(self, url: str) -> bool:
         return self._hostname(url) in AGGREGATOR_HOSTS
+
+    @staticmethod
+    def _severity_label(severity: GateSeverity) -> str:
+        if severity == GateSeverity.BLOCKER:
+            return "blocker"
+        if severity == GateSeverity.WARN:
+            return "warn"
+        return "info"
+
+    @staticmethod
+    def _safe_float(value: Any, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _as_string_list(value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        out: list[str] = []
+        for item in value:
+            text = str(item or "").strip()
+            if text:
+                out.append(text)
+        return out
+
+    def _claim_support_gate_issues(self, report: ArticleQualityReport) -> list[GateIssue]:
+        settings = get_settings()
+        if not bool(settings.quality_claim_support_enforcement_enabled):
+            return []
+
+        payload = report.report_json or {}
+        claims = payload.get("claims")
+        if not isinstance(claims, list):
+            return []
+
+        issues: list[GateIssue] = []
+        threshold = max(0.5, min(0.95, self._safe_float(settings.quality_claim_sensitive_threshold, 0.8)))
+        require_non_aggregator = bool(settings.quality_claim_require_non_aggregator_support)
+
+        for idx, raw_claim in enumerate(claims, start=1):
+            if not isinstance(raw_claim, dict):
+                continue
+            claim_id = str(raw_claim.get("id") or f"claim-{idx}").strip()
+            claim_text = str(raw_claim.get("text") or "").strip()
+            claim_type = str(raw_claim.get("claim_type") or "statement").strip().lower()
+            confidence = self._safe_float(raw_claim.get("confidence"), 0.0)
+
+            sensitive = bool(raw_claim.get("sensitive")) or claim_type in {"number", "date"} or confidence >= threshold
+            if not sensitive:
+                continue
+
+            evidence_links = self._as_string_list(raw_claim.get("evidence_links"))
+            usable_links = [link for link in evidence_links if link.startswith(("http://", "https://"))]
+            if require_non_aggregator:
+                usable_links = [link for link in usable_links if not self._is_aggregator_url(link)]
+
+            unverifiable = bool(raw_claim.get("unverifiable"))
+            unverifiable_reason = str(raw_claim.get("unverifiable_reason") or "").strip()
+
+            if usable_links:
+                continue
+            if unverifiable and unverifiable_reason:
+                issues.append(
+                    GateIssue(
+                        code="claim_unverifiable_marked",
+                        message="Claim marked as unverifiable with documented reason.",
+                        severity=GateSeverity.INFO,
+                        details={
+                            "claim_id": claim_id,
+                            "claim_type": claim_type,
+                            "claim_excerpt": claim_text[:160],
+                        },
+                    )
+                )
+                continue
+
+            issues.append(
+                GateIssue(
+                    code="claim_support_required",
+                    message="Sensitive claim requires support link or unverifiable reason.",
+                    severity=GateSeverity.BLOCKER,
+                    details={
+                        "claim_id": claim_id,
+                        "claim_type": claim_type,
+                        "claim_excerpt": claim_text[:220],
+                    },
+                )
+            )
+
+        return issues
+
+    def summarize_gate_result(self, gate_result: GateResult) -> dict[str, Any]:
+        counts = {"blocker": 0, "warn": 0, "info": 0}
+        items: list[dict[str, Any]] = []
+        for issue in gate_result.issues:
+            label = self._severity_label(issue.severity)
+            counts[label] += 1
+            items.append(
+                {
+                    "code": issue.code,
+                    "message": issue.message,
+                    "severity": label,
+                    "details": issue.details or {},
+                }
+            )
+        return {
+            "passed": bool(gate_result.passed),
+            "counts": counts,
+            "items": items,
+        }
 
     @staticmethod
     def _access_restricted_report(status_code: int, metrics: dict[str, Any]) -> dict[str, Any]:
@@ -174,6 +287,8 @@ class QualityGateService:
                         details={"stage": stage, "score": int(report.score)},
                     )
                 )
+            if stage == "FACT_CHECK":
+                issues.extend(self._claim_support_gate_issues(report))
 
         if policy_report:
             if not bool(policy_report.get("passed", False)):

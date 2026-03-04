@@ -506,6 +506,70 @@ export interface ChiefPendingItem {
     };
 }
 
+export interface ChiefDecisionResponse {
+    article_id: number;
+    status: string | null;
+    decision: string;
+    message: string;
+    overridden_blockers?: string[];
+}
+
+export interface FactCheckClaim {
+    id: string;
+    text: string;
+    claim_type?: string;
+    confidence?: number;
+    sensitive?: boolean;
+    blocking?: boolean;
+    verify_hint?: string;
+    evidence_links?: string[];
+    unverifiable?: boolean;
+    unverifiable_reason?: string;
+}
+
+export interface FactCheckReport {
+    stage: string;
+    passed: boolean;
+    score: number;
+    claims: FactCheckClaim[];
+    blocking_reasons: string[];
+    actionable_fixes: string[];
+    threshold: number;
+}
+
+export interface ClaimOverrideInput {
+    claim_id: string;
+    evidence_links?: string[];
+    unverifiable?: boolean;
+    unverifiable_reason?: string;
+}
+
+export interface GateSummaryItem {
+    code: string;
+    message: string;
+    severity: 'blocker' | 'warn' | 'info' | string;
+    details?: Record<string, unknown>;
+}
+
+export interface GateSummary {
+    passed: boolean;
+    counts: {
+        blocker: number;
+        warn: number;
+        info: number;
+    };
+    items: GateSummaryItem[];
+}
+
+export interface WorkspacePublishReadiness {
+    work_id: string;
+    article_id: number;
+    ready_for_publish: boolean;
+    blocking_reasons: string[];
+    reports: Record<string, { passed: boolean; score?: number | null; created_at?: string | null; blocking_reasons?: string[] }>;
+    gates: GateSummary;
+}
+
 export interface StoryItemLink {
     id: number;
     link_type: 'article' | 'draft' | string;
@@ -773,16 +837,16 @@ export const editorialApi = {
         based_on_version: number;
         suggestion_tool?: string;
     }) => api.post(`/editorial/workspace/drafts/${workId}/ai/apply`, data),
-    verifyClaims: (workId: string, threshold = 0.7) =>
-        api.post(`/editorial/workspace/drafts/${workId}/verify/claims`, { threshold }),
+    verifyClaims: (workId: string, threshold = 0.7, claim_overrides: ClaimOverrideInput[] = []) =>
+        api.post<FactCheckReport>(`/editorial/workspace/drafts/${workId}/verify/claims`, { threshold, claim_overrides }),
     qualityScore: (workId: string) =>
         api.post(`/editorial/workspace/drafts/${workId}/quality/score`),
     publishReadiness: (workId: string) =>
-        api.get(`/editorial/workspace/drafts/${workId}/publish-readiness`),
+        api.get<WorkspacePublishReadiness>(`/editorial/workspace/drafts/${workId}/publish-readiness`),
     chiefPending: (limit = 100) =>
         api.get<ChiefPendingItem[]>(`/editorial/chief/pending`, { params: { limit } }),
     chiefFinalDecision: (articleId: number, data: { decision: 'approve' | 'approve_with_reservations' | 'send_back' | 'reject' | 'return_for_revision'; notes?: string }) =>
-        api.post(`/editorial/${articleId}/chief/final-decision`, data),
+        api.post<ChiefDecisionResponse>(`/editorial/${articleId}/chief/final-decision`, data),
     socialApprovedFeed: (limit = 50) =>
         api.get<SocialApprovedItem[]>(`/editorial/social/approved-feed`, { params: { limit } }),
     socialVariantsForArticle: (articleId: number) =>

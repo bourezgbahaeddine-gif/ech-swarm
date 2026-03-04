@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.scribe import scribe_agent
 from app.api.deps.rbac import enforce_roles, require_roles
 from app.api.routes.auth import get_current_user
+from app.core.config import get_settings
 from app.core.correlation import get_correlation_id, get_request_id
 from app.core.database import get_db, async_session
 from app.core.logging import get_logger
@@ -45,6 +46,7 @@ from app.services.state_transition_service import state_transition_service
 from app.services.trend_signal_service import bump_keyword_interactions, extract_keywords
 
 logger = get_logger("api.editorial")
+settings = get_settings()
 router = APIRouter(prefix="/editorial", tags=["Editorial"])
 
 
@@ -104,6 +106,7 @@ class HeadlineSuggestionRequest(BaseModel):
 
 class ClaimVerifyRequest(BaseModel):
     threshold: float = Field(default=0.70, ge=0.1, le=0.99)
+    claim_overrides: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
 
 
 class LinkSuggestRequest(BaseModel):
@@ -672,6 +675,7 @@ async def _submit_draft_for_chief_approval(
         article_id=article.id,
         policy_report=policy_report,
     )
+    gate_summary = quality_gate_service.summarize_gate_result(gate_result)
 
     decision = policy_report.get("decision", "reservations")
     if not gate_result.passed:
@@ -766,6 +770,7 @@ async def _submit_draft_for_chief_approval(
         "journalist_direct_path": journalist_direct_path,
         "blocking_reasons": blockers or policy_report.get("blocking_reasons", []),
         "actionable_fixes": policy_report.get("actionable_fixes", []),
+        "gate_summary": gate_summary,
     }
 
 
@@ -804,6 +809,17 @@ async def _assert_publish_gate_and_constitution(
             continue
         if not report.passed:
             blockers.extend(report.blocking_reasons or [f"فشل تقرير المرحلة: {stage}"])
+
+    policy_report_row = await _latest_stage_report(db, article_id=article_id, stage="EDITORIAL_POLICY")
+    policy_payload = (policy_report_row.report_json or {}) if policy_report_row else None
+    gate_result = await quality_gate_service.run_submission_quality_gates(
+        db,
+        article_id=article_id,
+        policy_report=policy_payload,
+    )
+    blockers.extend(issue.message for issue in gate_result.blockers)
+
+    blockers = list(dict.fromkeys(blockers))
     if blockers:
         raise HTTPException(
             status_code=412,
@@ -2005,7 +2021,7 @@ async def workspace_verify_claims(
         job_type="editorial_claims",
         operation="claims",
         queue_name="ai_quality",
-        payload={"threshold": payload.threshold},
+        payload={"threshold": payload.threshold, "claim_overrides": payload.claim_overrides},
         wait_for_result_override=wait,
         wait_timeout_seconds_override=wait_timeout_seconds,
     )
@@ -2062,13 +2078,25 @@ async def workspace_publish_readiness(
         if not report.passed:
             blockers.extend(report.blocking_reasons or [f"فشل تقرير المرحلة: {stage}"])
 
-    ready = len(blockers) == 0
+    policy_report_row = await _latest_stage_report(db, article_id=article_id, stage="EDITORIAL_POLICY")
+    policy_payload = (policy_report_row.report_json or {}) if policy_report_row else None
+    gate_result = await quality_gate_service.run_submission_quality_gates(
+        db,
+        article_id=article_id,
+        policy_report=policy_payload,
+    )
+    gate_summary = quality_gate_service.summarize_gate_result(gate_result)
+    gate_blockers = [item["message"] for item in gate_summary["items"] if item["severity"] == "blocker"]
+    blockers = list(dict.fromkeys(blockers + gate_blockers))
+
+    ready = len(blockers) == 0 and bool(gate_summary.get("passed", False))
     return {
         "work_id": work_id,
         "article_id": article_id,
         "ready_for_publish": ready,
         "blocking_reasons": blockers,
         "reports": stage_reports,
+        "gates": gate_summary,
     }
 
 
@@ -2130,9 +2158,15 @@ async def chief_pending_queue(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.director, UserRole.editor_chief)),
 ):
+    freshness_cutoff = datetime.utcnow() - timedelta(hours=settings.scout_max_article_age_hours)
     rows = await db.execute(
         select(Article)
-        .where(Article.status.in_(list(CHIEF_REVIEW_STATUSES)))
+        .where(
+            and_(
+                Article.status.in_(list(CHIEF_REVIEW_STATUSES)),
+                func.coalesce(Article.published_at, Article.crawled_at) >= freshness_cutoff,
+            )
+        )
         .order_by(Article.updated_at.desc(), Article.id.desc())
         .limit(max(1, min(limit, 500)))
     )
@@ -2218,6 +2252,7 @@ async def chief_final_decision(
     note = (payload.notes or "").strip()
     if decision in {"approve_with_reservations", "reject"} and not note:
         raise HTTPException(status_code=422, detail="reason is required for this decision")
+    overridden_blockers: list[str] = []
 
     if decision == "approve":
         await _assert_publish_gate_and_constitution(db, article_id=article.id, user=current_user)
@@ -2232,6 +2267,14 @@ async def chief_final_decision(
         )
         message = "تم اعتماد النسخة النهائية وأصبحت جاهزة للنشر اليدوي."
     elif decision == "approve_with_reservations":
+        policy_report_row = await _latest_stage_report(db, article_id=article.id, stage="EDITORIAL_POLICY")
+        policy_payload = (policy_report_row.report_json or {}) if policy_report_row else None
+        gate_result = await quality_gate_service.run_submission_quality_gates(
+            db,
+            article_id=article.id,
+            policy_report=policy_payload,
+        )
+        overridden_blockers = list(dict.fromkeys(issue.message for issue in gate_result.blockers))
         await _transition_article_status(
             db=db,
             article=article,
@@ -2239,7 +2282,10 @@ async def chief_final_decision(
             actor=current_user,
             action="chief_approve_with_reservations",
             reason=note,
-            details={"article_id": article.id},
+            details={
+                "article_id": article.id,
+                "overridden_blockers": overridden_blockers,
+            },
         )
         message = "تم تسجيل اعتماد بتحفظات وإبقاء الخبر ضمن مراجعة السياسة."
     elif decision == "send_back":
@@ -2287,6 +2333,7 @@ async def chief_final_decision(
         "status": article.status.value if article.status else None,
         "decision": decision,
         "message": message,
+        "overridden_blockers": overridden_blockers,
     }
 
 

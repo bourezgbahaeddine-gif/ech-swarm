@@ -110,15 +110,21 @@ export default function EditorialPage() {
             articleId: number;
             decision: 'approve' | 'approve_with_reservations' | 'send_back' | 'reject' | 'return_for_revision';
             notes?: string;
-        }) =>
-            editorialApi.chiefFinalDecision(articleId, { decision, notes }),
+        }) => editorialApi.chiefFinalDecision(articleId, { decision, notes }),
         onSuccess: (res) => {
-            setSuccessMessage(res.data?.message || 'تم تنفيذ القرار.');
+            const message = res.data?.message || 'Decision applied.';
+            const overridden = (res.data?.overridden_blockers || []).filter(Boolean);
+            if (overridden.length > 0) {
+                const rendered = overridden.slice(0, 5).map((item) => `- ${item}`).join('\n');
+                setSuccessMessage(`${message}\n\nBlockers overridden:\n${rendered}`);
+            } else {
+                setSuccessMessage(message);
+            }
             setErrorMessage(null);
             queryClient.invalidateQueries({ queryKey: ['chief-pending-queue'] });
         },
         onError: (err: unknown) => {
-            setErrorMessage(getApiErrorMessage(err, 'تعذر تنفيذ قرار رئيس التحرير.'));
+            setErrorMessage(getApiErrorMessage(err, 'Failed to apply chief decision.'));
             setSuccessMessage(null);
         },
     });
@@ -159,13 +165,20 @@ export default function EditorialPage() {
     ) => {
         const note = (notesMap[item.id] || '').trim();
         if (decisionRequiresReason[decision] && !note) {
-            setErrorMessage(`سبب القرار مطلوب للإجراء: ${decisionLabel[decision]}`);
+            setErrorMessage(`Decision reason is required for: ${decisionLabel[decision]}`);
             setSuccessMessage(null);
             return;
         }
+        const blockersPreview =
+            decision === 'approve_with_reservations'
+                ? [...(item.decision_card?.quality_issues || []), ...(item.decision_card?.claims_issues || [])].slice(0, 3)
+                : [];
+        const confirmationMessage = blockersPreview.length
+            ? `Confirm action: ${decisionLabel[decision]}?\n\nBLOCKERS to override:\n- ${blockersPreview.join('\n- ')}`
+            : `Confirm action: ${decisionLabel[decision]}?`;
         const confirmed = typeof window === 'undefined'
             ? true
-            : window.confirm(`تأكيد الإجراء: ${decisionLabel[decision]}؟`);
+            : window.confirm(confirmationMessage);
         if (!confirmed) return;
 
         chiefDecisionMutation.mutate({

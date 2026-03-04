@@ -23,7 +23,16 @@ import {
     Sparkles,
 } from 'lucide-react';
 
-import { competitorXrayApi, editorialApi, jobsApi, msiApi, simApi } from '@/lib/api';
+import {
+    competitorXrayApi,
+    editorialApi,
+    jobsApi,
+    msiApi,
+    simApi,
+    type ClaimOverrideInput,
+    type FactCheckClaim,
+    type WorkspacePublishReadiness,
+} from '@/lib/api';
 import { constitutionApi } from '@/lib/constitution-api';
 import { useAuth } from '@/lib/auth';
 import { cn, formatRelativeTime, truncate } from '@/lib/utils';
@@ -32,6 +41,11 @@ type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
 type RightTab = 'evidence' | 'proofread' | 'quality' | 'seo' | 'social' | 'context' | 'msi' | 'simulator' | 'xray';
 type GuideType = 'welcome' | 'action';
 type ActionId = 'quick_check' | 'verify' | 'proofread' | 'improve' | 'headlines' | 'seo' | 'links' | 'social' | 'quality' | 'publish_gate' | 'apply' | 'save' | 'manual_draft' | 'audience_test';
+type ClaimOverrideDraft = {
+    evidenceLinksRaw: string;
+    unverifiable: boolean;
+    unverifiableReason: string;
+};
 
 const TABS: Array<{ id: RightTab; label: string }> = [
     { id: 'evidence', label: 'التحقق والأدلة' },
@@ -82,6 +96,38 @@ const METRIC_LABELS: Record<string, string> = {
     sources_attribution: 'الإسناد للمصادر',
     word_count: 'عدد الكلمات',
 };
+
+function parseEvidenceLinks(raw: string): string[] {
+    const unique = new Set<string>();
+    for (const chunk of (raw || '').split(/\r?\n|,/)) {
+        const value = (chunk || '').trim();
+        if (!value) continue;
+        if (!/^https?:\/\//i.test(value)) continue;
+        unique.add(value);
+    }
+    return Array.from(unique).slice(0, 8);
+}
+
+function claimDraftFromClaim(claim: FactCheckClaim): ClaimOverrideDraft {
+    return {
+        evidenceLinksRaw: (claim?.evidence_links || []).join('\n'),
+        unverifiable: Boolean(claim?.unverifiable),
+        unverifiableReason: String(claim?.unverifiable_reason || ''),
+    };
+}
+
+function mergeClaimOverrideDrafts(
+    claims: FactCheckClaim[],
+    previous: Record<string, ClaimOverrideDraft>,
+): Record<string, ClaimOverrideDraft> {
+    const next: Record<string, ClaimOverrideDraft> = {};
+    for (const claim of claims || []) {
+        const claimId = String(claim?.id || '').trim();
+        if (!claimId) continue;
+        next[claimId] = previous[claimId] || claimDraftFromClaim(claim);
+    }
+    return next;
+}
 
 function cleanText(value: string): string {
     if (!value) return '';
@@ -153,7 +199,8 @@ function WorkspaceDraftsPageContent() {
     const [activeTab, setActiveTab] = useState<RightTab>('evidence');
     const [err, setErr] = useState<string | null>(null);
     const [ok, setOk] = useState<string | null>(null);
-    const [claims, setClaims] = useState<any[]>([]);
+    const [claims, setClaims] = useState<FactCheckClaim[]>([]);
+    const [claimOverrideDrafts, setClaimOverrideDrafts] = useState<Record<string, ClaimOverrideDraft>>({});
     const [proofread, setProofread] = useState<any | null>(null);
     const [quality, setQuality] = useState<any | null>(null);
     const [seoPack, setSeoPack] = useState<any | null>(null);
@@ -162,7 +209,7 @@ function WorkspaceDraftsPageContent() {
     const [linkSuggestions, setLinkSuggestions] = useState<Array<any>>([]);
     const [social, setSocial] = useState<any | null>(null);
     const [simResult, setSimResult] = useState<any | null>(null);
-    const [readiness, setReadiness] = useState<any | null>(null);
+    const [readiness, setReadiness] = useState<WorkspacePublishReadiness | null>(null);
     const [headlines, setHeadlines] = useState<any[]>([]);
     const [suggestion, setSuggestion] = useState<any | null>(null);
     const [showTechnicalDiff, setShowTechnicalDiff] = useState(false);
@@ -182,6 +229,36 @@ function WorkspaceDraftsPageContent() {
     const pendingActionRef = useRef<null | (() => void)>(null);
     const lastSavedRef = useRef<{ title: string; body: string }>({ title: '', body: '' });
     const visibleTabs = useMemo(() => TABS.filter((tab) => (tab.id === 'msi' ? isDirector : true)), [isDirector]);
+
+    const setClaimOverrideDraftField = (claimId: string, patch: Partial<ClaimOverrideDraft>) => {
+        setClaimOverrideDrafts((prev) => {
+            const current = prev[claimId] || { evidenceLinksRaw: '', unverifiable: false, unverifiableReason: '' };
+            return {
+                ...prev,
+                [claimId]: { ...current, ...patch },
+            };
+        });
+    };
+
+    const buildClaimOverridesPayload = (): ClaimOverrideInput[] => {
+        const payload: ClaimOverrideInput[] = [];
+        for (const claim of claims) {
+            const claimId = String(claim?.id || '').trim();
+            if (!claimId) continue;
+            const draft = claimOverrideDrafts[claimId] || claimDraftFromClaim(claim);
+            const evidenceLinks = parseEvidenceLinks(draft.evidenceLinksRaw || '');
+            const unverifiableReason = (draft.unverifiableReason || '').trim();
+            const hasOverride = evidenceLinks.length > 0 || draft.unverifiable || Boolean(unverifiableReason);
+            if (!hasOverride) continue;
+            payload.push({
+                claim_id: claimId,
+                evidence_links: evidenceLinks,
+                unverifiable: Boolean(draft.unverifiable),
+                unverifiable_reason: draft.unverifiable ? unverifiableReason : '',
+            });
+        }
+        return payload;
+    };
 
     const { data: listData, isLoading: listLoading } = useQuery({
         queryKey: ['smart-editor-list', articleId],
@@ -302,6 +379,9 @@ function WorkspaceDraftsPageContent() {
         setSuggestion(null);
         setProofread(null);
         setSimResult(null);
+        setClaims([]);
+        setClaimOverrideDrafts({});
+        setReadiness(null);
     }, [context?.draft?.id, editor]);
 
     useEffect(() => {
@@ -423,8 +503,17 @@ function WorkspaceDraftsPageContent() {
     });
 
     const runVerifier = useMutation({
-        mutationFn: () => runEditorialActionWithPolling(() => editorialApi.verifyClaims(workId!, 0.7), 'التحقق من الادعاءات'),
-        onSuccess: (data) => { setClaims(data?.claims || []); setActiveTab('evidence'); },
+        mutationFn: () =>
+            runEditorialActionWithPolling(
+                () => editorialApi.verifyClaims(workId!, 0.7, buildClaimOverridesPayload()),
+                'التحقق من الادعاءات',
+            ),
+        onSuccess: (data) => {
+            const nextClaims = data?.claims || [];
+            setClaims(nextClaims);
+            setClaimOverrideDrafts((prev) => mergeClaimOverrideDrafts(nextClaims, prev));
+            setActiveTab('evidence');
+        },
         onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر تنفيذ التحقق'),
     });
     const runQuality = useMutation({
@@ -498,14 +587,19 @@ function WorkspaceDraftsPageContent() {
     const runQuickCheck = useMutation({
         mutationFn: async () => {
             const [verifyData, qualityData, readinessRes] = await Promise.all([
-                runEditorialActionWithPolling(() => editorialApi.verifyClaims(workId!, 0.7), 'التحقق من الادعاءات'),
+                runEditorialActionWithPolling(
+                    () => editorialApi.verifyClaims(workId!, 0.7, buildClaimOverridesPayload()),
+                    'التحقق من الادعاءات',
+                ),
                 runEditorialActionWithPolling(() => editorialApi.qualityScore(workId!), 'تقييم الجودة'),
                 editorialApi.publishReadiness(workId!),
             ]);
             return { verifyData, qualityData, readinessRes };
         },
         onSuccess: ({ verifyData, qualityData, readinessRes }) => {
-            setClaims(verifyData?.claims || []);
+            const nextClaims = verifyData?.claims || [];
+            setClaims(nextClaims);
+            setClaimOverrideDrafts((prev) => mergeClaimOverrideDrafts(nextClaims, prev));
             setQuality(qualityData);
             setReadiness(readinessRes.data);
             setActiveTab('quality');
@@ -908,7 +1002,55 @@ function WorkspaceDraftsPageContent() {
 
                     {activeTab === 'evidence' && (
                         <Panel title="نتائج التحقق">
-                            {claims.length ? claims.map((c) => <Row key={c.id} text={cleanText(c.text || '')} danger={c.blocking} title={`${Math.round((c.confidence || 0) * 100)}% ثقة`} />) : <Empty text="اضغط زر «تحقق» لعرض الادعاءات." />}
+                            {claims.length ? (
+                                <div className="space-y-2">
+                                    {claims.map((claim) => {
+                                        const claimId = String(claim?.id || '');
+                                        const draft = claimOverrideDrafts[claimId] || claimDraftFromClaim(claim);
+                                        return (
+                                            <div
+                                                key={claimId}
+                                                className={cn(
+                                                    'rounded-xl border p-2 text-xs space-y-2',
+                                                    claim?.blocking ? 'border-red-500/30 bg-red-500/10' : 'border-emerald-500/30 bg-emerald-500/10',
+                                                )}
+                                            >
+                                                <div className="flex items-start justify-between gap-2">
+                                                    <p className="text-gray-100 flex-1">{cleanText(claim?.text || '')}</p>
+                                                    <span className={cn('shrink-0 rounded px-2 py-0.5 text-[10px]', claim?.blocking ? 'bg-red-500/20 text-red-100' : 'bg-emerald-500/20 text-emerald-100')}>
+                                                        {Math.round(Number(claim?.confidence || 0) * 100)}% ثقة
+                                                    </span>
+                                                </div>
+                                                <textarea
+                                                    value={draft.evidenceLinksRaw}
+                                                    onChange={(e) => setClaimOverrideDraftField(claimId, { evidenceLinksRaw: e.target.value })}
+                                                    placeholder="روابط الأدلة (رابط في كل سطر أو مفصولة بفاصلة)"
+                                                    className="w-full min-h-14 rounded-lg bg-black/20 border border-white/15 px-2 py-1 text-[11px] text-gray-100 placeholder:text-gray-500"
+                                                />
+                                                <label className="flex items-center gap-2 text-[11px] text-gray-200">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={Boolean(draft.unverifiable)}
+                                                        onChange={(e) => setClaimOverrideDraftField(claimId, { unverifiable: e.target.checked })}
+                                                    />
+                                                    تعليم الادعاء كغير قابل للتحقق مع سبب
+                                                </label>
+                                                {draft.unverifiable && (
+                                                    <input
+                                                        value={draft.unverifiableReason}
+                                                        onChange={(e) => setClaimOverrideDraftField(claimId, { unverifiableReason: e.target.value })}
+                                                        placeholder="سبب عدم إمكانية التحقق"
+                                                        className="w-full rounded-lg bg-black/20 border border-white/15 px-2 py-1 text-[11px] text-gray-100 placeholder:text-gray-500"
+                                                    />
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                    <p className="text-[11px] text-gray-400">
+                                        عند الضغط على «تحقق»، يتم إرسال روابط الأدلة/حالات عدم التحقق الحالية لبوابة الجودة.
+                                    </p>
+                                </div>
+                            ) : <Empty text="اضغط زر «تحقق» لعرض الادعاءات." />}
                         </Panel>
                     )}
 
@@ -982,10 +1124,33 @@ function WorkspaceDraftsPageContent() {
                                     </div>
                                     {!readiness.ready_for_publish && <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-2 text-red-100">{(readiness.blocking_reasons || []).map((r: string, i: number) => <p key={`${r}-${i}`}>- {cleanText(r)}</p>)}</div>}
                                     <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-gray-300 space-y-1">
-                                        {Object.entries(readiness.reports || {}).map(([stage, report]: any) => (
+                                        {Object.entries(readiness.reports || {}).map(([stage, report]) => (
                                             <div key={stage} className="flex items-center justify-between"><span>{STAGE_LABELS[stage] || stage}</span><span className={report?.passed ? 'text-emerald-300' : 'text-red-300'}>{report?.passed ? 'ناجح' : 'فشل'}</span></div>
                                         ))}
                                     </div>
+                                    {!!readiness.gates && (
+                                        <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-gray-200 space-y-2">
+                                            <p className="text-[11px] text-gray-400">
+                                                Gate Severities: blocker={readiness.gates.counts?.blocker || 0} · warn={readiness.gates.counts?.warn || 0} · info={readiness.gates.counts?.info || 0}
+                                            </p>
+                                            {(readiness.gates.items || []).map((item, idx) => (
+                                                <div
+                                                    key={`${item.code}-${idx}`}
+                                                    className={cn(
+                                                        'rounded-lg border px-2 py-1',
+                                                        item.severity === 'blocker'
+                                                            ? 'border-red-500/30 bg-red-500/10 text-red-100'
+                                                            : item.severity === 'warn'
+                                                                ? 'border-amber-500/30 bg-amber-500/10 text-amber-100'
+                                                                : 'border-cyan-500/30 bg-cyan-500/10 text-cyan-100',
+                                                    )}
+                                                >
+                                                    <p className="text-[11px] uppercase tracking-wide opacity-90">{item.severity}</p>
+                                                    <p>{cleanText(item.message || '')}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </Panel>
@@ -1321,10 +1486,6 @@ function Panel({ title, children }: { title: string; children: ReactNode }) {
 
 function Empty({ text }: { text: string }) {
     return <p className="text-xs text-gray-500">{text}</p>;
-}
-
-function Row({ title, text, danger }: { title: string; text: string; danger?: boolean }) {
-    return <div className={cn('rounded-xl border p-2 text-xs', danger ? 'border-red-500/30 bg-red-500/10 text-red-100' : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100')} dir="rtl"><p className="font-semibold mb-1">{title}</p><p>{text || 'بدون نص ادعاء'}</p></div>;
 }
 
 function InfoBlock({ label, value }: { label: string; value?: string }) {
