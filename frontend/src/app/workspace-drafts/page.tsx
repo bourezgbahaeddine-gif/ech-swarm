@@ -102,10 +102,10 @@ function parseEvidenceLinks(raw: string): string[] {
     for (const chunk of (raw || '').split(/\r?\n|,/)) {
         const value = (chunk || '').trim();
         if (!value) continue;
-        if (!/^https?:\/\//i.test(value)) continue;
+        if (!/^https?:\/\//i.test(value) && !/^(docintel:|document-intel:|doc:|di:\/\/)/i.test(value)) continue;
         unique.add(value);
     }
-    return Array.from(unique).slice(0, 8);
+    return Array.from(unique).slice(0, 12);
 }
 
 function claimDraftFromClaim(claim: FactCheckClaim): ClaimOverrideDraft {
@@ -1017,14 +1017,26 @@ function WorkspaceDraftsPageContent() {
                                             >
                                                 <div className="flex items-start justify-between gap-2">
                                                     <p className="text-gray-100 flex-1">{cleanText(claim?.text || '')}</p>
-                                                    <span className={cn('shrink-0 rounded px-2 py-0.5 text-[10px]', claim?.blocking ? 'bg-red-500/20 text-red-100' : 'bg-emerald-500/20 text-emerald-100')}>
-                                                        {Math.round(Number(claim?.confidence || 0) * 100)}% ثقة
-                                                    </span>
+                                                    <div className="shrink-0 flex flex-col items-end gap-1">
+                                                        <span className={cn('rounded px-2 py-0.5 text-[10px]', claim?.blocking ? 'bg-red-500/20 text-red-100' : 'bg-emerald-500/20 text-emerald-100')}>
+                                                            {Math.round(Number(claim?.confidence || 0) * 100)}% ثقة
+                                                        </span>
+                                                        <span className={cn(
+                                                            'rounded px-2 py-0.5 text-[10px] uppercase',
+                                                            claim?.risk_level === 'high'
+                                                                ? 'bg-red-500/20 text-red-100'
+                                                                : claim?.risk_level === 'medium'
+                                                                    ? 'bg-amber-500/20 text-amber-100'
+                                                                    : 'bg-cyan-500/20 text-cyan-100',
+                                                        )}>
+                                                            {String(claim?.risk_level || 'low')}
+                                                        </span>
+                                                    </div>
                                                 </div>
                                                 <textarea
                                                     value={draft.evidenceLinksRaw}
                                                     onChange={(e) => setClaimOverrideDraftField(claimId, { evidenceLinksRaw: e.target.value })}
-                                                    placeholder="روابط الأدلة (رابط في كل سطر أو مفصولة بفاصلة)"
+                                                    placeholder="روابط الأدلة أو مراجع DocIntel (سطر لكل مرجع أو مفصولة بفاصلة)"
                                                     className="w-full min-h-14 rounded-lg bg-black/20 border border-white/15 px-2 py-1 text-[11px] text-gray-100 placeholder:text-gray-500"
                                                 />
                                                 <label className="flex items-center gap-2 text-[11px] text-gray-200">

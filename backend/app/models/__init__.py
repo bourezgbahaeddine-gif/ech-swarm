@@ -20,6 +20,7 @@ from app.models.knowledge import (
     StoryClusterMember,
 )
 from app.models.quality import ArticleQualityReport
+from app.models.claim_support import ArticleClaim, ArticleClaimSupport
 from app.models.project_memory import ProjectMemoryItem, ProjectMemoryEvent
 from app.models.msi import (
     MsiRun,
@@ -96,6 +97,8 @@ __all__ = [
     "StoryCluster",
     "StoryClusterMember",
     "ArticleQualityReport",
+    "ArticleClaim",
+    "ArticleClaimSupport",
     "ProjectMemoryItem",
     "ProjectMemoryEvent",
     "MsiRun",

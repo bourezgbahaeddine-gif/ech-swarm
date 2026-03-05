@@ -7,6 +7,7 @@ __all__ = [
     "article_index_service",
     "news_knowledge_service",
     "quality_gate_service",
+    "claim_support_service",
     "smart_editor_service",
     "project_memory_service",
 ]
@@ -37,6 +38,10 @@ def __getattr__(name: str):
         from app.services.quality_gate_service import quality_gate_service
 
         return quality_gate_service
+    if name == "claim_support_service":
+        from app.services.claim_support_service import claim_support_service
+
+        return claim_support_service
     if name == "smart_editor_service":
         from app.services.smart_editor_service import smart_editor_service
 

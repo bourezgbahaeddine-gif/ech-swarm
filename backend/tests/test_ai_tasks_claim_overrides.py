@@ -40,3 +40,17 @@ def test_apply_claim_overrides_ignores_unknown_claim_ids():
     _apply_claim_overrides(report, overrides)
 
     assert report["claims"][0]["evidence_links"] == []
+
+
+def test_apply_claim_overrides_accepts_doc_intel_refs():
+    report = {"claims": [{"id": "clm-2", "evidence_links": []}]}
+    overrides = [
+        {
+            "claim_id": "clm-2",
+            "evidence_links": ["docintel:chunk-77", "di://memo/alpha", "invalid-ref"],
+        }
+    ]
+
+    _apply_claim_overrides(report, overrides)
+
+    assert report["claims"][0]["evidence_links"] == ["docintel:chunk-77", "di://memo/alpha"]

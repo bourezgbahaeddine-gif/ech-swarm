@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -232,3 +232,59 @@ async def test_dossier_returns_timeline(monkeypatch):
     assert data["stats"]["items_total"] == 2
     assert len(data["timeline"]) == 2
     assert data["highlights"]["sources"][0]["name"] == "APS"
+
+
+@pytest.mark.asyncio
+async def test_list_story_clusters_returns_metrics_and_members():
+    now = datetime.now(timezone.utc)
+    cluster = SimpleNamespace(
+        id=44,
+        cluster_key="cluster-key-44",
+        label="Economic package",
+        category="economy",
+        geography="DZ",
+        created_at=now - timedelta(hours=2),
+        updated_at=now - timedelta(minutes=15),
+    )
+    member = SimpleNamespace(
+        cluster_id=44,
+        article_id=1001,
+        score=0.93,
+        created_at=now - timedelta(minutes=20),
+    )
+    article = SimpleNamespace(
+        id=1001,
+        title_ar="حزمة اقتصادية جديدة",
+        original_title="",
+        source_name="APS",
+        category=SimpleNamespace(value="economy"),
+        status=SimpleNamespace(value="candidate"),
+        entities=["الحكومة", "الاقتصاد"],
+        keywords=["ميزانية", "استثمار"],
+        crawled_at=now - timedelta(minutes=30),
+        created_at=now - timedelta(minutes=31),
+    )
+
+    db = _SequenceDb([
+        [(cluster, 3)],
+        [(member, article)],
+    ])
+    current_user = SimpleNamespace(id=1, username="director", full_name_ar="Director")
+
+    response = await stories_route.list_story_clusters(
+        hours=24,
+        category=None,
+        min_size=2,
+        limit=10,
+        db=db,
+        _=current_user,
+    )
+    data = _decode_response_data(response)
+
+    assert data["metrics"]["clusters_created"] == 1
+    assert data["metrics"]["average_cluster_size"] == 3.0
+    assert data["metrics"]["time_to_cluster_minutes"] is not None
+    assert len(data["items"]) == 1
+    assert data["items"][0]["cluster_key"] == "cluster-key-44"
+    assert data["items"][0]["members"][0]["article_id"] == 1001
+    assert data["items"][0]["top_entities"][0]["entity"] in {"الحكومة", "الاقتصاد"}

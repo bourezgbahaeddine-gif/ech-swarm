@@ -13,11 +13,12 @@ from sqlalchemy import desc, func, select
 
 from app.core.database import async_session
 from app.core.logging import get_logger
-from app.models import Article, EditorialDraft, JobRun
+from app.models import Article, ArticleQualityReport, EditorialDraft, JobRun
 from app.queue.async_runtime import run_async
 from app.queue.celery_app import celery_app
 from app.services.job_queue_service import job_queue_service
 from app.services.link_intelligence_service import link_intelligence_service
+from app.services.claim_support_service import claim_support_service
 from app.services.quality_gate_service import quality_gate_service
 from app.services.smart_editor_service import smart_editor_service
 from app.services.task_execution_service import execute_with_task_idempotency
@@ -25,6 +26,55 @@ from app.services.task_execution_service import execute_with_task_idempotency
 logger = get_logger("queue.ai_tasks")
 LINKS_TASK_SOFT_LIMIT_SEC = 45
 LINKS_TASK_HARD_LIMIT_SEC = 60
+
+
+def _normalize_claim_links(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    links: list[str] = []
+    for item in value:
+        link = str(item or "").strip()
+        if not link:
+            continue
+        if not link.startswith(("http://", "https://", "docintel:", "document-intel:", "doc:", "di://")):
+            continue
+        if link not in links:
+            links.append(link)
+    return links[:12]
+
+
+def _apply_claim_overrides(report: dict, overrides: object) -> None:
+    claims = report.get("claims")
+    if not isinstance(claims, list) or not isinstance(overrides, list):
+        return
+
+    by_id: dict[str, dict] = {}
+    for raw in overrides:
+        if not isinstance(raw, dict):
+            continue
+        claim_id = str(raw.get("claim_id") or raw.get("id") or "").strip()
+        if not claim_id:
+            continue
+        by_id[claim_id] = raw
+
+    if not by_id:
+        return
+
+    for claim in claims:
+        if not isinstance(claim, dict):
+            continue
+        claim_id = str(claim.get("id") or "").strip()
+        if not claim_id or claim_id not in by_id:
+            continue
+        override = by_id[claim_id]
+        evidence_links = _normalize_claim_links(override.get("evidence_links"))
+        if evidence_links:
+            existing = _normalize_claim_links(claim.get("evidence_links"))
+            claim["evidence_links"] = list(dict.fromkeys(existing + evidence_links))
+        if "unverifiable" in override:
+            claim["unverifiable"] = bool(override.get("unverifiable"))
+        if "unverifiable_reason" in override:
+            claim["unverifiable_reason"] = str(override.get("unverifiable_reason") or "").strip()
 
 
 async def _latest_draft_or_none(work_id: str) -> EditorialDraft | None:
@@ -203,6 +253,8 @@ async def _execute_editorial_ai_payload(
                 source_url=article.original_url,
                 threshold=threshold,
             )
+            _apply_claim_overrides(report, payload.get("claim_overrides"))
+            report = claim_support_service.enrich_fact_check_report(report)
             await quality_gate_service.save_report(
                 db,
                 article_id=article.id,
@@ -215,6 +267,25 @@ async def _execute_editorial_ai_payload(
                 created_by=job.actor_username or "worker",
                 upsert_by_stage=True,
             )
+            quality_report_row = await db.execute(
+                select(ArticleQualityReport)
+                .where(
+                    ArticleQualityReport.article_id == article.id,
+                    ArticleQualityReport.stage == "FACT_CHECK",
+                )
+                .order_by(desc(ArticleQualityReport.created_at), desc(ArticleQualityReport.id))
+                .limit(1)
+            )
+            quality_report = quality_report_row.scalar_one_or_none()
+            persist_stats = await claim_support_service.persist_claim_report(
+                db,
+                article_id=article.id,
+                quality_report_id=quality_report.id if quality_report else None,
+                work_id=latest.work_id,
+                report=report,
+                actor=job.actor_username or "worker",
+            )
+            report["persisted"] = persist_stats
             await db.commit()
             return report
 

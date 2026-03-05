@@ -608,16 +608,25 @@ facebook, x, push, summary_120, breaking_alert
             if source_url:
                 confidence += 0.05
             confidence = min(confidence, 0.95)
+            risk_level = "low"
+            if claim_type in {"number", "date"} or confidence >= 0.85:
+                risk_level = "high"
+            elif confidence >= 0.70:
+                risk_level = "medium"
 
             claims.append(
                 {
                     "id": f"clm-{idx}",
                     "text": sentence,
                     "claim_type": claim_type,
+                    "risk_level": risk_level,
                     "confidence": round(confidence, 2),
+                    "sensitive": claim_type in {"number", "date"} or confidence >= 0.8,
                     "blocking": confidence < 0.70,
                     "verify_hint": "تحقق من المصدر الرسمي أو وكالة موثوقة",
                     "evidence_links": [source_url] if source_url else [],
+                    "unverifiable": False,
+                    "unverifiable_reason": "",
                 }
             )
         return claims

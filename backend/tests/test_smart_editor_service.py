@@ -25,6 +25,7 @@ def test_fact_check_report_blocks_low_confidence_claims():
     assert report['passed'] is False
     assert report['blocking_reasons']
     assert report['claims']
+    assert all('risk_level' in claim for claim in report['claims'])
 
 
 def test_quality_score_has_required_metrics():

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import re
 from collections import Counter
 from difflib import SequenceMatcher
@@ -8,14 +8,23 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.rbac import require_roles
 from app.api.envelope import success_envelope
 from app.core.database import get_db
-from app.models import Article, ArticleRelation, EditorialDraft, Story, StoryItem, StoryStatus
+from app.models import (
+    Article,
+    ArticleRelation,
+    EditorialDraft,
+    Story,
+    StoryCluster,
+    StoryClusterMember,
+    StoryItem,
+    StoryStatus,
+)
 from app.models.user import User, UserRole
 from app.repositories.story_repository import story_repository
 from app.services.audit_service import audit_service
@@ -64,6 +73,21 @@ def _story_linked_item_counts(story: Story) -> tuple[int, int]:
         if item.draft_id:
             draft_count += 1
     return article_count, draft_count
+
+
+def _article_status_value(article: Article | None) -> str | None:
+    if article is None:
+        return None
+    status = getattr(article, "status", None)
+    return status.value if status is not None else None
+
+
+def _as_naive_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def _story_to_dict(story: Story) -> dict:
@@ -339,6 +363,191 @@ async def suggest_stories_for_article(
 
     suggestions.sort(key=lambda item: (item["score"], item["last_updated_at"] or ""), reverse=True)
     return success_envelope(suggestions[:limit])
+
+
+@router.get("/clusters")
+async def list_story_clusters(
+    hours: int = Query(24, ge=1, le=168),
+    category: str | None = Query(default=None),
+    min_size: int = Query(2, ge=2, le=100),
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(UserRole.director, UserRole.editor_chief, UserRole.journalist, UserRole.social_media, UserRole.print_editor)),
+):
+    """
+    Return recent story clusters with members, top entities/topics, and observability metrics.
+    """
+    now = datetime.utcnow()
+    cutoff = now - timedelta(hours=hours)
+
+    size_subq = (
+        select(
+            StoryClusterMember.cluster_id.label("cluster_id"),
+            func.count(StoryClusterMember.article_id).label("cluster_size"),
+        )
+        .group_by(StoryClusterMember.cluster_id)
+        .subquery()
+    )
+
+    stmt = (
+        select(StoryCluster, size_subq.c.cluster_size)
+        .join(size_subq, size_subq.c.cluster_id == StoryCluster.id)
+        .where(size_subq.c.cluster_size >= min_size)
+        .order_by(desc(size_subq.c.cluster_size), desc(StoryCluster.updated_at), desc(StoryCluster.id))
+        .limit(limit * 3)
+    )
+    if category:
+        stmt = stmt.where(StoryCluster.category == category)
+
+    cluster_rows = (await db.execute(stmt)).all()
+    if not cluster_rows:
+        return success_envelope(
+            {
+                "generated_at": now.isoformat(),
+                "window_hours": hours,
+                "filters": {"category": category, "min_size": min_size, "limit": limit},
+                "metrics": {
+                    "clusters_created": 0,
+                    "average_cluster_size": 0.0,
+                    "time_to_cluster_minutes": None,
+                },
+                "items": [],
+            }
+        )
+
+    cluster_payload: dict[int, dict] = {}
+    ordered_cluster_ids: list[int] = []
+    for cluster, cluster_size in cluster_rows:
+        cid = int(cluster.id)
+        ordered_cluster_ids.append(cid)
+        cluster_payload[cid] = {
+            "cluster_id": cid,
+            "cluster_key": cluster.cluster_key,
+            "label": cluster.label,
+            "category": cluster.category,
+            "geography": cluster.geography,
+            "created_at": cluster.created_at.isoformat() if cluster.created_at else None,
+            "updated_at": cluster.updated_at.isoformat() if cluster.updated_at else None,
+            "cluster_size": int(cluster_size or 0),
+            "members": [],
+            "top_entities": [],
+            "top_topics": [],
+            "latest_article_at": None,
+            "_created_at_dt": cluster.created_at,
+        }
+
+    members_stmt = (
+        select(StoryClusterMember, Article)
+        .join(Article, Article.id == StoryClusterMember.article_id)
+        .where(StoryClusterMember.cluster_id.in_(ordered_cluster_ids))
+        .order_by(StoryClusterMember.cluster_id.asc(), desc(StoryClusterMember.score), desc(Article.crawled_at))
+    )
+    member_rows = (await db.execute(members_stmt)).all()
+
+    cluster_entities: dict[int, Counter[str]] = {cid: Counter() for cid in ordered_cluster_ids}
+    cluster_topics: dict[int, Counter[str]] = {cid: Counter() for cid in ordered_cluster_ids}
+    cluster_latest_at: dict[int, datetime | None] = {cid: None for cid in ordered_cluster_ids}
+    time_to_cluster_minutes: list[float] = []
+
+    for member, article in member_rows:
+        cid = int(member.cluster_id)
+        if cid not in cluster_payload:
+            continue
+
+        article_ts = article.crawled_at or article.created_at
+        member_ts = member.created_at or article_ts
+        if article_ts and member_ts and member_ts >= article_ts:
+            delta = (member_ts - article_ts).total_seconds() / 60.0
+            time_to_cluster_minutes.append(max(0.0, delta))
+        if article_ts:
+            latest = cluster_latest_at[cid]
+            cluster_latest_at[cid] = article_ts if latest is None or article_ts > latest else latest
+
+        entities = article.entities if isinstance(article.entities, list) else []
+        for entity in entities:
+            cleaned = str(entity or "").strip()
+            if cleaned:
+                cluster_entities[cid][cleaned] += 1
+
+        keywords = article.keywords if isinstance(article.keywords, list) else []
+        for topic in keywords:
+            cleaned = str(topic or "").strip()
+            if cleaned:
+                cluster_topics[cid][cleaned] += 1
+
+        cluster_payload[cid]["members"].append(
+            {
+                "article_id": article.id,
+                "score": round(float(member.score or 0.0), 4),
+                "title": (article.title_ar or article.original_title or "").strip(),
+                "source_name": article.source_name,
+                "category": article.category.value if getattr(article, "category", None) else None,
+                "status": _article_status_value(article),
+                "crawled_at": article.crawled_at.isoformat() if article.crawled_at else None,
+                "created_at": article.created_at.isoformat() if article.created_at else None,
+            }
+        )
+
+    clusters_created = 0
+    filtered_items: list[dict] = []
+    for cid in ordered_cluster_ids:
+        payload = cluster_payload[cid]
+        latest = cluster_latest_at[cid]
+        latest_dt = _as_naive_utc(latest)
+        if latest_dt is None or latest_dt < cutoff:
+            continue
+        created_dt = _as_naive_utc(payload.get("_created_at_dt"))
+        if created_dt and created_dt >= cutoff:
+            clusters_created += 1
+        payload["latest_article_at"] = latest.isoformat() if latest else None
+        payload["top_entities"] = [
+            {"entity": name, "count": int(count)}
+            for name, count in cluster_entities[cid].most_common(5)
+        ]
+        payload["top_topics"] = [
+            {"topic": name, "count": int(count)}
+            for name, count in cluster_topics[cid].most_common(5)
+        ]
+        payload["members"] = payload["members"][:30]
+        payload.pop("_created_at_dt", None)
+        filtered_items.append(payload)
+
+    filtered_items.sort(
+        key=lambda item: (
+            int(item.get("cluster_size", 0)),
+            item.get("latest_article_at") or "",
+        ),
+        reverse=True,
+    )
+    filtered_items = filtered_items[:limit]
+
+    avg_cluster_size = (
+        round(
+            sum(int(item.get("cluster_size", 0)) for item in filtered_items) / len(filtered_items),
+            2,
+        )
+        if filtered_items
+        else 0.0
+    )
+    avg_time_to_cluster = (
+        round(sum(time_to_cluster_minutes) / len(time_to_cluster_minutes), 2)
+        if time_to_cluster_minutes
+        else None
+    )
+
+    return success_envelope(
+        {
+            "generated_at": now.isoformat(),
+            "window_hours": hours,
+            "filters": {"category": category, "min_size": min_size, "limit": limit},
+            "metrics": {
+                "clusters_created": clusters_created,
+                "average_cluster_size": avg_cluster_size,
+                "time_to_cluster_minutes": avg_time_to_cluster,
+            },
+            "items": filtered_items,
+        }
+    )
 
 
 @router.get("/{story_id}")

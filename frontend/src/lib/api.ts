@@ -518,9 +518,12 @@ export interface FactCheckClaim {
     id: string;
     text: string;
     claim_type?: string;
+    risk_level?: 'low' | 'medium' | 'high' | string;
     confidence?: number;
     sensitive?: boolean;
     blocking?: boolean;
+    supported?: boolean;
+    support_count?: number;
     verify_hint?: string;
     evidence_links?: string[];
     unverifiable?: boolean;
@@ -532,8 +535,20 @@ export interface FactCheckReport {
     passed: boolean;
     score: number;
     claims: FactCheckClaim[];
+    claim_coverage?: {
+        high_risk_total: number;
+        high_risk_supported: number;
+        high_risk_documented_unverifiable: number;
+        high_risk_unsupported: number;
+        percent_high_risk_supported: number;
+    };
     blocking_reasons: string[];
     actionable_fixes: string[];
+    unsupported_high_risk_claim_ids?: string[];
+    persisted?: {
+        claims_upserted: number;
+        supports_upserted: number;
+    };
     threshold: number;
 }
 
@@ -644,6 +659,48 @@ export interface StoryDossierResponse {
         sources: Array<{ name: string; count: number }>;
         notes_count: number;
     };
+}
+
+export interface StoryClusterMemberRecord {
+    article_id: number;
+    score: number;
+    title: string;
+    source_name?: string | null;
+    category?: string | null;
+    status?: string | null;
+    crawled_at?: string | null;
+    created_at?: string | null;
+}
+
+export interface StoryClusterRecord {
+    cluster_id: number;
+    cluster_key: string;
+    label?: string | null;
+    category?: string | null;
+    geography?: string | null;
+    created_at?: string | null;
+    updated_at?: string | null;
+    latest_article_at?: string | null;
+    cluster_size: number;
+    top_entities: Array<{ entity: string; count: number }>;
+    top_topics: Array<{ topic: string; count: number }>;
+    members: StoryClusterMemberRecord[];
+}
+
+export interface StoryClustersResponse {
+    generated_at: string;
+    window_hours: number;
+    filters: {
+        category?: string | null;
+        min_size: number;
+        limit: number;
+    };
+    metrics: {
+        clusters_created: number;
+        average_cluster_size: number;
+        time_to_cluster_minutes: number | null;
+    };
+    items: StoryClusterRecord[];
 }
 
 export interface ScriptOutputRecord {
@@ -857,6 +914,8 @@ export const editorialApi = {
 
 export const storiesApi = {
     list: (params?: { limit?: number }) => api.get<StoryRecord[]>('/stories', { params }),
+    clusters: (params?: { hours?: number; category?: string; min_size?: number; limit?: number }) =>
+        api.get<StoryClustersResponse>('/stories/clusters', { params }),
     get: (storyId: number) => api.get<StoryRecord>(`/stories/${storyId}`),
     createFromArticle: (articleId: number, params?: { reuse?: boolean }) =>
         api.post<{ story: StoryRecord; linked_items_count: number; reused: boolean }>(`/stories/from-article/${articleId}`, null, { params }),
