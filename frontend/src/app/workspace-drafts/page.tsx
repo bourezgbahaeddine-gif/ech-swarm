@@ -1133,22 +1133,27 @@ function WorkspaceDraftsPageContent() {
                                             <p className="text-[11px] text-gray-400">
                                                 Gate Severities: blocker={readiness.gates.counts?.blocker || 0} · warn={readiness.gates.counts?.warn || 0} · info={readiness.gates.counts?.info || 0}
                                             </p>
-                                            {(readiness.gates.items || []).map((item, idx) => (
-                                                <div
-                                                    key={`${item.code}-${idx}`}
-                                                    className={cn(
-                                                        'rounded-lg border px-2 py-1',
-                                                        item.severity === 'blocker'
-                                                            ? 'border-red-500/30 bg-red-500/10 text-red-100'
-                                                            : item.severity === 'warn'
-                                                                ? 'border-amber-500/30 bg-amber-500/10 text-amber-100'
-                                                                : 'border-cyan-500/30 bg-cyan-500/10 text-cyan-100',
-                                                    )}
-                                                >
-                                                    <p className="text-[11px] uppercase tracking-wide opacity-90">{item.severity}</p>
-                                                    <p>{cleanText(item.message || '')}</p>
-                                                </div>
-                                            ))}
+                                            {([
+                                                { key: 'blocker', label: 'Blockers', style: 'border-red-500/30 bg-red-500/10 text-red-100' },
+                                                { key: 'warn', label: 'Warnings', style: 'border-amber-500/30 bg-amber-500/10 text-amber-100' },
+                                                { key: 'info', label: 'Info', style: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-100' },
+                                            ] as const).map((group) => {
+                                                const groupItems = (readiness.gates.items || []).filter((item) => item.severity === group.key);
+                                                if (groupItems.length === 0) return null;
+                                                return (
+                                                    <div key={group.key} className="space-y-1">
+                                                        <p className="text-[11px] uppercase tracking-wide text-gray-400">{group.label}</p>
+                                                        {groupItems.map((item, idx) => (
+                                                            <div
+                                                                key={`${group.key}-${item.code}-${idx}`}
+                                                                className={cn('rounded-lg border px-2 py-1', group.style)}
+                                                            >
+                                                                <p>{cleanText(item.message || '')}</p>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
                                     )}
                                 </div>

@@ -64,6 +64,15 @@ When chief chooses `approve_with_reservations`, backend now returns:
 
 This list is also persisted in transition/audit details for traceability.
 
+## RBAC and Transition Guarantees
+
+- Chief override endpoint (`/editorial/{article_id}/chief/final-decision`) is restricted to:
+  - `director`
+  - `editor_chief`
+- `approve_with_reservations` and `reject` require a mandatory reason.
+- `approve` path still enforces publish gate checks and blocks on unresolved blockers.
+- Journalists cannot execute chief override path.
+
 ## Claim Support Rule
 
 `FACT_CHECK` includes a claim support sub-gate:
@@ -103,3 +112,7 @@ Expected:
 - Track blockers in `article_quality_reports` and policy report payloads.
 - Use `dashboard/ops/overview` and job logs for failure distribution and latency.
 - Never bypass gate blockers with direct DB state edits.
+
+## Roadmap Status (`docs/news AGENTS.md`)
+
+- Epic 3 (Quality Gates 2.0): in progress; severity and chief override trail implemented, tests extended for chief decision flow and RBAC checks.
