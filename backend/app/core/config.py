@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     gemini_model_pro: str = "gemini-2.5-pro"
     groq_api_key: str = ""
     embedding_provider: str = "hash"  # gemini|hash
-    embedding_model_gemini: str = "models/text-embedding-004"
+    embedding_model_gemini: str = "models/gemini-embedding-001"
     embedding_vector_dim: int = 256
     embedding_use_real_for_chunks: bool = False
     youtube_data_api_key: str = ""

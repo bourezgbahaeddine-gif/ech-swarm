@@ -109,7 +109,7 @@ class EmbeddingService:
 
     async def _embed_with_gemini(self, text: str, *, task_type: str) -> tuple[list[float], str]:
         genai = await self._get_gemini()
-        model_name = (settings.embedding_model_gemini or "models/text-embedding-004").strip()
+        model_name = (settings.embedding_model_gemini or "models/gemini-embedding-001").strip()
         if not model_name.startswith("models/"):
             model_name = f"models/{model_name}"
 
