@@ -266,7 +266,14 @@ export default function AgentsPage() {
                                         </td>
                                         <td className="px-3 py-2 text-gray-200">{Number(row.oldest_task_age || 0).toFixed(1)}</td>
                                         <td className="px-3 py-2 text-gray-200">{Number(row.mean_runtime || 0).toFixed(1)}</td>
-                                        <td className="px-3 py-2 text-gray-200">{Number(row.failure_rate_24h || 0).toFixed(1)}%</td>
+                                        <td className="px-3 py-2 text-gray-200">
+                                            {Number(row.failure_rate_24h || 0).toFixed(1)}%
+                                            {(row.stale_failures_excluded_24h || 0) > 0 && (
+                                                <span className="mr-1 text-[10px] text-amber-300">
+                                                    (stale:{row.stale_failures_excluded_24h})
+                                                </span>
+                                            )}
+                                        </td>
                                         <td className="px-3 py-2 text-gray-200">{row.SLA_target_minutes}m</td>
                                         <td className="px-3 py-2">
                                             {row.state_drift_suspected ? (

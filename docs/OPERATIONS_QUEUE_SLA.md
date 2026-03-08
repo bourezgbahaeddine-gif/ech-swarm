@@ -31,6 +31,7 @@ Response shape:
       "oldest_task_age": 6.4,
       "mean_runtime": 2.1,
       "failure_rate_24h": 4.2,
+      "stale_failures_excluded_24h": 0,
       "SLA_target_minutes": 10,
       "SLA_breached": false,
       "active_running_jobs": 1,
@@ -48,6 +49,7 @@ Metric semantics:
   - When `depth == 0`: only running-age is considered; queued-age is ignored to avoid stale DB false positives.
 - `mean_runtime`: average runtime in minutes for `completed` jobs only (to avoid stale-failure skew).
 - `failure_rate_24h`: percentage of failed/dead-lettered tasks over finished tasks in lookback window.
+- `stale_failures_excluded_24h`: failed rows with `error` prefix `stale_timeout:` excluded from failure-rate math.
 - `SLA_target_minutes`: configured target per queue.
 - `SLA_breached`: true when any breach rule triggers (depth pressure, age/runtime over target, or high failure rate).
 - `active_running_jobs`: count of `running` jobs in DB.

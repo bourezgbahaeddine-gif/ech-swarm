@@ -376,6 +376,7 @@ export interface QueueSlaItem {
     oldest_task_age: number;
     mean_runtime: number;
     failure_rate_24h: number;
+    stale_failures_excluded_24h?: number;
     SLA_target_minutes: number;
     SLA_breached: boolean;
     active_running_jobs?: number;

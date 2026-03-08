@@ -52,8 +52,8 @@ async def test_queue_sla_overview_aggregates_metrics(monkeypatch):
         [
             _Result(
                 rows=[
-                    ("ai_router", 180.0, 20, 4),  # 3.0 min runtime, 20% failure
-                    ("ai_scribe", 900.0, 4, 2),  # 15.0 min runtime, 50% failure
+                    ("ai_router", 180.0, 20, 4, 0),  # 3.0 min runtime, 20% failure
+                    ("ai_scribe", 900.0, 4, 2, 0),  # 15.0 min runtime, 50% failure
                 ]
             ),
             _Result(
@@ -86,6 +86,7 @@ async def test_queue_sla_overview_aggregates_metrics(monkeypatch):
     assert router["depth"] == 12
     assert router["mean_runtime"] == 3.0
     assert router["failure_rate_24h"] == 20.0
+    assert router["stale_failures_excluded_24h"] == 0
     assert router["oldest_task_age"] >= 11.5
     assert router["SLA_target_minutes"] == 10
     assert router["SLA_breached"] is True
@@ -98,6 +99,7 @@ async def test_queue_sla_overview_aggregates_metrics(monkeypatch):
     assert scribe["oldest_task_age"] >= 2.5
     assert scribe["mean_runtime"] == 15.0
     assert scribe["failure_rate_24h"] == 50.0
+    assert scribe["stale_failures_excluded_24h"] == 0
     assert scribe["SLA_target_minutes"] == 20
     assert scribe["SLA_breached"] is True
     assert scribe["active_running_jobs"] == 0
@@ -110,7 +112,7 @@ async def test_queue_sla_ignores_queued_age_when_depth_is_zero(monkeypatch):
     now = datetime.utcnow()
     db = _DbStub(
         [
-            _Result(rows=[]),
+            _Result(rows=[("ai_router", 60.0, 3, 0, 2)]),
             _Result(rows=[]),
             _Result(rows=[("ai_router", 3, now - timedelta(minutes=240))]),
         ]
@@ -130,6 +132,8 @@ async def test_queue_sla_ignores_queued_age_when_depth_is_zero(monkeypatch):
     assert row["state_drift_suspected"] is True
     assert row["oldest_task_age"] == 0.0
     assert row["SLA_breached"] is False
+    assert row["stale_failures_excluded_24h"] == 2
+    assert row["failure_rate_24h"] == 0.0
 
 
 @pytest.mark.asyncio

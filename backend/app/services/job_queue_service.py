@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 from redis.asyncio import Redis
-from sqlalchemy import case, desc, func, select
+from sqlalchemy import and_, case, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -291,6 +291,11 @@ class JobQueueService:
     async def queue_sla_overview(self, db: AsyncSession, *, lookback_hours: int = 24) -> dict[str, Any]:
         window_hours = max(1, min(int(lookback_hours), 168))
         window_start = datetime.utcnow() - timedelta(hours=window_hours)
+        stale_timeout_failed = and_(
+            JobRun.status == "failed",
+            JobRun.error.is_not(None),
+            JobRun.error.ilike("stale_timeout:%"),
+        )
 
         runtime_rows = await db.execute(
             select(
@@ -304,8 +309,20 @@ class JobQueueService:
                         else_=None,
                     )
                 ).label("avg_runtime_seconds"),
-                func.count(JobRun.id).label("finished_count"),
-                func.sum(case((JobRun.status.in_(("failed", "dead_lettered")), 1), else_=0)).label("failed_count"),
+                func.sum(case((stale_timeout_failed, 0), else_=1)).label("finished_count"),
+                func.sum(
+                    case(
+                        (
+                            and_(
+                                JobRun.status.in_(("failed", "dead_lettered")),
+                                ~stale_timeout_failed,
+                            ),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ).label("failed_count"),
+                func.sum(case((stale_timeout_failed, 1), else_=0)).label("stale_excluded_count"),
             )
             .where(
                 JobRun.status.in_(("completed", "failed", "dead_lettered")),
@@ -315,14 +332,16 @@ class JobQueueService:
             .group_by(JobRun.queue_name)
         )
         runtime_by_queue: dict[str, dict[str, float]] = {}
-        for queue_name, avg_runtime_seconds, finished_count, failed_count in runtime_rows.all():
+        for queue_name, avg_runtime_seconds, finished_count, failed_count, stale_excluded_count in runtime_rows.all():
             finished = int(finished_count or 0)
             failed = int(failed_count or 0)
+            stale_excluded = int(stale_excluded_count or 0)
             failure_rate = round((failed / finished) * 100.0, 2) if finished else 0.0
             mean_runtime_minutes = round((float(avg_runtime_seconds or 0.0) / 60.0), 2)
             runtime_by_queue[str(queue_name)] = {
                 "mean_runtime": mean_runtime_minutes,
                 "failure_rate_24h": failure_rate,
+                "stale_failures_excluded_24h": float(stale_excluded),
             }
 
         running_rows = await db.execute(
@@ -399,6 +418,7 @@ class JobQueueService:
             runtime_stats = runtime_by_queue.get(queue_name, {})
             mean_runtime = float(runtime_stats.get("mean_runtime", 0.0))
             failure_rate_24h = float(runtime_stats.get("failure_rate_24h", 0.0))
+            stale_failures_excluded_24h = int(runtime_stats.get("stale_failures_excluded_24h", 0.0))
             sla_target_minutes = self.queue_sla_target_minutes(queue_name)
             depth_breach = depth >= depth_limit
             age_breach = oldest_task_age > sla_target_minutes
@@ -413,6 +433,7 @@ class JobQueueService:
                     "oldest_task_age": oldest_task_age,
                     "mean_runtime": mean_runtime,
                     "failure_rate_24h": failure_rate_24h,
+                    "stale_failures_excluded_24h": stale_failures_excluded_24h,
                     "SLA_target_minutes": sla_target_minutes,
                     "SLA_breached": sla_breached,
                     "active_running_jobs": running_count,
