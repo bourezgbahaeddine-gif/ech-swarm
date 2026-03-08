@@ -193,7 +193,11 @@ Content to rewrite:
             return await _run(alt)
 
         try:
-            return await provider_manager.call(run_fn=_run, fallback_fn=_fallback)
+            return await provider_manager.call(
+                run_fn=_run,
+                fallback_fn=_fallback,
+                route_context={"queue_name": "ai_quality", "urgency": "normal"},
+            )
         except Exception as e:  # noqa: BLE001
             logger.error("rewrite_all_providers_failed", error=str(e))
 
@@ -287,7 +291,11 @@ Articles:
             return await _run(alt)
 
         try:
-            return await provider_manager.call(run_fn=_run, fallback_fn=_fallback)
+            return await provider_manager.call(
+                run_fn=_run,
+                fallback_fn=_fallback,
+                route_context={"queue_name": "ai_scribe", "urgency": "normal"},
+            )
         except Exception as e:
             logger.error("generate_text_error", error=str(e))
             return ""

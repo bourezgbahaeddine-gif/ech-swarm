@@ -168,6 +168,14 @@ class Settings(BaseSettings):
     provider_weight_gemini: float = 0.7
     provider_weight_groq: float = 0.3
     provider_prefer_configured_only: bool = True
+    provider_daily_budget_usd: float = 12.0
+    provider_per_job_max_usd: float = 0.20
+    provider_cost_estimate_gemini_usd: float = 0.03
+    provider_cost_estimate_groq_usd: float = 0.015
+    provider_queue_tier_scribe: str = "balanced"  # low|balanced|high
+    provider_queue_tier_quality: str = "high"
+    provider_queue_tier_simulator: str = "balanced"
+    provider_queue_tier_router: str = "low"
 
     # FreshRSS / RSS-Bridge
     scout_use_freshrss: bool = False
