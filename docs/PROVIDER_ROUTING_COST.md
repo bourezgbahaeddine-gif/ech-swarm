@@ -29,6 +29,9 @@ Equivalent `ECHOROUK_OS_...` prefixed variables are supported as well.
    - `high` -> prefer `gemini`
    - `low` -> prefer `groq`
    - `balanced` -> weighted selection (`provider_weight_*`)
+   - Current urgency sources:
+     - Scribe drafts: from article urgency/breaking
+     - Editorial process actions: from article `is_breaking`
 3. Budget check:
    - If daily budget is exhausted OR preferred call cost exceeds per-job cap,
      route to the cheapest eligible provider.

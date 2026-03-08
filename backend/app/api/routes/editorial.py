@@ -1019,13 +1019,19 @@ async def process_article(
         raise HTTPException(404, "Article not found")
 
     text = article.original_content or article.summary or article.original_title
+    route_urgency = "high" if bool(getattr(article, "is_breaking", False)) else "normal"
 
     if payload.action in {"summarize", "translate", "proofread", "fact_check", "social_summary"}:
         _require_roles(current_user, NEWSROOM_ROLES)
 
         prompt = _editorial_prompt(payload.action, text, payload.value)
 
-        output = _clean_editorial_output(await ai_service.generate_text(prompt))
+        output = _clean_editorial_output(
+            await ai_service.generate_text(
+                prompt,
+                route_context={"queue_name": "ai_quality", "urgency": route_urgency},
+            )
+        )
         if not output or not output.strip():
             raise HTTPException(status_code=503, detail="AI service returned empty output")
 

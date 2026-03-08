@@ -63,6 +63,17 @@ class ScribeAgent:
 
         return html.strip()
 
+    @staticmethod
+    def _route_urgency(article: Article) -> str:
+        if bool(getattr(article, "is_breaking", False)):
+            return "high"
+        raw = str(getattr(article, "urgency", "") or "").strip().lower()
+        if raw in {"high", "breaking", "critical", "urgent"}:
+            return "high"
+        if raw in {"low"}:
+            return "low"
+        return "normal"
+
     async def write_article(
         self,
         db: AsyncSession,
@@ -91,6 +102,7 @@ class ScribeAgent:
                 content=content,
                 category=category,
                 style="echorouk",
+                route_context={"queue_name": "ai_scribe", "urgency": self._route_urgency(article)},
             )
 
             await cache_service.increment_counter("ai_calls_today")

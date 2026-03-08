@@ -132,7 +132,13 @@ Output Schema (JSON only, no markdown):
             raise
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=30))
-    async def rewrite_article(self, content: str, category: str = "", style: str = "echorouk") -> dict:
+    async def rewrite_article(
+        self,
+        content: str,
+        category: str = "",
+        style: str = "echorouk",
+        route_context: dict | None = None,
+    ) -> dict:
         """
         Rewrite an article in Echorouk style using Groq (fast) or Gemini Flash.
         """
@@ -196,7 +202,7 @@ Content to rewrite:
             return await provider_manager.call(
                 run_fn=_run,
                 fallback_fn=_fallback,
-                route_context={"queue_name": "ai_quality", "urgency": "normal"},
+                route_context=route_context or {"queue_name": "ai_quality", "urgency": "normal"},
             )
         except Exception as e:  # noqa: BLE001
             logger.error("rewrite_all_providers_failed", error=str(e))
@@ -263,7 +269,7 @@ Articles:
             logger.error("radio_script_error", error=str(e))
             return ""
 
-    async def generate_text(self, prompt: str) -> str:
+    async def generate_text(self, prompt: str, route_context: dict | None = None) -> str:
         """Generate text using provider manager with fallback."""
         async def _run(provider_name: str) -> str:
             if provider_name == "groq":
@@ -294,16 +300,16 @@ Articles:
             return await provider_manager.call(
                 run_fn=_run,
                 fallback_fn=_fallback,
-                route_context={"queue_name": "ai_scribe", "urgency": "normal"},
+                route_context=route_context or {"queue_name": "ai_scribe", "urgency": "normal"},
             )
         except Exception as e:
             logger.error("generate_text_error", error=str(e))
             return ""
 
-    async def generate_json(self, prompt: str) -> dict:
+    async def generate_json(self, prompt: str, route_context: dict | None = None) -> dict:
         """Generate structured JSON using Gemini and parse safely."""
         try:
-            text = await self.generate_text(prompt)
+            text = await self.generate_text(prompt, route_context=route_context)
             if not text:
                 return {}
             return self._parse_json_response(text)
