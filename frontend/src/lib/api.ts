@@ -369,6 +369,24 @@ export interface JobStatusResponse {
     finished_at: string | null;
 }
 
+export interface QueueSlaItem {
+    queue_name: string;
+    depth: number;
+    depth_limit: number;
+    oldest_task_age: number;
+    mean_runtime: number;
+    failure_rate_24h: number;
+    SLA_target_minutes: number;
+    SLA_breached: boolean;
+}
+
+export interface QueueSlaResponse {
+    generated_at: string;
+    lookback_hours: number;
+    failure_rate_threshold_percent: number;
+    queues: QueueSlaItem[];
+}
+
 export interface WorkspaceDraft {
     id: number;
     article_id: number;
@@ -1026,6 +1044,7 @@ export const dashboardApi = {
 
 export const jobsApi = {
     getJob: (jobId: string) => api.get<JobStatusResponse>(`/jobs/${jobId}`),
+    getSla: (params?: { lookback_hours?: number }) => api.get<QueueSlaResponse>('/jobs/sla', { params }),
 };
 
 // ── Auth API ──

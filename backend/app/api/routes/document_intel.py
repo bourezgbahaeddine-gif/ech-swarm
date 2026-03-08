@@ -57,9 +57,11 @@ async def submit_extract_document(
 
     allowed, depth, limit_depth = await job_queue_service.check_backpressure(DOCUMENT_INTEL_QUEUE)
     if not allowed:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Queue overloaded ({depth}/{limit_depth}). Please retry shortly.",
+        raise job_queue_service.backpressure_exception(
+            queue_name=DOCUMENT_INTEL_QUEUE,
+            current_depth=depth,
+            depth_limit=limit_depth,
+            message="Document extraction queue overloaded. Please retry shortly.",
         )
 
     blob_key = await document_intel_job_storage.save_payload(payload)

@@ -391,9 +391,11 @@ async def _enqueue_dashboard_job(
 ) -> dict:
     allowed, depth, limit_depth = await job_queue_service.check_backpressure(queue_name)
     if not allowed:
-        raise HTTPException(
-            status_code=429,
-            detail=f"Queue busy for {job_type} ({depth}/{limit_depth}). Retry in a moment.",
+        raise job_queue_service.backpressure_exception(
+            queue_name=queue_name,
+            current_depth=depth,
+            depth_limit=limit_depth,
+            message=f"Queue busy for {job_type}. Retry shortly.",
         )
 
     payload_data = dict(payload or {})

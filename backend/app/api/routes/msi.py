@@ -101,9 +101,11 @@ async def run_msi(
     )
     allowed, depth, limit_depth = await job_queue_service.check_backpressure("ai_msi")
     if not allowed:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"MSI queue is busy ({depth}/{limit_depth}). Retry in a moment.",
+        raise job_queue_service.backpressure_exception(
+            queue_name="ai_msi",
+            current_depth=depth,
+            depth_limit=limit_depth,
+            message="MSI queue is busy. Retry shortly.",
         )
     job = await job_queue_service.create_job(
         db,

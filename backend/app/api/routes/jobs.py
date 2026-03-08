@@ -76,6 +76,16 @@ async def get_queue_depths(current_user: User = Depends(get_current_user)):
     return {"queues": await job_queue_service.queue_depths()}
 
 
+@router.get("/sla")
+async def get_queue_sla(
+    lookback_hours: int = Query(24, ge=1, le=168),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_view(current_user)
+    return await job_queue_service.queue_sla_overview(db, lookback_hours=lookback_hours)
+
+
 @router.get("/providers/health")
 async def providers_health(current_user: User = Depends(get_current_user)):
     _require_view(current_user)

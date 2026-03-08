@@ -78,9 +78,11 @@ async def run_simulation(
         raise
     allowed, depth, limit_depth = await job_queue_service.check_backpressure("ai_simulator")
     if not allowed:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Simulator queue is busy ({depth}/{limit_depth}). Retry in a moment.",
+        raise job_queue_service.backpressure_exception(
+            queue_name="ai_simulator",
+            current_depth=depth,
+            depth_limit=limit_depth,
+            message="Simulator queue is busy. Retry shortly.",
         )
     job = await job_queue_service.create_job(
         db,

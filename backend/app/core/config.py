@@ -136,6 +136,17 @@ class Settings(BaseSettings):
     queue_depth_limit_links: int = 120
     queue_depth_limit_trends: int = 120
     queue_depth_limit_scripts: int = 120
+    queue_backpressure_retry_after_seconds: int = 20
+    queue_sla_target_minutes_default: int = 20
+    queue_sla_target_minutes_router: int = 10
+    queue_sla_target_minutes_scribe: int = 20
+    queue_sla_target_minutes_quality: int = 20
+    queue_sla_target_minutes_simulator: int = 15
+    queue_sla_target_minutes_msi: int = 30
+    queue_sla_target_minutes_links: int = 15
+    queue_sla_target_minutes_trends: int = 20
+    queue_sla_target_minutes_scripts: int = 20
+    queue_sla_failure_rate_threshold_percent: float = 25.0
 
     # Router throughput tuning
     router_batch_limit: int = 120
@@ -172,6 +183,9 @@ class Settings(BaseSettings):
     truth_score_verify_threshold: float = 0.8
     editorial_min_importance: int = 6
     editorial_require_local_signal: bool = True
+    quality_claim_support_enforcement_enabled: bool = True
+    quality_claim_sensitive_threshold: float = 0.80
+    quality_claim_require_non_aggregator_support: bool = False
     max_rss_sources: int = 300
     rss_fetch_timeout: int = 30
     scout_batch_size: int = 8

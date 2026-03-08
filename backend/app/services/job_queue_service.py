@@ -6,8 +6,9 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
+from fastapi import HTTPException, status
 from redis.asyncio import Redis
-from sqlalchemy import desc, select
+from sqlalchemy import case, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -29,6 +30,17 @@ QUEUE_LIMITS = {
     "ai_links": settings.queue_depth_limit_links,
     "ai_trends": settings.queue_depth_limit_trends,
     "ai_scripts": settings.queue_depth_limit_scripts,
+}
+
+QUEUE_SLA_TARGETS = {
+    "ai_router": settings.queue_sla_target_minutes_router,
+    "ai_scribe": settings.queue_sla_target_minutes_scribe,
+    "ai_quality": settings.queue_sla_target_minutes_quality,
+    "ai_simulator": settings.queue_sla_target_minutes_simulator,
+    "ai_msi": settings.queue_sla_target_minutes_msi,
+    "ai_links": settings.queue_sla_target_minutes_links,
+    "ai_trends": settings.queue_sla_target_minutes_trends,
+    "ai_scripts": settings.queue_sla_target_minutes_scripts,
 }
 
 JOB_TASK_MAP: dict[str, tuple[str, str]] = {
@@ -71,8 +83,56 @@ class JobQueueService:
         if not settings.queue_backpressure_enabled:
             return True, 0, 0
         depth = await self.queue_depth(queue_name)
-        limit = QUEUE_LIMITS.get(queue_name, settings.queue_depth_limit_default)
+        limit = self.queue_depth_limit(queue_name)
         return depth < limit, depth, limit
+
+    def queue_depth_limit(self, queue_name: str) -> int:
+        return int(QUEUE_LIMITS.get(queue_name, settings.queue_depth_limit_default))
+
+    def queue_sla_target_minutes(self, queue_name: str) -> int:
+        return int(QUEUE_SLA_TARGETS.get(queue_name, settings.queue_sla_target_minutes_default))
+
+    def build_backpressure_detail(
+        self,
+        *,
+        queue_name: str,
+        current_depth: int,
+        depth_limit: int,
+        retry_after_seconds: int | None = None,
+        message: str | None = None,
+    ) -> dict[str, Any]:
+        retry_after = int(retry_after_seconds or settings.queue_backpressure_retry_after_seconds)
+        detail: dict[str, Any] = {
+            "queue_name": queue_name,
+            "current_depth": int(current_depth),
+            "depth_limit": int(depth_limit),
+            "retry_after_seconds": max(1, retry_after),
+        }
+        if message:
+            detail["message"] = message
+        return detail
+
+    def backpressure_exception(
+        self,
+        *,
+        queue_name: str,
+        current_depth: int,
+        depth_limit: int,
+        retry_after_seconds: int | None = None,
+        message: str | None = None,
+    ) -> HTTPException:
+        detail = self.build_backpressure_detail(
+            queue_name=queue_name,
+            current_depth=current_depth,
+            depth_limit=depth_limit,
+            retry_after_seconds=retry_after_seconds,
+            message=message,
+        )
+        return HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=detail,
+            headers={"Retry-After": str(detail["retry_after_seconds"])},
+        )
 
     async def create_job(
         self,
@@ -227,6 +287,89 @@ class JobQueueService:
             except Exception:  # noqa: BLE001
                 depths[queue_name] = -1
         return depths
+
+    async def queue_sla_overview(self, db: AsyncSession, *, lookback_hours: int = 24) -> dict[str, Any]:
+        window_hours = max(1, min(int(lookback_hours), 168))
+        window_start = datetime.utcnow() - timedelta(hours=window_hours)
+
+        runtime_rows = await db.execute(
+            select(
+                JobRun.queue_name,
+                func.avg(func.extract("epoch", JobRun.finished_at - JobRun.started_at)).label("avg_runtime_seconds"),
+                func.count(JobRun.id).label("finished_count"),
+                func.sum(case((JobRun.status.in_(("failed", "dead_lettered")), 1), else_=0)).label("failed_count"),
+            )
+            .where(
+                JobRun.status.in_(("completed", "failed", "dead_lettered")),
+                JobRun.finished_at.is_not(None),
+                JobRun.finished_at >= window_start,
+            )
+            .group_by(JobRun.queue_name)
+        )
+        runtime_by_queue: dict[str, dict[str, float]] = {}
+        for queue_name, avg_runtime_seconds, finished_count, failed_count in runtime_rows.all():
+            finished = int(finished_count or 0)
+            failed = int(failed_count or 0)
+            failure_rate = round((failed / finished) * 100.0, 2) if finished else 0.0
+            mean_runtime_minutes = round((float(avg_runtime_seconds or 0.0) / 60.0), 2)
+            runtime_by_queue[str(queue_name)] = {
+                "mean_runtime": mean_runtime_minutes,
+                "failure_rate_24h": failure_rate,
+            }
+
+        oldest_rows = await db.execute(
+            select(
+                JobRun.queue_name,
+                func.min(func.coalesce(JobRun.started_at, JobRun.queued_at)).label("oldest_active_at"),
+            )
+            .where(JobRun.status.in_(("queued", "running")))
+            .group_by(JobRun.queue_name)
+        )
+        now = datetime.utcnow()
+        oldest_by_queue: dict[str, float] = {}
+        for queue_name, oldest_active_at in oldest_rows.all():
+            if not oldest_active_at:
+                continue
+            age_minutes = max(0.0, (now - oldest_active_at).total_seconds() / 60.0)
+            oldest_by_queue[str(queue_name)] = round(age_minutes, 2)
+
+        depths = await self.queue_depths()
+        queue_names = sorted(set(depths.keys()) | set(runtime_by_queue.keys()) | set(oldest_by_queue.keys()))
+        failure_threshold = float(settings.queue_sla_failure_rate_threshold_percent)
+        items: list[dict[str, Any]] = []
+        for queue_name in queue_names:
+            depth = int(depths.get(queue_name, 0))
+            depth_limit = self.queue_depth_limit(queue_name)
+            oldest_task_age = float(oldest_by_queue.get(queue_name, 0.0))
+            runtime_stats = runtime_by_queue.get(queue_name, {})
+            mean_runtime = float(runtime_stats.get("mean_runtime", 0.0))
+            failure_rate_24h = float(runtime_stats.get("failure_rate_24h", 0.0))
+            sla_target_minutes = self.queue_sla_target_minutes(queue_name)
+            sla_breached = (
+                depth >= depth_limit
+                or oldest_task_age > sla_target_minutes
+                or mean_runtime > sla_target_minutes
+                or failure_rate_24h >= failure_threshold
+            )
+            items.append(
+                {
+                    "queue_name": queue_name,
+                    "depth": depth,
+                    "depth_limit": depth_limit,
+                    "oldest_task_age": oldest_task_age,
+                    "mean_runtime": mean_runtime,
+                    "failure_rate_24h": failure_rate_24h,
+                    "SLA_target_minutes": sla_target_minutes,
+                    "SLA_breached": sla_breached,
+                }
+            )
+
+        return {
+            "generated_at": datetime.utcnow().isoformat(),
+            "lookback_hours": window_hours,
+            "failure_rate_threshold_percent": failure_threshold,
+            "queues": items,
+        }
 
     async def mark_running(self, db: AsyncSession, job: JobRun) -> None:
         job.status = "running"

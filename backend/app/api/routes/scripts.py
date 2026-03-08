@@ -130,9 +130,11 @@ async def _queue_script_generation(
 ) -> dict:
     allowed, depth, limit_depth = await job_queue_service.check_backpressure(SCRIPT_QUEUE_NAME)
     if not allowed:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Queue overloaded ({depth}/{limit_depth}). Retry shortly.",
+        raise job_queue_service.backpressure_exception(
+            queue_name=SCRIPT_QUEUE_NAME,
+            current_depth=depth,
+            depth_limit=limit_depth,
+            message="Script generation queue overloaded. Retry shortly.",
         )
 
     target_version = await script_repository.get_next_output_version(db, script_id)
