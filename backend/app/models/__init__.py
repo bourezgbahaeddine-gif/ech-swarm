@@ -58,6 +58,7 @@ from app.models.link_intelligence import (
     LinkClickEvent,
 )
 from app.models.job_queue import JobRun, DeadLetterJob
+from app.models.archive_crawl import ArchiveCrawlState, ArchiveCrawlUrl
 from app.models.story import Story, StoryItem, StoryStatus
 from app.models.idempotency import TaskIdempotencyKey
 from app.models.script import (
@@ -128,6 +129,8 @@ __all__ = [
     "LinkClickEvent",
     "JobRun",
     "DeadLetterJob",
+    "ArchiveCrawlState",
+    "ArchiveCrawlUrl",
     "Story",
     "StoryItem",
     "StoryStatus",

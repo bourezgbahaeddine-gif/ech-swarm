@@ -12,6 +12,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 from sqlalchemy import delete, select
@@ -160,7 +161,13 @@ def _archive_code(article_id: int) -> str:
 
 
 class ArticleIndexService:
-    async def upsert_article(self, db: AsyncSession, article: Article) -> None:
+    async def upsert_article(
+        self,
+        db: AsyncSession,
+        article: Article,
+        *,
+        profile_metadata: dict[str, Any] | None = None,
+    ) -> None:
         normalized = _normalize_article(article)
 
         existing_profile = await db.execute(
@@ -183,12 +190,16 @@ class ArticleIndexService:
         profile.category = article.category.value if article.category else None
         profile.editorial_status = article.status.value if article.status else None
         profile.search_text = normalized.search_text
-        profile.metadata_json = {
+        metadata_json = dict(profile.metadata_json or {})
+        metadata_json.update({
             "importance_score": article.importance_score,
             "urgency": article.urgency.value if article.urgency else None,
             "is_breaking": article.is_breaking,
             "published_at": article.published_at.isoformat() if article.published_at else None,
-        }
+        })
+        if profile_metadata:
+            metadata_json.update(profile_metadata)
+        profile.metadata_json = metadata_json
         profile.updated_at = datetime.utcnow()
 
         await db.flush()

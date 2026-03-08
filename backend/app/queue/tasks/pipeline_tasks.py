@@ -23,6 +23,7 @@ from app.queue.async_runtime import run_async
 from app.queue.celery_app import celery_app
 from app.services.document_intel_job_storage import document_intel_job_storage
 from app.services.document_intel_service import document_intel_service
+from app.services.echorouk_archive_service import echorouk_archive_service
 from app.services.job_queue_service import job_queue_service
 from app.services.script_studio_service import script_studio_service
 from app.services.task_execution_service import execute_with_task_idempotency
@@ -31,6 +32,8 @@ from app.simulator.service import audience_simulation_service
 logger = get_logger("queue.pipeline_tasks")
 DEFAULT_TASK_SOFT_LIMIT_SEC = 120
 DEFAULT_TASK_HARD_LIMIT_SEC = 180
+ARCHIVE_TASK_SOFT_LIMIT_SEC = 900
+ARCHIVE_TASK_HARD_LIMIT_SEC = 1200
 
 
 async def _load_job(job_id: str) -> JobRun:
@@ -195,6 +198,16 @@ async def _run_script_generate(job: JobRun) -> dict:
         target_version=target_version,
         actor_username=job.actor_username,
     )
+
+
+async def _run_echorouk_archive_backfill(job: JobRun) -> dict:
+    payload = job.payload_json or {}
+    async with async_session() as db:
+        return await echorouk_archive_service.run_batch(
+            db,
+            listing_pages=int(payload.get("listing_pages") or 3),
+            article_pages=int(payload.get("article_pages") or 12),
+        )
 
 
 @celery_app.task(
@@ -445,6 +458,35 @@ def run_script_generate_job(self: Task, job_id: str) -> dict:
                 job_id,
                 task_name="script_generate",
                 runner=_run_script_generate,
+            )
+        )
+        run_async(_complete(job_id, result))
+        return {"ok": True}
+    except Exception as exc:  # noqa: BLE001
+        tb = traceback.format_exc()
+        final = int(getattr(self.request, "retries", 0)) >= int(getattr(self, "max_retries", 3))
+        run_async(_fail(job_id, str(exc), tb, final))
+        raise
+    finally:
+        structlog.contextvars.clear_contextvars()
+
+
+@celery_app.task(
+    bind=True,
+    autoretry_for=(TimeoutError, ConnectionError),
+    retry_backoff=True,
+    retry_jitter=True,
+    max_retries=3,
+    soft_time_limit=ARCHIVE_TASK_SOFT_LIMIT_SEC,
+    time_limit=ARCHIVE_TASK_HARD_LIMIT_SEC,
+)
+def run_echorouk_archive_backfill(self: Task, job_id: str) -> dict:
+    try:
+        result = run_async(
+            _run_task_with_idempotency(
+                job_id,
+                task_name="echorouk_archive_backfill",
+                runner=_run_echorouk_archive_backfill,
             )
         )
         run_async(_complete(job_id, result))

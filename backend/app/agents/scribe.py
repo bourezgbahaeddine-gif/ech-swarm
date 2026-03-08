@@ -20,6 +20,7 @@ from app.services.article_index_service import article_index_service
 from app.services.ai_service import ai_service
 from app.services.cache_service import cache_service
 from app.services.embedding_service import embedding_service
+from app.services.echorouk_archive_service import echorouk_archive_service
 
 logger = get_logger("agent.scribe")
 settings = get_settings()
@@ -234,7 +235,32 @@ class ScribeAgent:
             }
             if len(candidates) >= limit:
                 break
-        return list(candidates.values())
+        items = list(candidates.values())
+        if settings.echorouk_archive_rag_enabled:
+            archive_refs = await echorouk_archive_service.semantic_search(
+                db,
+                q=text[:1200],
+                limit=max(1, int(settings.echorouk_archive_rag_limit)),
+            )
+            seen_urls = {str(item.get("url") or "") for item in items}
+            for ref in archive_refs:
+                url = str(ref.get("url") or "")
+                if url and url in seen_urls:
+                    continue
+                items.append(
+                    {
+                        "id": ref.get("id"),
+                        "title": ref.get("title"),
+                        "summary": ref.get("summary") or "",
+                        "source": ref.get("source_name") or "archive",
+                        "url": url,
+                        "category": None,
+                        "corpus": ref.get("corpus") or "archive",
+                    }
+                )
+                if url:
+                    seen_urls.add(url)
+        return items[: limit + max(0, int(settings.echorouk_archive_rag_limit if settings.echorouk_archive_rag_enabled else 0))]
 
     @staticmethod
     def _format_supporting_context(articles: list[dict]) -> str:
@@ -246,7 +272,9 @@ class ScribeAgent:
             title = art["title"] or "untitled"
             source = art["source"] or "publisher"
             url = art["url"] or ""
-            lines.append(f"{idx}. {title} ({source}) - {url}")
+            corpus = art.get("corpus")
+            prefix = f"[{corpus}] " if corpus else ""
+            lines.append(f"{idx}. {prefix}{title} ({source}) - {url}")
             if summary:
                 lines.append(f"   {summary}")
         return "\n".join(lines)

@@ -54,6 +54,7 @@ from app.api.routes.media_logger import router as media_logger_router
 from app.api.routes.document_intel import router as document_intel_router
 from app.api.routes.competitor_xray import router as competitor_xray_router
 from app.api.routes.jobs import router as jobs_router
+from app.api.routes.archive import router as archive_router
 from app.api.routes.stories import router as stories_router
 from app.api.routes.scripts import router as scripts_router
 from app.api.routes.events import router as events_router
@@ -606,6 +607,7 @@ app.include_router(media_logger_router, prefix="/api/v1")
 app.include_router(document_intel_router, prefix="/api/v1")
 app.include_router(competitor_xray_router, prefix="/api/v1")
 app.include_router(jobs_router, prefix="/api/v1")
+app.include_router(archive_router, prefix="/api/v1")
 app.include_router(stories_router, prefix="/api/v1")
 app.include_router(scripts_router, prefix="/api/v1")
 app.include_router(events_router, prefix="/api/v1")

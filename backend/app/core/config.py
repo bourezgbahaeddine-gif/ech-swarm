@@ -74,6 +74,24 @@ class Settings(BaseSettings):
     embedding_model_gemini: str = "models/gemini-embedding-001"
     embedding_vector_dim: int = 256
     embedding_use_real_for_chunks: bool = False
+    echorouk_archive_enabled: bool = False
+    echorouk_archive_source_name: str = "Echorouk Online Archive"
+    echorouk_archive_base_url: str = "https://www.echoroukonline.com/"
+    echorouk_archive_sections: str = (
+        "https://www.echoroukonline.com/,"
+        "https://www.echoroukonline.com/algeria,"
+        "https://www.echoroukonline.com/economy,"
+        "https://www.echoroukonline.com/world,"
+        "https://www.echoroukonline.com/sport,"
+        "https://www.echoroukonline.com/opinion"
+    )
+    echorouk_archive_request_timeout_seconds: int = 20
+    echorouk_archive_delay_ms: int = 1200
+    echorouk_archive_max_listing_pages_per_run: int = 3
+    echorouk_archive_max_articles_per_run: int = 12
+    echorouk_archive_max_listing_depth: int = 2500
+    echorouk_archive_rag_enabled: bool = False
+    echorouk_archive_rag_limit: int = 2
     youtube_data_api_key: str = ""
     youtube_trends_enabled: bool = False
 
@@ -254,6 +272,15 @@ class Settings(BaseSettings):
                 host = host[4:]
             domains.add(host)
         return domains
+
+    @property
+    def echorouk_archive_sections_list(self) -> list[str]:
+        values: list[str] = []
+        for raw in (self.echorouk_archive_sections or "").split(","):
+            value = raw.strip()
+            if value:
+                values.append(value)
+        return values
 
     class Config:
         env_file = ".env"

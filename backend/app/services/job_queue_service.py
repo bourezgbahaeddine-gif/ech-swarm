@@ -62,6 +62,7 @@ JOB_TASK_MAP: dict[str, tuple[str, str]] = {
     "published_monitor_scan": ("app.queue.tasks.pipeline_tasks.run_published_monitor_scan", "ai_quality"),
     "document_intel_extract": ("app.queue.tasks.pipeline_tasks.run_document_intel_extract_job", "ai_quality"),
     "script_generate": ("app.queue.tasks.pipeline_tasks.run_script_generate_job", "ai_scripts"),
+    "echorouk_archive_backfill": ("app.queue.tasks.pipeline_tasks.run_echorouk_archive_backfill", "ai_scripts"),
 }
 
 
