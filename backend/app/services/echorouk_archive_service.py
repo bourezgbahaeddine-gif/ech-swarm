@@ -306,6 +306,49 @@ class EchoroukArchiveService:
             ],
         }
 
+    async def prepare_refresh(self, db: AsyncSession) -> int:
+        state = await self.ensure_state(db)
+        refreshed = 0
+        now = datetime.utcnow()
+
+        for url in settings.echorouk_archive_sections_list:
+            canonical = _canonicalize_url(url)
+            if not canonical:
+                continue
+
+            result = await db.execute(
+                select(ArchiveCrawlUrl).where(
+                    ArchiveCrawlUrl.state_id == state.id,
+                    ArchiveCrawlUrl.url == canonical,
+                )
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                refreshed += await self._enqueue_url(
+                    db,
+                    state,
+                    url=canonical,
+                    url_type="listing",
+                    depth=0,
+                    discovered_from_url=None,
+                    priority=5,
+                )
+                continue
+
+            if row.status == "processing":
+                continue
+
+            row.status = "discovered"
+            row.priority = 5
+            row.depth = 0
+            row.last_error = None
+            row.updated_at = now
+            refreshed += 1
+
+        if refreshed:
+            await db.commit()
+        return refreshed
+
     async def semantic_search(self, db: AsyncSession, q: str, limit: int = 5) -> list[dict[str, Any]]:
         query = (q or "").strip()
         if len(query) < 2:

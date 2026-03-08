@@ -12,7 +12,7 @@
 import asyncio
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -62,6 +62,7 @@ from app.api.routes.digital import router as digital_router
 from app.msi.scheduler import start_msi_scheduler, stop_msi_scheduler
 from app.services.competitor_xray_service import competitor_xray_service
 from app.services.digital_team_service import digital_team_service
+from app.services.echorouk_archive_service import echorouk_archive_service
 from app.services.event_reminder_service import event_reminder_service
 from app.services.job_queue_service import job_queue_service
 from app.services.time_integrity_service import time_integrity_service
@@ -80,6 +81,7 @@ _competitor_xray_task: asyncio.Task | None = None
 _event_reminders_task: asyncio.Task | None = None
 _digital_generation_task: asyncio.Task | None = None
 _time_integrity_cleanup_task: asyncio.Task | None = None
+_archive_task: asyncio.Task | None = None
 
 
 async def _run_pipeline_once():
@@ -279,6 +281,94 @@ async def _run_time_integrity_cleanup_once():
     logger.info("auto_time_integrity_cleanup_tick_done", **result)
 
 
+async def _run_echorouk_archive_once():
+    async with async_session() as db:
+        if settings.defer_noncritical_jobs_when_backlog_high:
+            new_backlog = await _new_backlog_count(db)
+            if new_backlog >= max(100, int(settings.noncritical_backlog_threshold)):
+                logger.info(
+                    "auto_echorouk_archive_deferred_backlog_pressure",
+                    new_backlog=new_backlog,
+                    threshold=settings.noncritical_backlog_threshold,
+                )
+                return
+
+        active_job = await job_queue_service.find_active_job(
+            db,
+            job_type="echorouk_archive_backfill",
+            entity_id="echorouk_archive",
+            max_age_minutes=max(30, settings.echorouk_archive_backfill_interval_minutes * 6),
+        )
+        if active_job:
+            logger.info("auto_echorouk_archive_skip_active_job", job_id=str(active_job.id), status=active_job.status)
+            return
+
+        allowed, depth, limit_depth = await job_queue_service.check_backpressure("ai_scripts")
+        if not allowed:
+            logger.warning("auto_echorouk_archive_backpressure", depth=depth, limit=limit_depth)
+            return
+
+        state = await echorouk_archive_service.ensure_state(db)
+        overview = await echorouk_archive_service.archive_status(db)
+        queue = overview.get("queue") or {}
+        pending = 0
+        for payload in queue.values():
+            pending += int((payload or {}).get("discovered", 0))
+
+        mode = "backfill"
+        listing_pages = settings.echorouk_archive_max_listing_pages_per_run
+        article_pages = settings.echorouk_archive_max_articles_per_run
+
+        if pending <= 0 and state.last_run_finished_at:
+            age = datetime.utcnow() - state.last_run_finished_at
+            refresh_due = age >= timedelta(minutes=max(60, settings.echorouk_archive_refresh_interval_minutes))
+            if not refresh_due:
+                logger.info(
+                    "auto_echorouk_archive_skip_not_due",
+                    last_run_finished_at=state.last_run_finished_at,
+                    next_refresh_in_minutes=max(
+                        0,
+                        int(settings.echorouk_archive_refresh_interval_minutes - (age.total_seconds() / 60.0)),
+                    ),
+                )
+                return
+
+            refreshed = await echorouk_archive_service.prepare_refresh(db)
+            if refreshed <= 0:
+                logger.info("auto_echorouk_archive_skip_no_refresh_targets")
+                return
+
+            mode = "refresh"
+            listing_pages = settings.echorouk_archive_refresh_listing_pages
+            article_pages = settings.echorouk_archive_refresh_article_pages
+
+        tick_id = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+        job = await job_queue_service.create_job(
+            db,
+            job_type="echorouk_archive_backfill",
+            queue_name="ai_scripts",
+            payload={
+                "mode": mode,
+                "listing_pages": max(1, int(listing_pages)),
+                "article_pages": max(1, int(article_pages)),
+                "tick_id": tick_id,
+                "idempotency_key": f"echorouk_archive:{mode}:{tick_id}",
+            },
+            entity_id="echorouk_archive",
+            actor_username="system",
+            max_attempts=3,
+        )
+        await job_queue_service.enqueue_by_job_type(job_type="echorouk_archive_backfill", job_id=str(job.id))
+        logger.info(
+            "auto_echorouk_archive_tick_done",
+            mode=mode,
+            job_id=str(job.id),
+            listing_pages=listing_pages,
+            article_pages=article_pages,
+            pending=pending,
+        )
+
+
 async def _periodic_loop(name: str, interval_seconds: int, job):
     logger.info("periodic_loop_started", loop=name, interval_seconds=interval_seconds)
     while not _shutdown_event.is_set():
@@ -313,7 +403,7 @@ async def lifespan(app: FastAPI):
     await cache_service.connect()
 
     # Start periodic pipeline loops (optional)
-    global _pipeline_task, _trends_task, _published_monitor_task, _competitor_xray_task, _event_reminders_task, _digital_generation_task, _time_integrity_cleanup_task
+    global _pipeline_task, _trends_task, _published_monitor_task, _competitor_xray_task, _event_reminders_task, _digital_generation_task, _time_integrity_cleanup_task, _archive_task
     _shutdown_event.clear()
     if settings.auto_pipeline_enabled:
         scout_interval_minutes = max(1, int(settings.scout_interval_minutes))
@@ -418,6 +508,22 @@ async def lifespan(app: FastAPI):
             max_age_hours=settings.scout_max_article_age_hours,
         )
 
+    if settings.echorouk_archive_enabled:
+        _archive_task = asyncio.create_task(
+            _periodic_loop(
+                "echorouk_archive",
+                max(300, settings.echorouk_archive_backfill_interval_minutes * 60),
+                _run_echorouk_archive_once,
+            )
+        )
+        logger.info(
+            "echorouk_archive_enabled",
+            backfill_interval_minutes=settings.echorouk_archive_backfill_interval_minutes,
+            refresh_interval_minutes=settings.echorouk_archive_refresh_interval_minutes,
+            listing_pages=settings.echorouk_archive_max_listing_pages_per_run,
+            article_pages=settings.echorouk_archive_max_articles_per_run,
+        )
+
     if settings.msi_enabled and settings.msi_scheduler_enabled:
         start_msi_scheduler()
 
@@ -439,6 +545,7 @@ async def lifespan(app: FastAPI):
         _event_reminders_task,
         _digital_generation_task,
         _time_integrity_cleanup_task,
+        _archive_task,
     ):
         if task:
             task.cancel()
@@ -453,6 +560,7 @@ async def lifespan(app: FastAPI):
                 _event_reminders_task,
                 _digital_generation_task,
                 _time_integrity_cleanup_task,
+                _archive_task,
             )
             if t
         ],

@@ -90,6 +90,10 @@ class Settings(BaseSettings):
     echorouk_archive_max_listing_pages_per_run: int = 3
     echorouk_archive_max_articles_per_run: int = 12
     echorouk_archive_max_listing_depth: int = 2500
+    echorouk_archive_backfill_interval_minutes: int = 10
+    echorouk_archive_refresh_interval_minutes: int = 1440
+    echorouk_archive_refresh_listing_pages: int = 2
+    echorouk_archive_refresh_article_pages: int = 10
     echorouk_archive_rag_enabled: bool = False
     echorouk_archive_rag_limit: int = 2
     youtube_data_api_key: str = ""
