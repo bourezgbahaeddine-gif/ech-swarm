@@ -378,6 +378,9 @@ export interface QueueSlaItem {
     failure_rate_24h: number;
     SLA_target_minutes: number;
     SLA_breached: boolean;
+    active_running_jobs?: number;
+    active_queued_jobs?: number;
+    state_drift_suspected?: boolean;
 }
 
 export interface QueueSlaResponse {
@@ -385,6 +388,14 @@ export interface QueueSlaResponse {
     lookback_hours: number;
     failure_rate_threshold_percent: number;
     queues: QueueSlaItem[];
+}
+
+export interface RecoverStaleJobsResponse {
+    status: string;
+    stale_running_minutes: number;
+    stale_queued_minutes: number;
+    running_failed: number;
+    queued_failed: number;
 }
 
 export interface WorkspaceDraft {
@@ -1045,6 +1056,8 @@ export const dashboardApi = {
 export const jobsApi = {
     getJob: (jobId: string) => api.get<JobStatusResponse>(`/jobs/${jobId}`),
     getSla: (params?: { lookback_hours?: number }) => api.get<QueueSlaResponse>('/jobs/sla', { params }),
+    recoverStale: (params?: { stale_running_minutes?: number; stale_queued_minutes?: number }) =>
+        api.post<RecoverStaleJobsResponse>('/jobs/recover/stale', null, { params }),
 };
 
 // ── Auth API ──

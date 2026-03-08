@@ -317,40 +317,86 @@ class JobQueueService:
                 "failure_rate_24h": failure_rate,
             }
 
-        oldest_rows = await db.execute(
+        running_rows = await db.execute(
             select(
                 JobRun.queue_name,
-                func.min(func.coalesce(JobRun.started_at, JobRun.queued_at)).label("oldest_active_at"),
+                func.count(JobRun.id).label("running_count"),
+                func.min(func.coalesce(JobRun.started_at, JobRun.queued_at)).label("oldest_running_at"),
             )
-            .where(JobRun.status.in_(("queued", "running")))
+            .where(
+                JobRun.status == "running",
+                JobRun.finished_at.is_(None),
+            )
             .group_by(JobRun.queue_name)
         )
+        queued_rows = await db.execute(
+            select(
+                JobRun.queue_name,
+                func.count(JobRun.id).label("queued_count"),
+                func.min(JobRun.queued_at).label("oldest_queued_at"),
+            )
+            .where(
+                JobRun.status == "queued",
+                JobRun.finished_at.is_(None),
+            )
+            .group_by(JobRun.queue_name)
+        )
+
         now = datetime.utcnow()
-        oldest_by_queue: dict[str, float] = {}
-        for queue_name, oldest_active_at in oldest_rows.all():
-            if not oldest_active_at:
-                continue
-            age_minutes = max(0.0, (now - oldest_active_at).total_seconds() / 60.0)
-            oldest_by_queue[str(queue_name)] = round(age_minutes, 2)
+        running_by_queue: dict[str, dict[str, float]] = {}
+        for queue_name, running_count, oldest_running_at in running_rows.all():
+            age_minutes = 0.0
+            if oldest_running_at:
+                age_minutes = max(0.0, (now - oldest_running_at).total_seconds() / 60.0)
+            running_by_queue[str(queue_name)] = {
+                "count": int(running_count or 0),
+                "oldest_age": round(age_minutes, 2),
+            }
+
+        queued_by_queue: dict[str, dict[str, float]] = {}
+        for queue_name, queued_count, oldest_queued_at in queued_rows.all():
+            age_minutes = 0.0
+            if oldest_queued_at:
+                age_minutes = max(0.0, (now - oldest_queued_at).total_seconds() / 60.0)
+            queued_by_queue[str(queue_name)] = {
+                "count": int(queued_count or 0),
+                "oldest_age": round(age_minutes, 2),
+            }
 
         depths = await self.queue_depths()
-        queue_names = sorted(set(depths.keys()) | set(runtime_by_queue.keys()) | set(oldest_by_queue.keys()))
+        queue_names = sorted(set(depths.keys()) | set(runtime_by_queue.keys()) | set(running_by_queue.keys()) | set(queued_by_queue.keys()))
         failure_threshold = float(settings.queue_sla_failure_rate_threshold_percent)
         items: list[dict[str, Any]] = []
         for queue_name in queue_names:
             depth = int(depths.get(queue_name, 0))
             depth_limit = self.queue_depth_limit(queue_name)
-            oldest_task_age = float(oldest_by_queue.get(queue_name, 0.0))
+            running_stats = running_by_queue.get(queue_name, {})
+            queued_stats = queued_by_queue.get(queue_name, {})
+            running_count = int(running_stats.get("count", 0))
+            queued_count = int(queued_stats.get("count", 0))
+            oldest_running_age = float(running_stats.get("oldest_age", 0.0))
+            oldest_queued_age = float(queued_stats.get("oldest_age", 0.0))
+
+            # If Redis depth is zero, queued rows in DB often indicate stale state.
+            # In that case we only use running age, because queued-age SLA should track
+            # real backlog pressure from Redis.
+            if depth > 0:
+                oldest_task_age = round(max(oldest_queued_age, oldest_running_age), 2)
+            elif running_count > 0:
+                oldest_task_age = round(oldest_running_age, 2)
+            else:
+                oldest_task_age = 0.0
+
+            state_drift_suspected = depth == 0 and queued_count > 0
             runtime_stats = runtime_by_queue.get(queue_name, {})
             mean_runtime = float(runtime_stats.get("mean_runtime", 0.0))
             failure_rate_24h = float(runtime_stats.get("failure_rate_24h", 0.0))
             sla_target_minutes = self.queue_sla_target_minutes(queue_name)
-            sla_breached = (
-                depth >= depth_limit
-                or oldest_task_age > sla_target_minutes
-                or mean_runtime > sla_target_minutes
-                or failure_rate_24h >= failure_threshold
-            )
+            depth_breach = depth >= depth_limit
+            age_breach = oldest_task_age > sla_target_minutes
+            runtime_breach = mean_runtime > sla_target_minutes
+            failure_breach = failure_rate_24h >= failure_threshold
+            sla_breached = depth_breach or age_breach or runtime_breach or failure_breach
             items.append(
                 {
                     "queue_name": queue_name,
@@ -361,6 +407,9 @@ class JobQueueService:
                     "failure_rate_24h": failure_rate_24h,
                     "SLA_target_minutes": sla_target_minutes,
                     "SLA_breached": sla_breached,
+                    "active_running_jobs": running_count,
+                    "active_queued_jobs": queued_count,
+                    "state_drift_suspected": state_drift_suspected,
                 }
             )
 

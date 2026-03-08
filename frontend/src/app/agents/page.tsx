@@ -82,6 +82,17 @@ export default function AgentsPage() {
         },
     });
 
+    const recoverStaleJobs = useMutation({
+        mutationFn: async () => jobsApi.recoverStale({ stale_running_minutes: 15, stale_queued_minutes: 30 }),
+        onSuccess: async () => {
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: ['jobs-sla'] }),
+                queryClient.invalidateQueries({ queryKey: ['failed-jobs'] }),
+                queryClient.invalidateQueries({ queryKey: ['pipeline-runs-full'] }),
+            ]);
+        },
+    });
+
     if (!isDirector) {
         return (
             <div className="rounded-2xl border border-white/10 bg-gray-900/40 p-6 space-y-4">
@@ -110,6 +121,7 @@ export default function AgentsPage() {
     const lastRun = pipelineRuns[0]?.started_at;
     const queueSlaRows = (jobsSlaData?.data?.queues || []) as QueueSlaItem[];
     const breachedQueues = queueSlaRows.filter((row) => row.SLA_breached);
+    const driftQueues = queueSlaRows.filter((row) => row.state_drift_suspected);
     const totalDepth = queueSlaRows.reduce((sum, row) => sum + Math.max(0, row.depth || 0), 0);
     const worstQueue = [...queueSlaRows].sort(
         (a, b) =>
@@ -171,15 +183,25 @@ export default function AgentsPage() {
                             مراقبة مباشرة للطوابير مع روابط Flower وخطوات المعالجة السريعة.
                         </p>
                     </div>
-                    <a
-                        href={FLOWER_BASE_URL}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-200 hover:text-cyan-100"
-                    >
-                        فتح Flower
-                        <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => recoverStaleJobs.mutate()}
+                            disabled={recoverStaleJobs.isPending}
+                            className="inline-flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200 hover:text-amber-100 disabled:opacity-60"
+                        >
+                            {recoverStaleJobs.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                            Recover Stale Jobs
+                        </button>
+                        <a
+                            href={FLOWER_BASE_URL}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-200 hover:text-cyan-100"
+                        >
+                            فتح Flower
+                            <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                    </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -194,8 +216,17 @@ export default function AgentsPage() {
                     <div className="rounded-xl border border-white/10 bg-white/5 p-3">
                         <p className="text-[11px] text-gray-300">أسوأ Queue حالياً</p>
                         <p className="text-sm font-semibold text-white mt-1">{worstQueue?.queue_name || '—'}</p>
+                        {driftQueues.length > 0 && (
+                            <p className="text-[10px] text-amber-300 mt-1">state_drift: {driftQueues.length}</p>
+                        )}
                     </div>
                 </div>
+
+                {recoverStaleJobs.isSuccess && (
+                    <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-200">
+                        stale recovery done: running_failed={recoverStaleJobs.data?.data?.running_failed ?? 0}, queued_failed={recoverStaleJobs.data?.data?.queued_failed ?? 0}
+                    </div>
+                )}
 
                 <div className="overflow-x-auto rounded-xl border border-white/10">
                     <table className="min-w-full text-xs text-right">
@@ -203,6 +234,7 @@ export default function AgentsPage() {
                             <tr>
                                 <th className="px-3 py-2">Queue</th>
                                 <th className="px-3 py-2">Depth</th>
+                                <th className="px-3 py-2">DB Active</th>
                                 <th className="px-3 py-2">Oldest (min)</th>
                                 <th className="px-3 py-2">Runtime (min)</th>
                                 <th className="px-3 py-2">Failure 24h</th>
@@ -214,7 +246,7 @@ export default function AgentsPage() {
                         <tbody>
                             {jobsSlaLoading && (
                                 <tr>
-                                    <td colSpan={8} className="px-3 py-4 text-center text-gray-400">
+                                    <td colSpan={9} className="px-3 py-4 text-center text-gray-400">
                                         جاري تحميل مؤشرات SLA...
                                     </td>
                                 </tr>
@@ -229,12 +261,19 @@ export default function AgentsPage() {
                                         <td className="px-3 py-2 text-gray-200">
                                             {row.depth}/{row.depth_limit}
                                         </td>
+                                        <td className="px-3 py-2 text-gray-200">
+                                            {(row.active_running_jobs || 0) + (row.active_queued_jobs || 0)} ({row.active_running_jobs || 0}/{row.active_queued_jobs || 0})
+                                        </td>
                                         <td className="px-3 py-2 text-gray-200">{Number(row.oldest_task_age || 0).toFixed(1)}</td>
                                         <td className="px-3 py-2 text-gray-200">{Number(row.mean_runtime || 0).toFixed(1)}</td>
                                         <td className="px-3 py-2 text-gray-200">{Number(row.failure_rate_24h || 0).toFixed(1)}%</td>
                                         <td className="px-3 py-2 text-gray-200">{row.SLA_target_minutes}m</td>
                                         <td className="px-3 py-2">
-                                            {row.SLA_breached ? (
+                                            {row.state_drift_suspected ? (
+                                                <span className="inline-flex rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-200">
+                                                    Drift
+                                                </span>
+                                            ) : row.SLA_breached ? (
                                                 <span className="inline-flex rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1 text-[11px] text-red-200">
                                                     Breached
                                                 </span>
@@ -259,7 +298,7 @@ export default function AgentsPage() {
                                 ))}
                             {!jobsSlaLoading && queueSlaRows.length === 0 && (
                                 <tr>
-                                    <td colSpan={8} className="px-3 py-4 text-center text-gray-500">
+                                    <td colSpan={9} className="px-3 py-4 text-center text-gray-500">
                                         لا توجد بيانات SLA حالياً.
                                     </td>
                                 </tr>

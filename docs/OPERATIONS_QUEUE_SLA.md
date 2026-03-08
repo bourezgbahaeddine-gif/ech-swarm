@@ -32,7 +32,10 @@ Response shape:
       "mean_runtime": 2.1,
       "failure_rate_24h": 4.2,
       "SLA_target_minutes": 10,
-      "SLA_breached": false
+      "SLA_breached": false,
+      "active_running_jobs": 1,
+      "active_queued_jobs": 11,
+      "state_drift_suspected": false
     }
   ]
 }
@@ -40,11 +43,16 @@ Response shape:
 
 Metric semantics:
 - `depth`: current Redis queue length.
-- `oldest_task_age`: minutes for the oldest active task (`queued`/`running`).
+- `oldest_task_age`: minutes for actionable backlog age.
+  - When `depth > 0`: based on oldest queued/running active task.
+  - When `depth == 0`: only running-age is considered; queued-age is ignored to avoid stale DB false positives.
 - `mean_runtime`: average task runtime in minutes over lookback window.
 - `failure_rate_24h`: percentage of failed/dead-lettered tasks over finished tasks in lookback window.
 - `SLA_target_minutes`: configured target per queue.
 - `SLA_breached`: true when any breach rule triggers (depth pressure, age/runtime over target, or high failure rate).
+- `active_running_jobs`: count of `running` jobs in DB.
+- `active_queued_jobs`: count of `queued` jobs in DB.
+- `state_drift_suspected`: `true` when DB shows queued jobs while Redis depth is zero (candidate stale state).
 
 ## Standardized 429 Backpressure Payload
 
