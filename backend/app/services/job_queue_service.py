@@ -295,7 +295,15 @@ class JobQueueService:
         runtime_rows = await db.execute(
             select(
                 JobRun.queue_name,
-                func.avg(func.extract("epoch", JobRun.finished_at - JobRun.started_at)).label("avg_runtime_seconds"),
+                func.avg(
+                    case(
+                        (
+                            JobRun.status == "completed",
+                            func.extract("epoch", JobRun.finished_at - JobRun.started_at),
+                        ),
+                        else_=None,
+                    )
+                ).label("avg_runtime_seconds"),
                 func.count(JobRun.id).label("finished_count"),
                 func.sum(case((JobRun.status.in_(("failed", "dead_lettered")), 1), else_=0)).label("failed_count"),
             )
