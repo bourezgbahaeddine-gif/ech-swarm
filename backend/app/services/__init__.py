@@ -2,6 +2,7 @@
 
 __all__ = [
     "ai_service",
+    "embedding_service",
     "cache_service",
     "notification_service",
     "article_index_service",
@@ -18,6 +19,10 @@ def __getattr__(name: str):
         from app.services.ai_service import ai_service
 
         return ai_service
+    if name == "embedding_service":
+        from app.services.embedding_service import embedding_service
+
+        return embedding_service
     if name == "cache_service":
         from app.services.cache_service import cache_service
 

@@ -15,10 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.domain.news.state_machine import can_transition
-from app.models import Article, EditorialDraft, NewsStatus
+from app.models import Article, ArticleVector, EditorialDraft, NewsStatus
 from app.services.article_index_service import article_index_service
 from app.services.ai_service import ai_service
 from app.services.cache_service import cache_service
+from app.services.embedding_service import embedding_service
 
 logger = get_logger("agent.scribe")
 settings = get_settings()
@@ -97,9 +98,12 @@ class ScribeAgent:
         try:
             content = article.original_content or article.summary or article.original_title
             category = article.category.value if article.category else "general"
+            support_articles = await self._retrieve_supporting_articles(db, article.id, content)
+            context_block = self._format_supporting_context(support_articles)
+            content_with_context = f"{context_block}\n\n{content}" if context_block else content
 
             result_data = await ai_service.rewrite_article(
-                content=content,
+                content=content_with_context,
                 category=category,
                 style="echorouk",
                 route_context={"queue_name": "ai_scribe", "urgency": self._route_urgency(article)},
@@ -165,6 +169,7 @@ class ScribeAgent:
                 article_id=article.id,
                 work_id=draft.work_id,
                 version=draft.version,
+                supporting_context=len(support_articles),
             )
 
             return {
@@ -180,6 +185,71 @@ class ScribeAgent:
         except Exception as e:
             logger.error("scribe_error", article_id=article_id, error=str(e))
             return {"error": str(e)}
+
+    async def _retrieve_supporting_articles(
+        self,
+        db: AsyncSession,
+        article_id: int,
+        text: str,
+        limit: int = 3,
+    ) -> list[dict]:
+        if not text:
+            return []
+
+        query_vec, _ = await embedding_service.embed_query(text[:1200])
+        stmt = (
+            select(
+                Article.id,
+                Article.title_ar,
+                Article.original_title,
+                Article.summary,
+                Article.source_name,
+                Article.original_url,
+                Article.category,
+                ArticleVector.embedding.cosine_distance(query_vec).label("dist"),
+            )
+            .join(ArticleVector, ArticleVector.article_id == Article.id)
+            .where(
+                ArticleVector.vector_type == "summary",
+                Article.status != NewsStatus.ARCHIVED,
+                Article.id != article_id,
+            )
+            .order_by(ArticleVector.embedding.cosine_distance(query_vec))
+            .limit(limit * 4)
+        )
+        rows = await db.execute(stmt)
+        candidates = {}
+        for row in rows.fetchall():
+            article_row = row._mapping
+            aid = int(article_row["id"])
+            if aid in candidates:
+                continue
+            candidates[aid] = {
+                "id": aid,
+                "title": article_row["title_ar"] or article_row["original_title"],
+                "summary": article_row["summary"] or "",
+                "source": article_row["source_name"],
+                "url": article_row["original_url"],
+                "category": article_row["category"],
+            }
+            if len(candidates) >= limit:
+                break
+        return list(candidates.values())
+
+    @staticmethod
+    def _format_supporting_context(articles: list[dict]) -> str:
+        if not articles:
+            return ""
+        lines = ["Supporting context:"]
+        for idx, art in enumerate(articles, start=1):
+            summary = art["summary"][:200].strip()
+            title = art["title"] or "untitled"
+            source = art["source"] or "publisher"
+            url = art["url"] or ""
+            lines.append(f"{idx}. {title} ({source}) - {url}")
+            if summary:
+                lines.append(f"   {summary}")
+        return "\n".join(lines)
 
     async def batch_write(self, db: AsyncSession, limit: int = 10) -> dict:
         """Batch write all approved articles that do not have generated drafts."""
