@@ -87,6 +87,7 @@ class Settings(BaseSettings):
     )
     echorouk_archive_request_timeout_seconds: int = 20
     echorouk_archive_delay_ms: int = 1200
+    echorouk_archive_stale_processing_minutes: int = 60
     echorouk_archive_max_listing_pages_per_run: int = 3
     echorouk_archive_max_articles_per_run: int = 12
     echorouk_archive_max_listing_depth: int = 2500

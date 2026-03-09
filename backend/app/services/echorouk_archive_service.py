@@ -6,7 +6,7 @@ import json
 import re
 import ssl
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import urljoin, urlparse, urlunparse
@@ -15,7 +15,7 @@ import aiohttp
 import certifi
 import trafilatura
 from bs4 import BeautifulSoup
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -68,6 +68,13 @@ NON_ARTICLE_PREFIXES = {
     "podcast",
     "search",
     "echorouk-yawmi",
+    "ads",
+    "cdn-cgi",
+    "echorouk-arabi",
+    "echorouk-news",
+    "echorouk-tv",
+    "jawahir",
+    "miscellaneous",
 }
 ASSET_SUFFIXES = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".pdf", ".mp4", ".mp3")
 
@@ -220,6 +227,8 @@ def _listing_candidate(url: str) -> bool:
     segments = _path_segments(canonical)
     if not segments:
         return True
+    if segments[0] in NON_ARTICLE_PREFIXES:
+        return False
     if len(segments) == 1 and segments[0] in SECTION_CATEGORY_MAP:
         return True
     if "page" in segments:
@@ -401,6 +410,9 @@ class EchoroukArchiveService:
         article_pages: int | None = None,
     ) -> dict[str, Any]:
         state = await self.ensure_state(db)
+        reset_count = await self._reset_stale_processing(db, state)
+        if reset_count:
+            logger.warning("echorouk_archive_stale_processing_reset", reset_count=reset_count)
         source = await self._ensure_source(db)
         listing_limit = max(1, int(listing_pages or settings.echorouk_archive_max_listing_pages_per_run))
         article_limit = max(1, int(article_pages or settings.echorouk_archive_max_articles_per_run))
@@ -655,6 +667,28 @@ class EchoroukArchiveService:
             item.updated_at = now
         await db.commit()
         return items
+
+    async def _reset_stale_processing(self, db: AsyncSession, state: ArchiveCrawlState) -> int:
+        minutes = int(getattr(settings, "echorouk_archive_stale_processing_minutes", 60))
+        if minutes <= 0:
+            return 0
+        cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+        result = await db.execute(
+            update(ArchiveCrawlUrl)
+            .where(
+                ArchiveCrawlUrl.state_id == state.id,
+                ArchiveCrawlUrl.status == "processing",
+                ArchiveCrawlUrl.updated_at < cutoff,
+            )
+            .values(
+                status="discovered",
+                last_error="stale_processing_reset",
+                updated_at=datetime.utcnow(),
+            )
+            .execution_options(synchronize_session=False)
+        )
+        await db.commit()
+        return int(result.rowcount or 0)
 
     async def _enqueue_url(
         self,
