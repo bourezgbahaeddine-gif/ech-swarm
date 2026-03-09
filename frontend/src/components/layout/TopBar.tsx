@@ -414,6 +414,7 @@ function PublishedMonitorDrawer({
     onClose: () => void;
     onRefresh: () => Promise<void>;
 }) {
+    const [expandedReport, setExpandedReport] = useState<string | null>(null);
     const { data, isLoading, refetch } = useQuery({
         queryKey: ['published-monitor-latest'],
         queryFn: () => dashboardApi.latestPublishedMonitor({ refresh_if_empty: true, limit: 12 }),
@@ -536,6 +537,22 @@ function PublishedMonitorDrawer({
                                     )}
                                     {item.suggestions.length > 0 && (
                                         <p className="text-xs text-gray-300">اقتراح: {item.suggestions[0]}</p>
+                                    )}
+                                    {item.review_report && (
+                                        <button
+                                            onClick={() => {
+                                                const key = item.url || `${idx}`;
+                                                setExpandedReport(expandedReport === key ? null : key);
+                                            }}
+                                            className="text-xs text-cyan-200 hover:text-cyan-100 underline"
+                                        >
+                                            {expandedReport === (item.url || `${idx}`) ? 'إخفاء التقرير' : 'عرض التقرير'}
+                                        </button>
+                                    )}
+                                    {item.review_report && expandedReport === (item.url || `${idx}`) && (
+                                        <div className="rounded-lg border border-white/10 bg-white/[0.02] p-2 text-xs text-gray-200 whitespace-pre-wrap">
+                                            {cleanServiceOutput(item.review_report)}
+                                        </div>
                                     )}
                                 </div>
                             ))}

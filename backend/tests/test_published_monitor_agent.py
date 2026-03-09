@@ -21,7 +21,7 @@ def test_grade_thresholds():
     assert agent._grade(95) == "ممتاز"
     assert agent._grade(80) == "جيد"
     assert agent._grade(65) == "مقبول"
-    assert agent._grade(40) == "ضعيف"
+    assert agent._grade(40) == "يحتاج تدخلاً عاجلاً"
 
 
 def test_feed_dedup_removes_same_topic_variants():

@@ -54,33 +54,211 @@ WHEN_HINTS = {"اليوم", "أمس", "غدا", "هذا الأسبوع", "هذا
 
 STRONG_KEYWORDS = {"بيان", "قرار", "رسمي", "إحصائيات", "وثيقة", "مصدر", "أرقام", "تأكيد"}
 
-EDITORIAL_QUALITY_PROMPT = """
-أنت مدقق جودة تحريرية وإملائية محترف لبوابة أخبار عربية.
-قيّم المادة التالية دون مجاملة وبمعايير غرفة أخبار احترافية.
+POST_PUBLISH_REVIEW_PROMPT = """
+أنت وكيل مراجعة تحريرية ولغوية يعمل بعد نشر المحتوى على الموقع الإخباري.
+مهمتك هي تحليل المادة المنشورة تحليلاً نقدياً ومحايداً من الناحية التحريرية واللغوية،
+ثم إنتاج تقرير مختصر وواضح يساعد فريق التحرير على اتخاذ قرار سريع.
 
-المطلوب:
-1) رصد أخطاء إملائية/نحوية أو صياغات غير صحفية.
-2) رصد مشاكل مهنية: تهويل، غموض، ضعف إسناد، قفزات استنتاجية.
-3) تقديم اقتراحات تحريرية عملية وقابلة للتنفيذ فورًا.
-4) إعطاء تعديل رقمي على الدرجة score_adjustment من -15 إلى +5 فقط.
+## الهدف
+راجع المحتوى المنشور باعتبارك \"مدقق جودة بعد النشر\"، لا كاتباً بديلاً.
+لا تعِد كتابة المقال بالكامل، ولا تغيّر أسلوب الكاتب، ولا تولّد فقرات جديدة نيابة عنه.
+دورك هو:
+1) اكتشاف المشكلات التحريرية واللغوية.
+2) تصنيفها حسب الخطورة.
+3) شرح أثرها على الفهم والمصداقية وتجربة القراءة.
+4) اقتراح تصحيح موضعي مختصر عند الحاجة.
+5) تلخيص النتيجة في تقرير بسيط وسريع القراءة.
 
-أعد JSON فقط بالشكل:
-{
-  "issues": ["..."],
-  "suggestions": ["..."],
-  "score_adjustment": -3,
-  "checks": {
-    "spelling": 0,
-    "style": 0,
-    "structure": 0,
-    "accuracy": 0
-  }
-}
+## نطاق المراجعة
+حلّل المادة وفق المحاور التالية:
 
-قواعد صارمة:
-- لا تضف أي نص خارج JSON.
-- إذا لم تكتشف ملاحظة في محور معين، اتركه بدرجة عالية بدون اختلاق مشاكل.
-- ركّز على جودة التحرير الصحفي الفعلي، لا على الانطباعات العامة.
+### أولاً: المراجعة التحريرية
+افحص:
+- هل العنوان واضح ومباشر ويفصح عن جوهر الخبر؟
+- هل العنوان يطابق متن المادة ولا يبالغ أو يضلل؟
+- هل المقدمة تلخص الفكرة الأساسية بسرعة؟
+- هل المادة تجيب عن الأسئلة الأساسية بوضوح؟
+- هل ترتيب الفقرات منطقي؟
+- هل توجد حشو، تكرار، مطّ، أو تفاصيل لا تخدم الفكرة؟
+- هل توجد صياغات إنشائية أو دعائية أو منحازة؟
+- هل النبرة خبرية/تفسيرية منضبطة أم عاطفية ومبالغ فيها؟
+- هل هناك تعميمات غير مسندة؟
+- هل توجد قفزات منطقية أو فقرات غير مترابطة؟
+- هل الخلاصة أو الزاوية التحريرية مفهومة؟
+- هل توجد أجزاء تحتاج اختصاراً أو إعادة ترتيب؟
+
+### ثانياً: المراجعة اللغوية
+افحص:
+- الأخطاء النحوية.
+- الأخطاء الإملائية.
+- أخطاء الترقيم.
+- ضعف الصياغة.
+- الركاكة أو الغموض.
+- التكرار اللفظي.
+- الكلمات الزائدة.
+- العبارات الصحفية غير المفضلة.
+- المطابقة بين العدد والمعدود.
+- سلامة الإضافة والتعريف.
+- سلامة أدوات الربط والعطف.
+- استخدام الأفعال المباشرة بدل التراكيب الثقيلة.
+
+طبّق خصوصاً القواعد التالية:
+- فضّل الفعل المباشر على \"قام بـ\".
+- تجنّب \"تمّ + المصدر\" عندما توجد صياغة عربية أقوى.
+- استخدم \"أكد أن\" لا \"أكد بأن\".
+- استخدم \"دعا إلى المشاركة\" لا \"دعا إلى ضرورة المشاركة\".
+- راقب كتابة الأعداد والمعدود.
+- راقب العنوان: يجب أن يكون واضحاً لا مبهماً، وألا يخفي عناصر الخبر الأساسية بغرض التشويق.
+- نبّه إلى الأخبار أو الزوايا التي تبدو ضعيفة القيمة التحريرية أو غير جديرة بالنشر إذا ظهر ذلك من النص.
+
+### ثالثاً: وضوح العرض وتجربة القراءة
+افحص:
+- طول الفقرات.
+- قابلية المسح البصري.
+- وضوح التقسيمات.
+- سهولة القراءة على الهاتف.
+- كثافة الجمل.
+- الحاجة إلى قوائم أو تقسيمات أو فواصل.
+- وجود جمل طويلة جداً أو متداخلة تربك القارئ.
+
+### رابعاً: الاتساق التحريري
+افحص:
+- هل العنوان والوصف والافتتاحية والجسم في انسجام؟
+- هل توجد معلومة في العنوان لا يدعمها المتن؟
+- هل توجد زاوية في النص لا يعبّر عنها العنوان؟
+- هل الاستنتاجات مدعومة بما ورد في المادة نفسها؟
+- هل هناك أحكام أكبر من المعطيات المذكورة؟
+
+## منهجية العمل
+اتبع الخطوات التالية بالترتيب:
+1) اقرأ المادة كاملة.
+2) استخرج الفكرة الرئيسية.
+3) قيّم العنوان مقارنة بالمحتوى.
+4) حلّل التسلسل المنطقي للفقرات.
+5) التقط الأخطاء اللغوية والتحريرية.
+6) صنّف كل ملاحظة حسب النوع:
+   - لغوية
+   - تحريرية
+   - عنوان
+   - أسلوب
+   - وضوح
+   - ترابط
+7) حدّد درجة الخطورة:
+   - حرجة: تؤثر على المعنى أو المصداقية أو قد تسبب سوء فهم كبير.
+   - متوسطة: تضعف الجودة والوضوح لكنها لا تغيّر المعنى الجوهري.
+   - طفيفة: تحسينات أسلوبية أو شكلية.
+8) عند رصد مشكلة، قدّم:
+   - النص المقتبس القصير فقط
+   - سبب المشكلة
+   - اقتراح تصحيح مختصر جداً
+9) لا تقترح إعادة كتابة شاملة إلا إذا كان النص ضعيفاً جداً.
+10) إن لم توجد مشكلة في جانب معيّن، صرّح بذلك بوضوح.
+
+## قواعد صارمة
+- لا تخترع معلومات غير موجودة في النص.
+- لا تتحقق من الوقائع الخارجية إلا إذا طُلب منك ذلك صراحة.
+- لا تفترض نيات الكاتب.
+- لا تستخدم أحكاماً مبهمة مثل \"النص غير جيد\" دون تفسير.
+- لا تكتفِ بسرد الأخطاء؛ اشرح أثرها على الفهم والقراءة.
+- لا تعِد كتابة المقال كاملاً.
+- التزم بالمراجعة لا بالإنشاء.
+- كن دقيقاً، مختصراً، ومهنياً.
+- إذا كانت المادة سليمة إجمالاً، قل ذلك بوضوح مع ذكر التحسينات المحدودة فقط.
+- إذا كانت المشكلة في العنوان وحده أو في البنية فقط، لا تبالغ في تقييم بقية الأجزاء.
+
+## مقياس التقييم
+أعطِ في البداية تقييماً رقمياً من 100 موزعاً كالتالي:
+- العنوان: /15
+- البناء التحريري: /25
+- اللغة والإملاء والنحو: /25
+- الأسلوب والوضوح: /20
+- قابلية القراءة والمسح: /15
+
+ثم احسب:
+- التقييم الإجمالي: /100
+- الحكم النهائي:
+  - ممتاز
+  - جيد
+  - مقبول
+  - ضعيف
+  - يحتاج تدخلاً عاجلاً
+
+## شكل التقرير
+أخرج النتيجة بهذا القالب بالضبط:
+
+### تقرير المراجعة بعد النشر
+
+**التقييم الإجمالي:** [رقم]/100  
+**الحكم النهائي:** [ممتاز/جيد/مقبول/ضعيف/يحتاج تدخلاً عاجلاً]
+
+**1) ملخص تنفيذي**
+- اكتب 3 إلى 5 أسطر تلخص حالة المادة.
+- اذكر هل المشكلة الأكبر: عنوان / لغة / ترابط / أسلوب / وضوح.
+
+**2) التقييم التفصيلي**
+- العنوان: [رقم]/15 — [ملاحظة مختصرة]
+- البناء التحريري: [رقم]/25 — [ملاحظة مختصرة]
+- اللغة والإملاء والنحو: [رقم]/25 — [ملاحظة مختصرة]
+- الأسلوب والوضوح: [رقم]/20 — [ملاحظة مختصرة]
+- قابلية القراءة والمسح: [رقم]/15 — [ملاحظة مختصرة]
+
+**3) أهم الملاحظات**
+اعرض الملاحظات في جدول نصي مختصر بهذا الشكل:
+- [الخطورة] [النوع] | المقتطف: \"...\"
+  المشكلة: ...
+  التصحيح المقترح: ...
+
+يجب ترتيب الملاحظات من الأهم إلى الأقل أهمية.
+لا تذكر أكثر من 10 ملاحظات إلا إذا كان النص مليئاً بالأخطاء.
+
+**4) نقاط القوة**
+اذكر من 2 إلى 4 نقاط قوة حقيقية إن وجدت.
+
+**5) توصية النشر**
+اختر واحداً فقط:
+- يبقى كما هو
+- يحتاج تعديلات طفيفة
+- يحتاج مراجعة متوسطة
+- يحتاج إعادة تحرير قبل الإبقاء عليه
+
+**6) أولوية المعالجة**
+- عاجل الآن
+- اليوم
+- لاحقاً
+
+## أسلوب التقرير
+- عربي واضح ومهني.
+- جمل قصيرة.
+- لا تستخدم فقرات طويلة.
+- اجعل التقرير قابلاً للمسح السريع.
+- لا تستخدم زخرفة لغوية.
+- لا تكرر الفكرة نفسها.
+
+## مدخلات متوقعة
+قد تتلقى:
+- العنوان
+- متن المقال
+- الوصف
+- التصنيف
+- رابط المقال
+- تاريخ النشر
+
+إذا توفر الرابط أو البيانات الوصفية، استخدمها فقط لتحسين الفهم التحريري،
+لا لاختراع معلومات غير موجودة.
+
+## مخرج مختصر جداً عند الحاجة
+إذا طُلب منك \"نسخة سريعة\"، أخرج فقط:
+- التقييم الإجمالي
+- 3 مشاكل رئيسية
+- التوصية النهائية
+
+اعتبر أن معيارك التحريري الداخلي يعتمد على:
+- وضوح العنوان وإفصاحه عن عناصر الخبر.
+- الاقتصاد اللغوي وتجنب الصيغ الثقيلة.
+- النبرة الخبرية المحايدة.
+- تجنب \"قام بـ\" و\"تمّ + المصدر\" والصيغ المترهلة.
+- رصد الأخبار ضعيفة القيمة التحريرية أو العناوين المبهمة.
+- إعطاء الأولوية للوضوح والاختصار وسهولة القراءة على الهاتف.
 """
 
 
@@ -251,54 +429,172 @@ class PublishedContentMonitorAgent:
             if len(target) >= max_items:
                 return
 
-    async def _llm_editorial_review(
+    @staticmethod
+    def _clean_llm_report(value: str) -> str:
+        if not value:
+            return ""
+        cleaned = re.sub(r"```[\s\S]*?```", "", value or "")
+        cleaned = re.sub(r"\*\*(.*?)\*\*", r"\1", cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+        marker = "### تقرير المراجعة بعد النشر"
+        start = cleaned.find(marker)
+        if start != -1:
+            cleaned = cleaned[start:]
+        return cleaned.strip()
+
+    @staticmethod
+    def _extract_report_section(text: str, start_label: str, end_label: str) -> str:
+        if not text:
+            return ""
+        if not end_label:
+            pattern = re.escape(start_label) + r"(.*)$"
+        else:
+            pattern = re.escape(start_label) + r"(.*?)(?=" + re.escape(end_label) + r"|$)"
+        match = re.search(pattern, text, flags=re.S)
+        if not match:
+            return ""
+        return match.group(1).strip()
+
+    @staticmethod
+    def _parse_review_breakdown(section: str) -> dict[str, dict[str, Any]]:
+        breakdown: dict[str, dict[str, Any]] = {}
+        for line in (section or "").splitlines():
+            line = line.strip()
+            if not line.startswith("-"):
+                continue
+            match = re.search(r"-\s*([^:]+):\s*(\d{1,3})\s*/\s*(\d{1,3})\s*[—-]\s*(.+)$", line)
+            if not match:
+                continue
+            label = match.group(1).strip()
+            score = int(match.group(2))
+            total = int(match.group(3))
+            note = match.group(4).strip()
+            breakdown[label] = {"score": score, "total": total, "note": note}
+        return breakdown
+
+    @staticmethod
+    def _parse_review_issues(section: str) -> tuple[list[str], list[str]]:
+        issues: list[str] = []
+        suggestions: list[str] = []
+        if not section:
+            return issues, suggestions
+
+        blocks = re.split(r"\n-\s*\[", section)
+        for block in blocks:
+            if not block.strip():
+                continue
+            normalized = block.strip()
+            if not normalized.startswith("["):
+                normalized = "[" + normalized
+            lines = [line.strip() for line in normalized.splitlines() if line.strip()]
+            if not lines:
+                continue
+            header = lines[0]
+            match = re.match(r"\[(?P<severity>[^\]]+)\]\s*\[(?P<typ>[^\]]+)\]\s*\|\s*المقتطف:\s*\"?(?P<snippet>.*?)\"?$", header)
+            severity = match.group("severity").strip() if match else ""
+            issue_type = match.group("typ").strip() if match else ""
+            snippet = match.group("snippet").strip() if match else ""
+
+            problem = ""
+            correction = ""
+            for line in lines[1:]:
+                if line.startswith("المشكلة:"):
+                    problem = line.split(":", 1)[1].strip()
+                elif line.startswith("التصحيح المقترح:"):
+                    correction = line.split(":", 1)[1].strip()
+
+            issue_text = problem or header
+            if severity or issue_type:
+                issue_text = f"[{severity}] [{issue_type}] {issue_text}".strip()
+            if snippet and snippet not in issue_text:
+                issue_text = f"{issue_text} | المقتطف: {snippet}"
+            issues.append(issue_text.strip())
+            if correction:
+                suggestions.append(correction)
+            if len(issues) >= 10:
+                break
+
+        return issues, suggestions
+
+    @classmethod
+    def _parse_review_report(cls, report: str) -> dict[str, Any]:
+        cleaned = cls._clean_llm_report(report)
+        if not cleaned:
+            return {}
+
+        score_match = re.search(r"التقييم الإجمالي\s*[:：]?\s*(\d{1,3})\s*/\s*100", cleaned)
+        verdict_match = re.search(r"الحكم النهائي\s*[:：]?\s*([^\n]+)", cleaned)
+        score_value = int(score_match.group(1)) if score_match else None
+        verdict = verdict_match.group(1).strip() if verdict_match else ""
+        verdict = re.sub(r"[\\*]+", "", verdict).strip()
+
+        details_section = cls._extract_report_section(cleaned, "2) التقييم التفصيلي", "3) أهم الملاحظات")
+        issues_section = cls._extract_report_section(cleaned, "3) أهم الملاحظات", "4) نقاط القوة")
+        recommendation_section = cls._extract_report_section(cleaned, "5) توصية النشر", "6) أولوية المعالجة")
+        priority_section = cls._extract_report_section(cleaned, "6) أولوية المعالجة", "")
+
+        issues, suggestions = cls._parse_review_issues(issues_section)
+        breakdown = cls._parse_review_breakdown(details_section)
+
+        recommendation = ""
+        for line in recommendation_section.splitlines():
+            line = line.strip("- ").strip()
+            if line:
+                recommendation = line
+                break
+
+        priority = ""
+        for line in priority_section.splitlines():
+            line = line.strip("- ").strip()
+            if line:
+                priority = line
+                break
+
+        return {
+            "report": cleaned,
+            "score": score_value,
+            "verdict": verdict,
+            "issues": issues,
+            "suggestions": suggestions,
+            "breakdown": breakdown,
+            "recommendation": recommendation,
+            "priority": priority,
+        }
+
+    async def _llm_post_publish_review(
         self,
         *,
         title: str,
         summary: str,
         body_text: str,
         first_chunk: str,
+        url: str,
+        published_at: str,
+        category: str | None,
     ) -> dict[str, Any] | None:
         prompt = (
-            f"{EDITORIAL_QUALITY_PROMPT}\n\n"
-            f"العنوان: {title[:240]}\n"
-            f"الملخص: {summary[:700]}\n"
-            f"الفقرة الافتتاحية: {first_chunk[:700]}\n"
-            f"مقتطف من المتن: {(body_text or summary)[:1800]}\n"
+            f"{POST_PUBLISH_REVIEW_PROMPT}\n\n"
+            f"## مدخلات المادة\n"
+            f"- العنوان: {title[:240]}\n"
+            f"- الوصف: {summary[:700]}\n"
+            f"- التصنيف: {(category or 'غير متاح')}\n"
+            f"- رابط المقال: {url or 'غير متاح'}\n"
+            f"- تاريخ النشر: {published_at or 'غير متاح'}\n"
+            f"- الفقرة الافتتاحية: {first_chunk[:700]}\n"
+            f"- مقتطف من المتن: {(body_text or summary)[:2000]}\n"
         )
         try:
-            data = await ai_service.generate_json(prompt)
+            raw_report = await ai_service.generate_text(prompt, route_context={"queue_name": "ai_quality", "urgency": "normal"})
         except Exception as exc:  # noqa: BLE001
             logger.warning("published_monitor_llm_error", error=str(exc))
             return None
-
-        if not isinstance(data, dict):
+        report = self._clean_llm_report(raw_report)
+        if not report:
             return None
-        issues = [str(x).strip() for x in (data.get("issues") or []) if str(x).strip()]
-        suggestions = [str(x).strip() for x in (data.get("suggestions") or []) if str(x).strip()]
-        if not issues and not suggestions:
+        parsed = self._parse_review_report(report)
+        if not parsed:
             return None
-
-        try:
-            score_adjustment = int(float(data.get("score_adjustment", 0)))
-        except Exception:
-            score_adjustment = 0
-        score_adjustment = max(-15, min(5, score_adjustment))
-
-        checks_raw = data.get("checks") if isinstance(data.get("checks"), dict) else {}
-        checks: dict[str, int] = {}
-        for key in ("spelling", "style", "structure", "accuracy"):
-            try:
-                checks[key] = max(0, min(100, int(float(checks_raw.get(key, 0)))))
-            except Exception:
-                checks[key] = 0
-
-        return {
-            "issues": issues[:5],
-            "suggestions": suggestions[:5],
-            "score_adjustment": score_adjustment,
-            "checks": checks,
-        }
+        return parsed
 
     async def _audit_entry(
         self,
@@ -313,6 +609,12 @@ class PublishedContentMonitorAgent:
         score = 100
         issues: list[str] = []
         suggestions: list[str] = []
+        review_report = ""
+        review_verdict = ""
+        review_breakdown: dict[str, Any] | None = None
+        review_recommendation = ""
+        review_priority = ""
+        grade_override: str | None = None
 
         title_clean = (title or "").strip()
         summary_clean = (summary or "").strip()
@@ -366,20 +668,36 @@ class PublishedContentMonitorAgent:
 
         llm_checks: dict[str, int] | None = None
         if use_llm and (title_clean or text):
-            llm_review = await self._llm_editorial_review(
+            llm_review = await self._llm_post_publish_review(
                 title=title_clean,
                 summary=summary_clean,
                 body_text=body_text,
                 first_chunk=first_chunk,
+                url=url,
+                published_at=published_at,
+                category=None,
             )
             if llm_review:
-                self._extend_unique(issues, llm_review.get("issues", []), max_items=8)
-                self._extend_unique(suggestions, llm_review.get("suggestions", []), max_items=8)
-                score += int(llm_review.get("score_adjustment", 0))
-                llm_checks = llm_review.get("checks")
+                review_report = str(llm_review.get("report") or "")
+                review_verdict = str(llm_review.get("verdict") or "")
+                review_breakdown = llm_review.get("breakdown") if isinstance(llm_review.get("breakdown"), dict) else None
+                review_recommendation = str(llm_review.get("recommendation") or "")
+                review_priority = str(llm_review.get("priority") or "")
+
+                if llm_review.get("score") is not None:
+                    try:
+                        score = int(llm_review.get("score"))
+                    except Exception:
+                        pass
+                if review_verdict:
+                    grade_override = review_verdict
+                issues = []
+                self._extend_unique(issues, llm_review.get("issues", []), max_items=10)
+                suggestions = []
+                self._extend_unique(suggestions, llm_review.get("suggestions", []), max_items=10)
 
         score = max(0, min(100, score))
-        grade = self._grade(score)
+        grade = grade_override or self._grade(score)
 
         metrics: dict[str, Any] = {
             "title_length": title_len,
@@ -390,6 +708,12 @@ class PublishedContentMonitorAgent:
         }
         if llm_checks:
             metrics["llm_checks"] = llm_checks
+        if review_breakdown:
+            metrics["review_breakdown"] = review_breakdown
+        if review_recommendation:
+            metrics["review_recommendation"] = review_recommendation
+        if review_priority:
+            metrics["review_priority"] = review_priority
 
         suggestions = self._practical_suggestions(issues, suggestions)
 
@@ -402,6 +726,10 @@ class PublishedContentMonitorAgent:
             "issues": issues,
             "suggestions": suggestions,
             "metrics": metrics,
+            "review_report": review_report or None,
+            "review_verdict": review_verdict or None,
+            "review_recommendation": review_recommendation or None,
+            "review_priority": review_priority or None,
         }
 
     @staticmethod
@@ -474,7 +802,9 @@ class PublishedContentMonitorAgent:
             return "جيد"
         if score >= 60:
             return "مقبول"
-        return "ضعيف"
+        if score >= 45:
+            return "ضعيف"
+        return "يحتاج تدخلاً عاجلاً"
 
 
 published_content_monitor_agent = PublishedContentMonitorAgent()
