@@ -365,6 +365,8 @@ function WorkspaceDraftsPageContent() {
     const [guideType, setGuideType] = useState<GuideType>('welcome');
     const [guideAction, setGuideAction] = useState<ActionId | null>(null);
     const pendingActionRef = useRef<null | (() => void)>(null);
+    const [reviewExpanded, setReviewExpanded] = useState(false);
+    const [explainExpanded, setExplainExpanded] = useState(false);
     const lastSavedRef = useRef<{ title: string; body: string }>({ title: '', body: '' });
     const visibleTabs = useMemo(() => TABS.filter((tab) => (tab.id === 'msi' ? isDirector : true)), [isDirector]);
 
@@ -1041,6 +1043,15 @@ function WorkspaceDraftsPageContent() {
         }));
     }, [decisionModel]);
 
+    const reviewCards = useMemo(
+        () => (reviewExpanded ? professionalReview : professionalReview.slice(0, 4)),
+        [reviewExpanded, professionalReview],
+    );
+    const explainCards = useMemo(
+        () => (explainExpanded ? explanationItems : explanationItems.slice(0, 5)),
+        [explainExpanded, explanationItems],
+    );
+
     const runAudienceSimulation = useMutation({
         mutationFn: async () => {
             const headline = cleanText(title || context?.article?.title_ar || context?.article?.original_title || '');
@@ -1394,19 +1405,19 @@ function WorkspaceDraftsPageContent() {
                             {section.items.length === 0 ? (
                                 <p className="text-[11px] text-gray-500">{section.empty}</p>
                             ) : (
-                                section.items.slice(0, 4).map((item) => {
+                                section.items.slice(0, 3).map((item) => {
                                     const styles = severityStyles(item.severity);
                                     const actionKey = item.action;
                                     const actionHandler = actionKey ? decisionActionHandlers[actionKey] : undefined;
                                     return (
                                         <div key={item.id} className={cn('rounded-lg border p-2 space-y-1', styles.border)}>
                                             <div className="flex items-center justify-between gap-2">
-                                                <p className="text-[11px] text-white">{item.title}</p>
+                                            <p className="text-[11px] text-white">{item.title}</p>
                                                 <span className={cn('px-2 py-0.5 rounded text-[10px]', styles.badge)}>
                                                     {severityLabel(item.severity)}
                                                 </span>
                                             </div>
-                                            <p className="text-[11px] text-gray-200">{item.reason}</p>
+                                            <p className="text-[11px] text-gray-200 line-clamp-2">{item.reason}</p>
                                             <p className="text-[10px] text-gray-400">الأثر: {item.impact}</p>
                                             <p className="text-[10px] text-gray-500">القاعدة: {item.rule}</p>
                                             <div className="flex items-center justify-between">
@@ -1448,8 +1459,8 @@ function WorkspaceDraftsPageContent() {
                         <h2 className="text-sm text-white font-semibold">مراجعة احترافية</h2>
                         <p className="text-[11px] text-gray-400">تلخيص سريع لمخرجات الجودة والتحقق والتهيئة قبل الاعتماد.</p>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-                        {professionalReview.map((card) => {
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                        {reviewCards.map((card) => {
                             const styles = severityStyles(card.severity);
                             const actionHandler = card.action ? decisionActionHandlers[card.action] : undefined;
                             return (
@@ -1461,7 +1472,7 @@ function WorkspaceDraftsPageContent() {
                                         </span>
                                     </div>
                                     <p className="text-sm text-gray-100">{card.value}</p>
-                                    <p className="text-[10px] text-gray-400">{card.hint}</p>
+                                    <p className="text-[10px] text-gray-400 line-clamp-2">{card.hint}</p>
                                     {actionHandler && (
                                         <button
                                             onClick={() => actionHandler()}
@@ -1474,6 +1485,16 @@ function WorkspaceDraftsPageContent() {
                             );
                         })}
                     </div>
+                    {professionalReview.length > 4 && (
+                        <div className="flex justify-end">
+                            <button
+                                onClick={() => setReviewExpanded((prev) => !prev)}
+                                className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-gray-200"
+                            >
+                                {reviewExpanded ? 'عرض أقل' : 'عرض المزيد'}
+                            </button>
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -1483,9 +1504,9 @@ function WorkspaceDraftsPageContent() {
                         <h2 className="text-sm text-white font-semibold">ثقة وتفسير</h2>
                         <p className="text-[11px] text-gray-400">لماذا ظهرت هذه الملاحظات؟ وما أثرها التحريري؟</p>
                     </div>
-                    {explanationItems.length ? (
+                    {explainCards.length ? (
                         <div className="space-y-2">
-                            {explanationItems.map((item) => {
+                            {explainCards.map((item) => {
                                 const styles = severityStyles(item.severity);
                                 return (
                                     <div key={`explain-${item.id}`} className={cn('rounded-xl border p-3 space-y-1', styles.border)}>
@@ -1496,7 +1517,7 @@ function WorkspaceDraftsPageContent() {
                                                 <span className="text-[10px] text-gray-400">{item.source}</span>
                                             </div>
                                         </div>
-                                        <p className="text-[11px] text-gray-200">{item.reason}</p>
+                                        <p className="text-[11px] text-gray-200 line-clamp-2">{item.reason}</p>
                                         <p className="text-[10px] text-gray-400">الأثر: {item.impact}</p>
                                         <p className="text-[10px] text-gray-500">القاعدة: {item.rule}</p>
                                         <p className="text-[10px] text-gray-500">الثقة: {item.confidence ? `${Math.round(item.confidence * 100)}%` : '—'}</p>
@@ -1506,6 +1527,16 @@ function WorkspaceDraftsPageContent() {
                         </div>
                     ) : (
                         <Empty text="لا توجد ملاحظات مفسّرة حالياً." />
+                    )}
+                    {explanationItems.length > 5 && (
+                        <div className="flex justify-end">
+                            <button
+                                onClick={() => setExplainExpanded((prev) => !prev)}
+                                className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-gray-200"
+                            >
+                                {explainExpanded ? 'عرض أقل' : 'عرض المزيد'}
+                            </button>
+                        </div>
                     )}
                 </div>
             )}
