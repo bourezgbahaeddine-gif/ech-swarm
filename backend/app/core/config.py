@@ -97,6 +97,8 @@ class Settings(BaseSettings):
     echorouk_archive_refresh_article_pages: int = 10
     echorouk_archive_rag_enabled: bool = False
     echorouk_archive_rag_limit: int = 2
+    echorouk_archive_rag_min_score: float = 0.78
+    echorouk_archive_rag_prefer_category_match: bool = True
     youtube_data_api_key: str = ""
     youtube_trends_enabled: bool = False
 

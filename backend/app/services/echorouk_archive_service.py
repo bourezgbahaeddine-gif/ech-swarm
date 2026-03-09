@@ -395,6 +395,7 @@ class EchoroukArchiveService:
                 "summary": article.summary or "",
                 "url": article.original_url,
                 "source_name": article.source_name,
+                "category": article.category.value if article.category else None,
                 "published_at": article.published_at.isoformat() if article.published_at else None,
                 "score": round(max(0.0, 1.0 - min(distance, 2.0) / 2.0), 4),
                 "corpus": ARCHIVE_CORPUS,

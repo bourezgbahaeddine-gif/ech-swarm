@@ -237,11 +237,28 @@ class ScribeAgent:
                 break
         items = list(candidates.values())
         if settings.echorouk_archive_rag_enabled:
+            query_seed = "\n".join(
+                part
+                for part in [
+                    article.title_ar or article.original_title or "",
+                    article.summary or "",
+                    text[:600] if text else "",
+                ]
+                if part
+            ).strip()
             archive_refs = await echorouk_archive_service.semantic_search(
                 db,
-                q=text[:1200],
+                q=query_seed or text[:1200],
                 limit=max(1, int(settings.echorouk_archive_rag_limit)),
             )
+            min_score = float(getattr(settings, "echorouk_archive_rag_min_score", 0.0))
+            if min_score > 0:
+                archive_refs = [ref for ref in archive_refs if float(ref.get("score") or 0.0) >= min_score]
+            if getattr(settings, "echorouk_archive_rag_prefer_category_match", False) and article.category:
+                target_category = article.category.value
+                matching = [ref for ref in archive_refs if ref.get("category") == target_category]
+                if matching:
+                    archive_refs = matching
             seen_urls = {str(item.get("url") or "") for item in items}
             for ref in archive_refs:
                 url = str(ref.get("url") or "")
@@ -254,7 +271,7 @@ class ScribeAgent:
                         "summary": ref.get("summary") or "",
                         "source": ref.get("source_name") or "archive",
                         "url": url,
-                        "category": None,
+                        "category": ref.get("category"),
                         "corpus": ref.get("corpus") or "archive",
                     }
                 )
