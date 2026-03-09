@@ -334,7 +334,7 @@ function WorkspaceDraftsPageContent() {
     const [baseVersion, setBaseVersion] = useState(1);
     const [saveState, setSaveState] = useState<SaveState>('saved');
     const [activeTab, setActiveTab] = useState<RightTab>('evidence');
-    const [viewMode, setViewMode] = useState<ViewMode>('deep');
+    const [viewMode, setViewMode] = useState<ViewMode>('speed');
     const [err, setErr] = useState<string | null>(null);
     const [ok, setOk] = useState<string | null>(null);
     const [claims, setClaims] = useState<FactCheckClaim[]>([]);
@@ -367,8 +367,16 @@ function WorkspaceDraftsPageContent() {
     const pendingActionRef = useRef<null | (() => void)>(null);
     const [reviewExpanded, setReviewExpanded] = useState(false);
     const [explainExpanded, setExplainExpanded] = useState(false);
+    const [reviewOpen, setReviewOpen] = useState(false);
+    const [explainOpen, setExplainOpen] = useState(false);
+    const [toolsExpanded, setToolsExpanded] = useState(false);
+    const [showAdvancedTabs, setShowAdvancedTabs] = useState(false);
     const lastSavedRef = useRef<{ title: string; body: string }>({ title: '', body: '' });
-    const visibleTabs = useMemo(() => TABS.filter((tab) => (tab.id === 'msi' ? isDirector : true)), [isDirector]);
+    const allowedTabs = useMemo(() => TABS.filter((tab) => (tab.id === 'msi' ? isDirector : true)), [isDirector]);
+    const visibleTabs = useMemo(() => {
+        const coreIds = new Set<RightTab>(['evidence', 'proofread', 'quality', 'seo']);
+        return allowedTabs.filter((tab) => showAdvancedTabs || coreIds.has(tab.id));
+    }, [allowedTabs, showAdvancedTabs]);
 
     const setClaimOverrideDraftField = (claimId: string, patch: Partial<ClaimOverrideDraft>) => {
         setClaimOverrideDrafts((prev) => {
@@ -417,6 +425,10 @@ function WorkspaceDraftsPageContent() {
     useEffect(() => {
         if (!isDirector && activeTab === 'msi') setActiveTab('evidence');
     }, [isDirector, activeTab]);
+    useEffect(() => {
+        const core = new Set<RightTab>(['evidence', 'proofread', 'quality', 'seo']);
+        if (!showAdvancedTabs && !core.has(activeTab)) setActiveTab('evidence');
+    }, [activeTab, showAdvancedTabs]);
 
     useEffect(() => {
         autoCreateAttemptRef.current = false;
@@ -1052,6 +1064,24 @@ function WorkspaceDraftsPageContent() {
         [explainExpanded, explanationItems],
     );
 
+    const nextAction = useMemo(() => {
+        const primary = decisionModel.urgent[0] || decisionModel.improve[0] || null;
+        if (primary && primary.action) {
+            return {
+                label: `التالي: ${primary.title}`,
+                description: primary.reason,
+                severity: primary.severity,
+                handler: decisionActionHandlers[primary.action],
+            };
+        }
+        return {
+            label: 'تشغيل فحص سريع',
+            description: 'لا توجد ملاحظات ظاهرة الآن. شغّل الفحص للتأكيد.',
+            severity: 'low' as DecisionSeverity,
+            handler: decisionActionHandlers.quick_check,
+        };
+    }, [decisionModel, decisionActionHandlers]);
+
     const runAudienceSimulation = useMutation({
         mutationFn: async () => {
             const headline = cleanText(title || context?.article?.title_ar || context?.article?.original_title || '');
@@ -1338,43 +1368,76 @@ function WorkspaceDraftsPageContent() {
                     </div>
                 </div>
 
-                <div className="mt-3 flex gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible">
-                    <button
-                        onClick={() => runWithGuide('quick_check', () => runQuickCheck.mutate())}
-                        disabled={runQuickCheck.isPending}
-                        className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-100 text-xs flex items-center gap-2 disabled:opacity-60"
-                    >
-                        <ShieldCheck className="w-4 h-4" />
-                        {runQuickCheck.isPending ? 'جاري الفحص...' : 'فحص سريع'}
-                    </button>
-                    <button disabled={runVerifier.isPending} onClick={() => runWithGuide('verify', () => runVerifier.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-cyan-500/20 border border-cyan-500/30 text-cyan-200 text-xs flex items-center gap-2 disabled:opacity-60"><SearchCheck className="w-4 h-4" />{runVerifier.isPending ? 'جاري التحقق...' : 'تحقق'}</button>
-                    <button disabled={runProofread.isPending} onClick={() => runWithGuide('proofread', () => runProofread.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-lime-500/20 border border-lime-500/30 text-lime-200 text-xs disabled:opacity-60">{runProofread.isPending ? 'جاري التدقيق...' : 'تدقيق لغوي'}</button>
-                    <button disabled={rewrite.isPending} onClick={() => runWithGuide('improve', () => rewrite.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-2 disabled:opacity-60"><Sparkles className="w-4 h-4" />{rewrite.isPending ? 'جاري التحسين...' : 'تحسين'}</button>
-                    <button disabled={runHeadlines.isPending} onClick={() => runWithGuide('headlines', () => runHeadlines.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-200 text-xs disabled:opacity-60">{runHeadlines.isPending ? 'جاري التوليد...' : 'عناوين'}</button>
-                    <button disabled={runSeo.isPending} onClick={() => runWithGuide('seo', () => runSeo.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-200 text-xs disabled:opacity-60">{runSeo.isPending ? 'جاري التحليل...' : 'SEO'}</button>
-                    <button disabled={runLinks.isPending} onClick={() => runWithGuide('links', () => runLinks.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-teal-500/20 border border-teal-500/30 text-teal-200 text-xs disabled:opacity-60">{runLinks.isPending ? 'جاري جلب الروابط...' : 'روابط'}</button>
-                    <button disabled={runSocial.isPending} onClick={() => runWithGuide('social', () => runSocial.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-sky-500/20 border border-sky-500/30 text-sky-200 text-xs disabled:opacity-60">{runSocial.isPending ? 'جاري التوليد...' : 'سوشيال'}</button>
-                    <button disabled={runQuality.isPending} onClick={() => runWithGuide('quality', () => runQuality.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs disabled:opacity-60">{runQuality.isPending ? 'جاري التقييم...' : 'جودة'}</button>
-                    <button disabled={runAudienceSimulation.isPending} onClick={() => runWithGuide('audience_test', () => runAudienceSimulation.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-100 text-xs disabled:opacity-60">
-                        محاكي الجمهور
-                    </button>
-                    <button disabled={runReadiness.isPending} onClick={() => runWithGuide('publish_gate', () => runReadiness.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-200 text-xs disabled:opacity-60">{runReadiness.isPending ? 'جاري الفحص...' : 'بوابة النشر'}</button>
-                    <button disabled={applyToArticle.isPending} onClick={() => runWithGuide('apply', () => applyToArticle.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs disabled:opacity-60">{applyToArticle.isPending ? 'جاري الإرسال...' : 'إرسال لاعتماد رئيس التحرير'}</button>
-                    <button disabled={autosave.isPending} onClick={() => runWithGuide('save', () => { setSaveState('saving'); autosave.mutate(); })} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs flex items-center gap-2 disabled:opacity-60"><Save className="w-4 h-4" />حفظ</button>
-                    <div className="ml-auto flex items-center gap-2">
+                <div className="mt-3 space-y-3">
+                    <div className="flex flex-wrap items-center gap-2">
                         <button
-                            onClick={() => setViewMode('speed')}
-                            className={cn('min-h-10 px-3 py-2 rounded-xl border text-xs', viewMode === 'speed' ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-100' : 'bg-white/5 border-white/15 text-gray-300')}
+                            onClick={() => runWithGuide('quick_check', () => runQuickCheck.mutate())}
+                            disabled={runQuickCheck.isPending}
+                            className="min-h-10 px-4 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-100 text-xs flex items-center gap-2 disabled:opacity-60"
                         >
-                            وضع السرعة
+                            <ShieldCheck className="w-4 h-4" />
+                            {runQuickCheck.isPending ? 'جاري الفحص...' : 'فحص سريع'}
                         </button>
                         <button
-                            onClick={() => setViewMode('deep')}
-                            className={cn('min-h-10 px-3 py-2 rounded-xl border text-xs', viewMode === 'deep' ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-100' : 'bg-white/5 border-white/15 text-gray-300')}
+                            onClick={() => nextAction.handler()}
+                            className={cn('min-h-10 px-4 py-2 rounded-xl border text-xs flex items-center gap-2', severityStyles(nextAction.severity).badge, 'border-white/15')}
                         >
-                            وضع العمق
+                            {nextAction.label}
                         </button>
+                        <button
+                            disabled={applyToArticle.isPending}
+                            onClick={() => runWithGuide('apply', () => applyToArticle.mutate())}
+                            className="min-h-10 px-4 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs disabled:opacity-60"
+                        >
+                            {applyToArticle.isPending ? 'جاري الإرسال...' : 'إرسال لاعتماد رئيس التحرير'}
+                        </button>
+                        <button
+                            disabled={autosave.isPending}
+                            onClick={() => runWithGuide('save', () => { setSaveState('saving'); autosave.mutate(); })}
+                            className="min-h-10 px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs flex items-center gap-2 disabled:opacity-60"
+                        >
+                            <Save className="w-4 h-4" />حفظ
+                        </button>
+                        <button
+                            onClick={() => setToolsExpanded((prev) => !prev)}
+                            className="min-h-10 px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-gray-300 text-xs"
+                        >
+                            {toolsExpanded ? 'إخفاء الأدوات' : 'المزيد من الأدوات'}
+                        </button>
+                        <div className="ml-auto flex items-center gap-2">
+                            <button
+                                onClick={() => setViewMode('speed')}
+                                className={cn('min-h-10 px-3 py-2 rounded-xl border text-xs', viewMode === 'speed' ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-100' : 'bg-white/5 border-white/15 text-gray-300')}
+                            >
+                                وضع السرعة
+                            </button>
+                            <button
+                                onClick={() => setViewMode('deep')}
+                                className={cn('min-h-10 px-3 py-2 rounded-xl border text-xs', viewMode === 'deep' ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-100' : 'bg-white/5 border-white/15 text-gray-300')}
+                            >
+                                وضع العمق
+                            </button>
+                        </div>
                     </div>
+                    {nextAction.description && (
+                        <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-[11px] text-gray-300">
+                            {nextAction.description}
+                        </div>
+                    )}
+                    {toolsExpanded && (
+                        <div className="flex flex-wrap gap-2">
+                            <button disabled={runVerifier.isPending} onClick={() => runWithGuide('verify', () => runVerifier.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-cyan-500/20 border border-cyan-500/30 text-cyan-200 text-xs flex items-center gap-2 disabled:opacity-60"><SearchCheck className="w-4 h-4" />{runVerifier.isPending ? 'جاري التحقق...' : 'تحقق'}</button>
+                            <button disabled={runProofread.isPending} onClick={() => runWithGuide('proofread', () => runProofread.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-lime-500/20 border border-lime-500/30 text-lime-200 text-xs disabled:opacity-60">{runProofread.isPending ? 'جاري التدقيق...' : 'تدقيق لغوي'}</button>
+                            <button disabled={rewrite.isPending} onClick={() => runWithGuide('improve', () => rewrite.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-2 disabled:opacity-60"><Sparkles className="w-4 h-4" />{rewrite.isPending ? 'جاري التحسين...' : 'تحسين'}</button>
+                            <button disabled={runHeadlines.isPending} onClick={() => runWithGuide('headlines', () => runHeadlines.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-200 text-xs disabled:opacity-60">{runHeadlines.isPending ? 'جاري التوليد...' : 'عناوين'}</button>
+                            <button disabled={runSeo.isPending} onClick={() => runWithGuide('seo', () => runSeo.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-200 text-xs disabled:opacity-60">{runSeo.isPending ? 'جاري التحليل...' : 'SEO'}</button>
+                            <button disabled={runLinks.isPending} onClick={() => runWithGuide('links', () => runLinks.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-teal-500/20 border border-teal-500/30 text-teal-200 text-xs disabled:opacity-60">{runLinks.isPending ? 'جاري جلب الروابط...' : 'روابط'}</button>
+                            <button disabled={runSocial.isPending} onClick={() => runWithGuide('social', () => runSocial.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-sky-500/20 border border-sky-500/30 text-sky-200 text-xs disabled:opacity-60">{runSocial.isPending ? 'جاري التوليد...' : 'سوشيال'}</button>
+                            <button disabled={runQuality.isPending} onClick={() => runWithGuide('quality', () => runQuality.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs disabled:opacity-60">{runQuality.isPending ? 'جاري التقييم...' : 'جودة'}</button>
+                            <button disabled={runAudienceSimulation.isPending} onClick={() => runWithGuide('audience_test', () => runAudienceSimulation.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-100 text-xs disabled:opacity-60">محاكي الجمهور</button>
+                            <button disabled={runReadiness.isPending} onClick={() => runWithGuide('publish_gate', () => runReadiness.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-200 text-xs disabled:opacity-60">{runReadiness.isPending ? 'جاري الفحص...' : 'بوابة النشر'}</button>
+                        </div>
+                    )}
                 </div>
 
                 {(err || ok) && <div className={cn('mt-3 rounded-xl px-3 py-2 text-xs', err ? 'bg-red-500/15 text-red-200 border border-red-500/30' : 'bg-emerald-500/15 text-emerald-200 border border-emerald-500/30')}>{err || ok}</div>}
@@ -1394,12 +1457,17 @@ function WorkspaceDraftsPageContent() {
                     </button>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-                    {[
-                        { title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد موانع حرجة حالياً.' },
-                        { title: 'يحسّن الجودة', items: decisionModel.improve, empty: 'لا توجد تحسينات عاجلة للجودة.' },
-                        { title: 'تحسينات إضافية', items: decisionModel.extra, empty: 'لا توجد تحسينات إضافية الآن.' },
-                    ].map((section) => (
+                <div className={cn('grid gap-3', viewMode === 'deep' ? 'grid-cols-1 lg:grid-cols-3' : 'grid-cols-1 lg:grid-cols-2')}>
+                    {(viewMode === 'deep'
+                        ? [
+                            { title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد موانع حرجة حالياً.' },
+                            { title: 'يحسّن الجودة', items: decisionModel.improve, empty: 'لا توجد تحسينات عاجلة للجودة.' },
+                            { title: 'تحسينات إضافية', items: decisionModel.extra, empty: 'لا توجد تحسينات إضافية الآن.' },
+                        ]
+                        : [
+                            { title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد موانع حرجة حالياً.' },
+                            { title: 'يحسّن الجودة', items: decisionModel.improve, empty: 'لا توجد تحسينات عاجلة للجودة.' },
+                        ]).map((section) => (
                         <div key={section.title} className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
                             <h3 className="text-xs text-gray-200 font-semibold">{section.title}</h3>
                             {section.items.length === 0 ? (
@@ -1441,102 +1509,128 @@ function WorkspaceDraftsPageContent() {
                     ))}
                 </div>
 
-                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-100 space-y-1">
-                    <p className="font-semibold text-emerald-200">أفضل عنوان مقترح</p>
-                    <p>{cleanText(decisionModel.bestHeadline.headline || 'لا يوجد عنوان مقترح حالياً.')}</p>
-                    {!!decisionModel.bestHeadline.reasons?.length && (
-                        <p className="text-[11px] text-emerald-200/90">السبب: {decisionModel.bestHeadline.reasons.slice(0, 2).join(' • ')}</p>
-                    )}
-                    {!!decisionModel.bestHeadline.risks?.length && (
-                        <p className="text-[11px] text-amber-200">مخاطر محتملة: {decisionModel.bestHeadline.risks.slice(0, 2).join(' • ')}</p>
-                    )}
-                </div>
+                {viewMode === 'deep' && (
+                    <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-100 space-y-1">
+                        <p className="font-semibold text-emerald-200">أفضل عنوان مقترح</p>
+                        <p>{cleanText(decisionModel.bestHeadline.headline || 'لا يوجد عنوان مقترح حالياً.')}</p>
+                        {!!decisionModel.bestHeadline.reasons?.length && (
+                            <p className="text-[11px] text-emerald-200/90">السبب: {decisionModel.bestHeadline.reasons.slice(0, 2).join(' • ')}</p>
+                        )}
+                        {!!decisionModel.bestHeadline.risks?.length && (
+                            <p className="text-[11px] text-amber-200">مخاطر محتملة: {decisionModel.bestHeadline.risks.slice(0, 2).join(' • ')}</p>
+                        )}
+                    </div>
+                )}
             </div>
 
             {viewMode === 'deep' && (
                 <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3">
-                    <div>
-                        <h2 className="text-sm text-white font-semibold">مراجعة احترافية</h2>
-                        <p className="text-[11px] text-gray-400">تلخيص سريع لمخرجات الجودة والتحقق والتهيئة قبل الاعتماد.</p>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                        {reviewCards.map((card) => {
-                            const styles = severityStyles(card.severity);
-                            const actionHandler = card.action ? decisionActionHandlers[card.action] : undefined;
-                            return (
-                                <div key={card.id} className={cn('rounded-xl border p-3 space-y-1', styles.border)}>
-                                    <div className="flex items-center justify-between gap-2">
-                                        <p className="text-[11px] text-white font-semibold">{card.title}</p>
-                                        <span className={cn('px-2 py-0.5 rounded text-[10px]', styles.badge)}>
-                                            {severityLabel(card.severity)}
-                                        </span>
-                                    </div>
-                                    <p className="text-sm text-gray-100">{card.value}</p>
-                                    <p className="text-[10px] text-gray-400 line-clamp-2">{card.hint}</p>
-                                    {actionHandler && (
-                                        <button
-                                            onClick={() => actionHandler()}
-                                            className="mt-1 rounded-lg border border-white/15 bg-white/10 px-2 py-1 text-[10px] text-gray-200"
-                                        >
-                                            فتح الأداة
-                                        </button>
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
-                    {professionalReview.length > 4 && (
-                        <div className="flex justify-end">
-                            <button
-                                onClick={() => setReviewExpanded((prev) => !prev)}
-                                className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-gray-200"
-                            >
-                                {reviewExpanded ? 'عرض أقل' : 'عرض المزيد'}
-                            </button>
+                    <div className="flex items-center justify-between gap-2">
+                        <div>
+                            <h2 className="text-sm text-white font-semibold">مراجعة احترافية</h2>
+                            <p className="text-[11px] text-gray-400">تلخيص سريع لمخرجات الجودة والتحقق والتهيئة قبل الاعتماد.</p>
                         </div>
+                        <button
+                            onClick={() => setReviewOpen((prev) => !prev)}
+                            className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-gray-200"
+                        >
+                            {reviewOpen ? 'إخفاء' : 'عرض'}
+                        </button>
+                    </div>
+                    {reviewOpen && (
+                        <>
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                                {reviewCards.map((card) => {
+                                    const styles = severityStyles(card.severity);
+                                    const actionHandler = card.action ? decisionActionHandlers[card.action] : undefined;
+                                    return (
+                                        <div key={card.id} className={cn('rounded-xl border p-3 space-y-1', styles.border)}>
+                                            <div className="flex items-center justify-between gap-2">
+                                                <p className="text-[11px] text-white font-semibold">{card.title}</p>
+                                                <span className={cn('px-2 py-0.5 rounded text-[10px]', styles.badge)}>
+                                                    {severityLabel(card.severity)}
+                                                </span>
+                                            </div>
+                                            <p className="text-sm text-gray-100">{card.value}</p>
+                                            <p className="text-[10px] text-gray-400 line-clamp-2">{card.hint}</p>
+                                            {actionHandler && (
+                                                <button
+                                                    onClick={() => actionHandler()}
+                                                    className="mt-1 rounded-lg border border-white/15 bg-white/10 px-2 py-1 text-[10px] text-gray-200"
+                                                >
+                                                    فتح الأداة
+                                                </button>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                            {professionalReview.length > 4 && (
+                                <div className="flex justify-end">
+                                    <button
+                                        onClick={() => setReviewExpanded((prev) => !prev)}
+                                        className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-gray-200"
+                                    >
+                                        {reviewExpanded ? 'عرض أقل' : 'عرض المزيد'}
+                                    </button>
+                                </div>
+                            )}
+                        </>
                     )}
                 </div>
             )}
 
             {viewMode === 'deep' && (
                 <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3">
-                    <div>
-                        <h2 className="text-sm text-white font-semibold">ثقة وتفسير</h2>
-                        <p className="text-[11px] text-gray-400">لماذا ظهرت هذه الملاحظات؟ وما أثرها التحريري؟</p>
+                    <div className="flex items-center justify-between gap-2">
+                        <div>
+                            <h2 className="text-sm text-white font-semibold">ثقة وتفسير</h2>
+                            <p className="text-[11px] text-gray-400">لماذا ظهرت هذه الملاحظات؟ وما أثرها التحريري؟</p>
+                        </div>
+                        <button
+                            onClick={() => setExplainOpen((prev) => !prev)}
+                            className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-gray-200"
+                        >
+                            {explainOpen ? 'إخفاء' : 'عرض'}
+                        </button>
                     </div>
-                    {explainCards.length ? (
-                        <div className="space-y-2">
-                            {explainCards.map((item) => {
-                                const styles = severityStyles(item.severity);
-                                return (
-                                    <div key={`explain-${item.id}`} className={cn('rounded-xl border p-3 space-y-1', styles.border)}>
-                                        <div className="flex flex-wrap items-center justify-between gap-2">
-                                            <p className="text-xs text-white font-semibold">{item.title}</p>
-                                            <div className="flex items-center gap-2">
-                                                <span className={cn('px-2 py-0.5 rounded text-[10px]', styles.badge)}>{severityLabel(item.severity)}</span>
-                                                <span className="text-[10px] text-gray-400">{item.source}</span>
+                    {explainOpen && (
+                        <>
+                            {explainCards.length ? (
+                                <div className="space-y-2">
+                                    {explainCards.map((item) => {
+                                        const styles = severityStyles(item.severity);
+                                        return (
+                                            <div key={`explain-${item.id}`} className={cn('rounded-xl border p-3 space-y-1', styles.border)}>
+                                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                                    <p className="text-xs text-white font-semibold">{item.title}</p>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={cn('px-2 py-0.5 rounded text-[10px]', styles.badge)}>{severityLabel(item.severity)}</span>
+                                                        <span className="text-[10px] text-gray-400">{item.source}</span>
+                                                    </div>
+                                                </div>
+                                                <p className="text-[11px] text-gray-200 line-clamp-2">{item.reason}</p>
+                                                <p className="text-[10px] text-gray-400">الأثر: {item.impact}</p>
+                                                <p className="text-[10px] text-gray-500">القاعدة: {item.rule}</p>
+                                                <p className="text-[10px] text-gray-500">الثقة: {item.confidence ? `${Math.round(item.confidence * 100)}%` : '—'}</p>
                                             </div>
-                                        </div>
-                                        <p className="text-[11px] text-gray-200 line-clamp-2">{item.reason}</p>
-                                        <p className="text-[10px] text-gray-400">الأثر: {item.impact}</p>
-                                        <p className="text-[10px] text-gray-500">القاعدة: {item.rule}</p>
-                                        <p className="text-[10px] text-gray-500">الثقة: {item.confidence ? `${Math.round(item.confidence * 100)}%` : '—'}</p>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    ) : (
-                        <Empty text="لا توجد ملاحظات مفسّرة حالياً." />
-                    )}
-                    {explanationItems.length > 5 && (
-                        <div className="flex justify-end">
-                            <button
-                                onClick={() => setExplainExpanded((prev) => !prev)}
-                                className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-gray-200"
-                            >
-                                {explainExpanded ? 'عرض أقل' : 'عرض المزيد'}
-                            </button>
-                        </div>
+                                        );
+                                    })}
+                                </div>
+                            ) : (
+                                <Empty text="لا توجد ملاحظات مفسّرة حالياً." />
+                            )}
+                            {explanationItems.length > 5 && (
+                                <div className="flex justify-end">
+                                    <button
+                                        onClick={() => setExplainExpanded((prev) => !prev)}
+                                        className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-gray-200"
+                                    >
+                                        {explainExpanded ? 'عرض أقل' : 'عرض المزيد'}
+                                    </button>
+                                </div>
+                            )}
+                        </>
                     )}
                 </div>
             )}
@@ -1633,6 +1727,12 @@ function WorkspaceDraftsPageContent() {
                             {visibleTabs.map((t) => (
                                 <button key={t.id} onClick={() => setActiveTab(t.id)} className={cn('shrink-0 min-h-9 px-2 py-1 rounded-lg text-[11px]', activeTab === t.id ? 'bg-emerald-500/20 text-emerald-200' : 'bg-white/10 text-gray-300')}>{t.label}</button>
                             ))}
+                            <button
+                                onClick={() => setShowAdvancedTabs((prev) => !prev)}
+                                className="shrink-0 min-h-9 px-2 py-1 rounded-lg text-[11px] bg-white/5 text-gray-300 border border-white/10"
+                            >
+                                {showAdvancedTabs ? 'إخفاء المتقدم' : 'أدوات متقدمة'}
+                            </button>
                         </div>
                     </div>
 
