@@ -144,6 +144,24 @@ export interface Article extends ArticleBrief {
     updated_at: string;
 }
 
+export interface ArchiveSearchItem {
+    id: number;
+    title: string | null;
+    summary: string | null;
+    url: string | null;
+    source_name: string | null;
+    published_at: string | null;
+    score: number;
+    corpus: string | null;
+    category?: string | null;
+}
+
+export interface ArchiveSearchResponse {
+    items: ArchiveSearchItem[];
+    query: string;
+    limit: number;
+}
+
 export interface DashboardStats {
     total_articles: number;
     articles_today: number;
@@ -813,6 +831,11 @@ export const newsApi = {
         strict_tokens?: boolean;
         status?: string;
     }) => api.get<ArticleBrief[]>('/news/search/semantic', { params }),
+};
+
+export const archiveApi = {
+    search: (params: { q: string; limit?: number }) =>
+        api.get<ArchiveSearchResponse>('/archive/echorouk/search', { params }),
 };
 
 export const sourcesApi = {
