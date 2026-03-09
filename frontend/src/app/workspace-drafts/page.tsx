@@ -1064,6 +1064,18 @@ function WorkspaceDraftsPageContent() {
         [explainExpanded, explanationItems],
     );
 
+    const decisionActionHandlers: Record<DecisionActionId, () => void> = {
+        verify: () => runVerifier.mutate(),
+        quality: () => runQuality.mutate(),
+        proofread: () => runProofread.mutate(),
+        seo: () => runSeo.mutate(),
+        headlines: () => runHeadlines.mutate(),
+        links: () => runLinks.mutate(),
+        social: () => runSocial.mutate(),
+        publish_gate: () => runReadiness.mutate(),
+        quick_check: () => runQuickCheck.mutate(),
+    };
+
     const nextAction = useMemo(() => {
         const primary = decisionModel.urgent[0] || decisionModel.improve[0] || null;
         if (primary && primary.action) {
@@ -1186,18 +1198,6 @@ function WorkspaceDraftsPageContent() {
         autoCreateAttemptRef.current = true;
         createDraftFromArticle.mutate();
     }, [articleNumericId, listLoading, workId, drafts.length, createDraftFromArticle]);
-
-    const decisionActionHandlers: Record<DecisionActionId, () => void> = {
-        verify: () => runVerifier.mutate(),
-        quality: () => runQuality.mutate(),
-        proofread: () => runProofread.mutate(),
-        seo: () => runSeo.mutate(),
-        headlines: () => runHeadlines.mutate(),
-        links: () => runLinks.mutate(),
-        social: () => runSocial.mutate(),
-        publish_gate: () => runReadiness.mutate(),
-        quick_check: () => runQuickCheck.mutate(),
-    };
 
     const showSidePanels = viewMode === 'deep';
 
