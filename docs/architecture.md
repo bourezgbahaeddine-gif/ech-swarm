@@ -1,236 +1,71 @@
-# Echorouk Editorial OS — Architecture Documentation
+﻿# Echorouk Editorial OS — Architecture
 
-Echorouk Editorial OS is an enterprise operating system for managing editorial content lifecycle from capture to manual-publish readiness, with strict governance and mandatory Human-in-the-Loop.
+Last updated: 2026-03-09
 
+## 1) Overview
+Enterprise newsroom operating system that manages editorial lifecycle from capture to manual‑publish readiness with strict governance and full traceability.
 
-## System Architecture
+## 2) System Layers
+- Presentation: Next.js + React.
+- API: FastAPI + SQLAlchemy + Pydantic.
+- Data: PostgreSQL + pgvector + Redis.
+- Async: Celery Workers + Redis Broker/Result.
+- Storage: MinIO.
+- Feeds: FreshRSS + RSS‑Bridge.
 
-### Data Flow Pipeline
-
+## 3) Core Editorial Flow
 ```
-                    ┌──────────────────────────────────────────────────────────────────┐
-                    │                  ECHOROUK EDITORIAL OS                           │
-                    │                                                                  │
-  RSS Feeds ────►   │  ┌─────────┐    ┌──────────┐    ┌─────────┐    ┌─────────────┐  │
-  (300+ sources)    │  │  Scout  │───►│  Router  │───►│ Scribe  │───►│  Editorial  │  │
-                    │  │ Agent   │    │  Agent   │    │ Agent   │    │  Dashboard  │  │
-                    │  └────┬────┘    └────┬─────┘    └────┬────┘    └──────┬──────┘  │
-                    │       │              │               │                │          │
-                    │       ▼              ▼               ▼                ▼          │
-                    │  ┌──────────────────────────────────────────────────────────┐    │
-                    │  │                    PostgreSQL + pgvector                 │    │
-                    │  │                    Redis (Cache + Queue)                 │    │
-                    │  │                    MinIO (Object Storage)                │    │
-                    │  └──────────────────────────────────────────────────────────┘    │
-                    │                                                                  │
-                    │  ┌────────────┐    ┌───────────────┐                             │
-                    │  │   Trend    │    │    Audio      │                             │
-                    │  │   Radar    │    │    Agent      │                             │
-                    │  └────────────┘    └───────────────┘                             │
-                    └──────────────────────────────────────────────────────────────────┘
+RSS/FreshRSS -> Scout -> Router -> Scribe -> Smart Editor -> Chief Approval -> ready_for_manual_publish
 ```
 
-### Article Status Pipeline
-
+## 4) Smart Editor Flow
 ```
-NEW → CLEANED → DEDUPED → CLASSIFIED → CANDIDATE → APPROVED → PUBLISHED → ARCHIVED
-                                            │                      │
-                                            ├──► REJECTED          │
-                                            │                      │
-                                            └──► REWRITE ────►────┘
+Draft -> Proofread -> Quality -> Claims -> SEO/Links/Social -> Publish Readiness Gate -> Chief Approval
 ```
 
-### Deduplication Strategy (Three-Layer)
-
-1. **Layer 1: SHA1 Hash** — Exact URL + title match check against Redis (24h TTL)
-2. **Layer 2: Database Check** — Fallback to PostgreSQL unique_hash index
-3. **Layer 3: Levenshtein Fuzzy** — Token-sort ratio against recent 200 titles (threshold: 70%)
-
-### Cost Optimization: Tiered AI Processing
-
+## 5) Archive Flow
 ```
-Input Text
-    │
-    ▼
-┌─────────────────┐
-│  Python Rules   │──── If confident (2+ keyword matches) → FREE classification
-│  (Keywords)     │
-└────────┬────────┘
-         │ uncertain
-         ▼
-┌─────────────────┐
-│  Gemini Flash   │──── Fast, cheap classification + analysis
-│  ($0.002/call)  │
-└────────┬────────┘
-         │ complex/investigative
-         ▼
-┌─────────────────┐
-│  Gemini Pro     │──── Deep analysis, large docs (only when needed)
-│  ($0.01/call)   │
-└─────────────────┘
+Listing URLs -> Archive Crawler -> Article Fetch -> Article Index -> pgvector -> /archive + RAG
 ```
 
-### Database Schema (ER Diagram)
-
+## 6) Post‑Publish Quality Monitor
 ```
-┌──────────────┐     ┌──────────────┐     ┌───────────────────┐
-│   sources    │     │   articles   │     │ editor_decisions  │
-├──────────────┤     ├──────────────┤     ├───────────────────┤
-│ id           │     │ id           │     │ id                │
-│ name         │◄────│ source_id    │────►│ article_id        │
-│ url          │     │ unique_hash  │     │ editor_name       │
-│ category     │     │ status       │     │ decision          │
-│ trust_score  │     │ category     │     │ reason            │
-│ priority     │     │ importance   │     │ edited_title      │
-│ enabled      │     │ urgency      │     │ edited_body       │
-│ error_count  │     │ title_ar     │     │ decided_at        │
-└──────────────┘     │ summary      │     └───────────────────┘
-                     │ body_html    │
-                     │ entities     │     ┌───────────────────┐
-                     │ keywords     │     │  feedback_logs    │
-                     │ truth_score  │     ├───────────────────┤
-                     │ ai_model     │     │ id                │
-                     │ trace_id     │     │ article_id        │
-                     └──────────────┘     │ field_name        │
-                                          │ original_value    │
-                     ┌──────────────┐     │ corrected_value   │
-                     │ failed_jobs  │     │ correction_type   │
-                     ├──────────────┤     └───────────────────┘
-                     │ id           │
-                     │ job_type     │     ┌───────────────────┐
-                     │ payload      │     │  pipeline_runs    │
-                     │ error_msg    │     ├───────────────────┤
-                     │ retry_count  │     │ id                │
-                     │ resolved     │     │ run_type          │
-                     └──────────────┘     │ total_items       │
-                                          │ new_items         │
-                                          │ duplicates        │
-                                          │ errors            │
-                                          │ status            │
-                                          └───────────────────┘
+RSS Feed -> Scoring -> Issues/Suggestions -> Telegram Alerts + UI Panel
 ```
 
-## Security Model
-
-### Input Validation Pipeline
-
+## 7) RAG in Scribe
 ```
-Raw Input → Strip HTML → Remove Scripts → Decode Entities → Remove XSS Patterns → Clean Whitespace → Output
+Article Content -> Embedding -> Archive Search -> Supporting Context -> Draft Generation
 ```
 
-### Secret Management
+## 8) Deduplication (Scout)
+- SHA1 hash + Redis cache.
+- URL dedup via `original_url`.
+- Fuzzy title dedup (Levenshtein).
+- Cross‑source dedup by time window and similarity.
 
-- All secrets in `.env` (never committed)
-- `.env.example` for documentation only
-- Docker secrets for production deployment
-- API keys validated on startup
+## 9) Time Integrity
+- Rejects stale or future timestamps beyond policy.
+- Per‑source timestamp policies and fallbacks.
 
-## 2026-02-25 Hardening Update
+## 10) Semantic Storage
+- `article_profiles`, `article_chunks`, `article_vectors`.
+- Archive corpus tagged as `corpus=echorouk_archive`.
 
-### Layering and bounded contexts
+## 11) Queues
+- `ai_router`, `ai_scribe`, `ai_quality`, `ai_simulator`, `ai_msi`, `ai_links`, `ai_trends`, `ai_scripts`.
+- Idempotency keys + retry/backoff + DLQ.
 
-The backend now follows explicit boundaries:
+## 12) Observability
+- Structured logging with `request_id` + `correlation_id`.
+- Health endpoint: `/health`.
 
-- `app/api/*`: HTTP transport only (request parsing, auth dependencies, response mapping).
-- `app/services/*`: application orchestration and cross-module workflows.
-- `app/domain/*`: pure domain logic (state machine and quality gate primitives).
-- `app/repositories/*`: reusable persistence access patterns.
-- `app/models/*`: SQLAlchemy persistence models.
+## 13) Ports
+- Backend: `8000`
+- Frontend: `3000`
+- Postgres: `5433`
+- Redis: `6380`
+- MinIO: `9000/9001`
 
-New modules introduced:
-
-- `app/domain/news/state_machine.py`
-- `app/domain/quality/gates.py`
-- `app/repositories/story_repository.py`
-- `app/repositories/task_idempotency_repository.py`
-- `app/services/task_execution_service.py`
-
-### Correlation and request tracking propagation
-
-Request middleware sets and logs:
-
-- `request_id`
-- `correlation_id`
-
-These values are persisted in `job_runs` and rebound inside Celery workers through `_load_job()` / `_mark_running()` context binding so worker logs remain traceable back to the triggering API request.
-
-### Task idempotency approach
-
-Task-level idempotency is implemented via `task_idempotency_keys` and `task_execution_service`.
-
-- Key format: `task_name:entity_id:payload_hash` (or explicit `idempotency_key` from payload).
-- `acquire` states:
-  - `acquired`: task can execute
-  - `running`: another active owner exists -> skip duplicate side effects
-  - `completed`: return cached result
-- Completion/failure updates are stored for replay-safe retries.
-
-This is applied to pipeline and editorial queue workers to avoid duplicate transitions/draft side effects under retry/requeue conditions.
-
-### Story activation flow (MVP)
-
-Stories are now operationally activated from the newsroom workflow:
-
-- `POST /api/v1/stories/from-article/{article_id}`
-  - one-click story creation from an article
-  - creates `stories` + `story_items` in one transaction
-  - optional `reuse=true` returns existing linked story when already linked
-
-- `GET /api/v1/stories/suggest?article_id=...`
-  - read-only linking suggestions (no side effects)
-  - score combines:
-    - title similarity (sequence + token overlap)
-    - entity overlap (article entities vs story text)
-    - relation boost (if related articles are linked to story)
-    - category match boost
-
-- `GET /api/v1/stories/{story_id}/dossier`
-  - unified dossier output for editorial consumption:
-    - linked timeline (`article` + `draft`)
-    - stats (items/articles/drafts/last activity)
-    - highlights (latest titles, top sources, notes count)
-
-Data integrity is enforced at DB level for `story_items`:
-
-- exactly one of `article_id` or `draft_id` must be set
-- `link_type` must match the non-null reference (`article` or `draft`)
-
-### Script Studio subsystem (MVP)
-
-Script Studio adds a unified script pipeline under `/api/v1/scripts` with Human-in-the-Loop review:
-
-- `story_script`
-- `video_script`
-- `bulletin_daily`
-- `bulletin_weekly`
-
-Core tables:
-
-- `script_projects`
-  - source scope: `article_id` or `story_id` for story/video types
-  - bulletin types are scope-free and operate on selected news windows
-  - lifecycle: `new -> generating -> ready_for_review -> approved|rejected|archived`
-- `script_outputs`
-  - versioned outputs per project
-  - structured payload (`content_json`) + rendered text (`content_text`)
-  - quality gate issues persisted per version
-
-Generation execution:
-
-- API creation endpoints create `script_projects` then enqueue `script_generate` jobs.
-- Queue routing uses `ai_scripts`.
-- Task idempotency key: `script:{script_id}:v{target_version}`.
-- Worker task `run_script_generate_job` calls `script_studio_service.generate_project_output`.
-- On success:
-  - output version is stored
-  - project transitions to `ready_for_review`
-- On failure:
-  - error is logged via job system (`job_runs` / dead-letter path)
-  - project remains `generating` for operator visibility.
-
-RBAC and audit:
-
-- View/create: newsroom roles (`director`, `editor_chief`, `journalist`, `social_media`, `print_editor`)
-- Approve/reject: chief roles (`editor_chief`, `director`)
-- Reject requires explicit reason
-- Approve/reject actions are recorded in `action_audit_logs` with request/correlation IDs.
+---
+See also: `docs/PLATFORM_MASTER_DETAILS_AR.md`.

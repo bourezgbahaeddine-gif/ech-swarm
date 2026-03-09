@@ -1,201 +1,71 @@
 ﻿# INSTRUCTURE — مرجع منصة Echorouk Editorial OS
 
-Echorouk Editorial OS is an enterprise operating system for managing editorial content lifecycle from capture to manual-publish readiness, with strict governance and mandatory Human-in-the-Loop.
+هذا الملف هو المرجع التشغيلي والتقني والتحريري للمنصة.
 
+آخر تحديث: 2026-03-09
 
 ## 1) الهدف
-هذا الملف هو المرجع التشغيلي والتقني والتحريري للمنصة. الهدف من المنصة:
 - إدارة دورة الخبر من الالتقاط حتى **جاهز للنشر اليدوي**.
 - فرض حوكمة تحريرية قبل الاعتماد النهائي.
 - إبقاء النشر النهائي يدويًا 100%.
 
-### ملاحق تشغيل مرتبطة
-- `docs/EXPERIMENT_PACKAGE_INDEX.md`
-- `docs/PLATFORM_CONTENT_MAP.md`
-- `docs/EXPERIMENT_SMOKE_TEST_PLAN.md`
-- `docs/TROUBLESHOOTING_PLAYBOOK.md`
-- `docs/OPERATIONS_QUICK_COMMANDS.md`
-- `docs/FINAL_REVIEW_2026-02-18.md`
+## 2) مكوّنات المنصة
+- Backend: FastAPI + SQLAlchemy + Alembic.
+- Frontend: Next.js 16 + React + TypeScript + Tailwind.
+- Data: PostgreSQL + pgvector + Redis.
+- Async: Celery Workers + Redis Broker/Result.
+- Storage: MinIO.
+- Feeds: FreshRSS + RSS‑Bridge.
 
-## 2) الحالة التشغيلية الحالية (تدقيق الوكيل المراقب)
-تاريخ التدقيق: 2026-02-18
+## 3) دورة الخبر المعتمدة
+1) الالتقاط (Scout).
+2) التصنيف والتوجيه (Router).
+3) توليد مسودة أولية (Scribe).
+4) تحرير داخل Smart Editor.
+5) تشغيل بوابات الجودة والتحقق.
+6) إرسال لرئيس التحرير.
+7) اعتماد نهائي → ready_for_manual_publish.
 
-### ما تم اختباره فعليًا
-- Backend unit tests:
-  - الأمر: `\.venv\Scripts\python.exe -m pytest backend/tests -q`
-  - النتيجة: **20 passed**
-- Backend compile check:
-  - الأمر: `\.venv\Scripts\python.exe -m compileall backend/app`
-  - النتيجة: **pass**
-- Frontend type check:
-  - الأمر: `npx tsc --noEmit` داخل `frontend`
-  - النتيجة: **pass**
-- Frontend production build:
-  - الأمر: `npm run build` داخل `frontend`
-  - النتيجة: **pass**
-- Frontend lint (فحص جودة الكود العام):
-  - الأمر: `npm run lint`
-  - النتيجة: **pass مع warnings فقط** (بدون errors)
+## 4) المحرر الذكي (Smart Editor)
+- وضع السرعة افتراضيًا لتخفيف الحمل البصري.
+- زر “التالي” يقود لأهم إجراء.
+- أدوات متقدمة تظهر عند الضغط.
+- طبقة “مراجعة احترافية” و“ثقة وتفسير” مطويتان افتراضيًا.
+- تدقيق لغوي/أسلوبي + تحسين بدون تغيير الحقائق.
+- تاريخ نسخ + diff + restore.
 
-### ملاحظة على نطاق التدقيق
-- تدقيق هذه النسخة يغطي build/type/tests ومراجعة المسارات والواجهات.
-- اختبار E2E الحي يعتمد على بيئة Docker السيرفر (وليس جلسة Windows المحلية فقط).
+## 5) ما بعد النشر (Published Monitor)
+- فحص دوري للمحتوى المنشور عبر RSS.
+- تقارير جودة مختصرة + تنبيه تيليغرام عند الانخفاض.
+- صفحة مخصصة في الشريط العلوي.
 
-## 3) البنية التقنية
+## 6) أرشيف الشروق + RAG
+- زاحف خلفي يبني الأرشيف تدريجياً.
+- بحث دلالي ضمن `/archive`.
+- RAG يضيف سياقاً للمسودة عندما يكون مفعلاً.
 
-### Backend
-- إطار العمل: `FastAPI`
-- قاعدة البيانات: `PostgreSQL` (+ `pgvector`)
-- Redis: للكاش/المهام الدورية
-- ملفات المسارات الأساسية:
-  - `backend/app/api/routes/auth.py`
-  - `backend/app/api/routes/news.py`
-  - `backend/app/api/routes/editorial.py`
-  - `backend/app/api/routes/dashboard.py`
-  - `backend/app/api/routes/constitution.py`
-  - `backend/app/api/routes/journalist_services.py`
-  - `backend/app/api/routes/settings.py`
-  - `backend/app/api/routes/sources.py`
-  - `backend/app/api/routes/rss.py`
-- التسجيل في التطبيق: `backend/app/main.py`
+## 7) الأدوار والصلاحيات
+- الصحفي: تحرير وتشغيل الأدوات دون اعتماد نهائي.
+- رئيس التحرير: اعتماد نهائي أو إرجاع.
+- المدير: صلاحيات كاملة + إعدادات النظام.
 
-### Frontend
-- إطار العمل: `Next.js (App Router)`
-- إدارة الاستعلامات: `@tanstack/react-query`
-- المحرر الذكي: `TipTap`
-- صفحات رئيسية:
-  - `/` لوحة القيادة
-  - `/news` و `/news/[id]`
-  - `/workspace-drafts`
-  - `/editorial`
-  - `/constitution`
-  - `/trends`
-  - `/services/multimedia`
-  - `/dashboard/metric/[metric]`
+## 8) أوامر التشغيل الأساسية
+تحديث وتشغيل:
+```
+cd ~/ech-swarm
+git pull --ff-only origin main
+docker compose up -d --build --force-recreate backend worker frontend
+docker compose exec backend alembic upgrade head
+curl http://127.0.0.1:8000/health
+```
 
-## 4) دورة الخبر الذكية (المعتمدة)
-1. الالتقاط والتصنيف (Scout/Router/Cluster).
-2. انتقال الخبر إلى `candidate`.
-3. الصحفي يرشّح/يحرّر حتى النسخة الأخيرة في Smart Editor.
-4. تشغيل بوابات: التحقق من الادعاءات + الجودة + SEO/Tech + readability.
-5. المرور على **وكيل السياسة التحريرية للشروق**.
-6. إرسال التنبيه إلى رئيس التحرير مع حالة:
-   - مقبول من الوكيل، أو
-   - طلب اعتماد مع تحفظات.
-7. رئيس التحرير يعتمد أو يعيد للمراجعة.
-8. عند الاعتماد النهائي: `ready_for_manual_publish` + Final Package كامل.
-9. النشر يتم يدويًا خارج النظام.
+## 9) نقاط واجهة مهمة
+- الشريط العلوي يحتوي أدوات أساسية + “المزيد من الأدوات”.
+- تبويبات أساسية + “أدوات متقدمة”.
+- المحرر يركز على القرار قبل التفاصيل.
 
-## 5) الأدوار والصلاحيات
-
-### الصحفي / محرر الجريدة
-- متابعة الأخبار المرشحة.
-- ترشيح الخبر.
-- التحرير حتى النسخة الأخيرة.
-- استخدام أدوات المحرر الذكي (تحسين/تحقق/SEO/جودة/سوشيال).
-- لا يملك اعتمادًا نهائيًا ولا إعدادات API.
-
-### رئيس التحرير
-- طابور اعتماد نهائي.
-- الاطلاع على تقارير السياسة التحريرية، التحقق، الجودة.
-- قرار: اعتماد أو إرجاع للمراجعة.
-
-### المدير
-- كل الصلاحيات + إعدادات API + مراقبة النظام + الحوكمة.
-- تحكم كامل في العضوية:
-  - إضافة أعضاء جدد.
-  - تعديل الدور/الأقسام/الحالة.
-  - إعادة تعيين كلمة المرور.
-  - مراجعة سجل نشاط كل عضو.
-
-### السوشيال ميديا
-- الاطلاع على الأخبار المعتمدة فقط.
-- نسخ مخرجات السوشيال الجاهزة (Copy/Paste) من الخبر المعتمد.
-- بدون تعديل النص التحريري الأصلي.
-
-## 6) Final Package (مخرجات ما قبل النشر اليدوي)
-- عنوان رئيسي + بديل.
-- متن الخبر النهائي.
-- SEO title + meta description + tags + keywords + slug.
-- تقرير جودة.
-- تقرير تحقق/claims.
-- مصادر وأدلة.
-- نسخ سوشيال (Facebook/X/Push/Breaking).
-- حالة نهائية: `Ready for Manual Publish`.
-
-## 7) نقاط الواجهة المهمة
-- توحيد اللغة العربية في الشاشات والنتائج.
-- Onboarding:
-  - نافذة أول دخول.
-  - شرح أول ضغطة للأزرار الحساسة.
-  - أيقونة دليل ثابتة.
-- Smart Editor:
-  - Autosave.
-  - Versioning + Diff + Restore.
-  - اقتراحات AI بصيغة Suggestion فقط.
-
-## 8) ملاحظات تدقيق فعلية (أخطاء/مخاطر مكتشفة)
-
-### حرجة (تمنع جاهزية إطلاق نظيف)
-1. فشل lint على الواجهة (`npm run lint`).
-   - أخطاء `no-explicit-any` في ملفات منها:
-     - `frontend/src/components/dashboard/AgentControl.tsx`
-     - `frontend/src/app/agents/page.tsx`
-     - `frontend/src/app/login/page.tsx`
-     - `frontend/src/app/team/page.tsx`
-   - أخطاء React Hook rule (`set-state-in-effect`) في:
-     - `frontend/src/components/layout/AppShell.tsx`
-     - `frontend/src/lib/auth.tsx`
-2. بيئة التشغيل المحلية غير مكتملة لـ backend عبر venv (runtime deps ناقصة مثل `fastapi`).
-3. Docker daemon غير شغال محليًا، وهذا يمنع اختبار E2E الحي.
-
-### متوسطة
-1. صفحة تسجيل الدخول ما زالت تحتوي رابط Word للدستور:
-   - `frontend/src/app/login/page.tsx` يشير إلى `/Constitution.docx`.
-2. عرض “الفرق التقني” في المحرر قد يطبع HTML خام عند وجود `diff_html`:
-   - `frontend/src/app/workspace-drafts/page.tsx`.
-3. قسم preview للتحسين في بعض الحالات قصير/مقتطع ويصعب القراءة للنسخ الطويلة:
-   - `frontend/src/app/workspace-drafts/page.tsx`.
-
-### منخفضة
-- تحذيرات lint إضافية (`unused vars`, `<img>` بدل `next/image`) لا تمنع البناء لكنها تؤثر الجودة.
-
-## 9) الأمن والحوكمة
-- RBAC مفعل في API لمسارات حساسة.
-- إعدادات API مخصصة للمدير.
-- لا نشر نهائي تلقائي.
-- بوابات منع قبل `ready_for_manual_publish`.
-
-## 10) مراقبة التشغيل (Runbook مختصر)
-
-### قبل الإطلاق
-1. تأكد من تشغيل Docker.
-2. طبّق migration.
-3. شغّل backend/frontend.
-4. نفّذ smoke flows لكل دور.
-
-### أوامر تحقق أساسية
-- Backend tests:
-  - `\.venv\Scripts\python.exe -m pytest backend/tests -q`
-- Frontend typecheck:
-  - `cd frontend && npx tsc --noEmit`
-- Frontend build:
-  - `cd frontend && npm run build`
-- Backend health (عند تشغيل السيرفر):
-  - `curl.exe -sS http://127.0.0.1:8000/health`
-
-### Membership APIs (المدير)
-- `GET /api/v1/auth/users`
-- `POST /api/v1/auth/users`
-- `PUT /api/v1/auth/users/{user_id}`
-- `GET /api/v1/auth/users/{user_id}/activity`
-
-## 11) خارطة التحسين التالية (موصى بها قبل Go-Live)
-1. إغلاق أخطاء lint الحرجة.
-2. إزالة رابط Word نهائيًا من صفحة الدخول واستبداله برابط صفحة `/constitution`.
-3. تنسيق `diff_html` إلى نص مفهوم للصحفي بدل العرض الخام.
-4. تحسين مساحة/خط عرض النسخة المحسنة في المحرر.
-5. تنفيذ E2E حي بعد تشغيل Docker + backend runtime dependencies.
-
----
-هذا المرجع يجب تحديثه مع كل تغييرات هيكلية (Routes/Workflow/RBAC/Policy gates).
+## 10) مراجع مرتبطة
+- `docs/PLATFORM_MASTER_DETAILS_AR.md`
+- `docs/architecture.md`
+- `docs/M5_SMART_EDITOR.md`
+- `docs/PUBLISHED_CONTENT_MONITOR.md`
