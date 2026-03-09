@@ -41,10 +41,23 @@ type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
 type RightTab = 'evidence' | 'proofread' | 'quality' | 'seo' | 'social' | 'context' | 'msi' | 'simulator' | 'xray';
 type GuideType = 'welcome' | 'action';
 type ActionId = 'quick_check' | 'verify' | 'proofread' | 'improve' | 'headlines' | 'seo' | 'links' | 'social' | 'quality' | 'publish_gate' | 'apply' | 'save' | 'manual_draft' | 'audience_test';
+type ViewMode = 'speed' | 'deep';
 type ClaimOverrideDraft = {
     evidenceLinksRaw: string;
     unverifiable: boolean;
     unverifiableReason: string;
+};
+type DecisionSeverity = 'critical' | 'high' | 'medium' | 'low';
+type DecisionActionId = 'verify' | 'quality' | 'proofread' | 'seo' | 'headlines' | 'links' | 'social' | 'publish_gate' | 'quick_check';
+type DecisionItem = {
+    id: string;
+    title: string;
+    reason: string;
+    impact: string;
+    rule: string;
+    severity: DecisionSeverity;
+    confidence?: number;
+    action?: DecisionActionId;
 };
 
 const TABS: Array<{ id: RightTab; label: string }> = [
@@ -173,6 +186,78 @@ function entityMatchesContext(entity: string, contextText: string): boolean {
     return tokens.every((t) => contextNorm.includes(t));
 }
 
+function severityRank(sev: DecisionSeverity): number {
+    return { critical: 4, high: 3, medium: 2, low: 1 }[sev] || 0;
+}
+
+function severityStyles(sev: DecisionSeverity): { badge: string; border: string } {
+    switch (sev) {
+        case 'critical':
+            return { badge: 'bg-rose-500/20 text-rose-100', border: 'border-rose-500/30 bg-rose-500/10' };
+        case 'high':
+            return { badge: 'bg-amber-500/20 text-amber-100', border: 'border-amber-500/30 bg-amber-500/10' };
+        case 'medium':
+            return { badge: 'bg-cyan-500/20 text-cyan-100', border: 'border-cyan-500/30 bg-cyan-500/10' };
+        default:
+            return { badge: 'bg-white/10 text-gray-200', border: 'border-white/10 bg-white/5' };
+    }
+}
+
+function impactBySeverity(sev: DecisionSeverity): string {
+    switch (sev) {
+        case 'critical':
+            return 'قد يمنع النشر أو يسبب ضرراً تحريرياً مباشراً.';
+        case 'high':
+            return 'يؤثر على المصداقية أو وضوح الخبر بشكل ملحوظ.';
+        case 'medium':
+            return 'يحسن الجودة ويقلل الالتباس دون تغيير المعنى.';
+        default:
+            return 'تحسين إضافي يمكن تأجيله.';
+    }
+}
+
+function evaluateHeadline(headline: string, isBreaking: boolean): { score: number; risks: string[]; reasons: string[] } {
+    const cleaned = cleanText(headline);
+    const words = cleaned.split(/\s+/).filter(Boolean);
+    let score = 60;
+    const risks: string[] = [];
+    const reasons: string[] = [];
+
+    if (words.length >= 8 && words.length <= 14) {
+        score += 15;
+        reasons.push('طول مناسب لعنوان خبري واضح.');
+    } else {
+        score -= 10;
+        risks.push('طول غير مناسب (قصير جداً أو طويل جداً).');
+    }
+
+    if (/(هذا|هذه|هؤلاء|ذلك|تلك)/.test(cleaned)) {
+        score -= 15;
+        risks.push('عنوان مبهم يعتمد على ضمير إشارة.');
+    }
+
+    if (/عاجل/.test(cleaned) && !isBreaking) {
+        score -= 15;
+        risks.push('ذكر “عاجل” دون سياق عاجل واضح.');
+    }
+
+    if (/[0-9]/.test(cleaned)) {
+        score += 5;
+        reasons.push('وجود رقم أو تاريخ يزيد الإفصاح.');
+    }
+
+    const verbHit = /(أعلن|أكد|قرر|دعا|كشف|نفى|أوضح|قال|صرّح|افتتح|أطلق)/.test(cleaned);
+    if (verbHit) {
+        score += 8;
+        reasons.push('صيغة فعل واضحة تدل على الحدث.');
+    } else {
+        risks.push('قد يفتقد إلى فعل خبري واضح.');
+    }
+
+    score = Math.max(0, Math.min(100, score));
+    return { score, risks, reasons };
+}
+
 function actionKey(action: ActionId): string {
     return `${ACTION_HELP_PREFIX}${action}`;
 }
@@ -197,6 +282,7 @@ function WorkspaceDraftsPageContent() {
     const [baseVersion, setBaseVersion] = useState(1);
     const [saveState, setSaveState] = useState<SaveState>('saved');
     const [activeTab, setActiveTab] = useState<RightTab>('evidence');
+    const [viewMode, setViewMode] = useState<ViewMode>('deep');
     const [err, setErr] = useState<string | null>(null);
     const [ok, setOk] = useState<string | null>(null);
     const [claims, setClaims] = useState<FactCheckClaim[]>([]);
@@ -608,6 +694,182 @@ function WorkspaceDraftsPageContent() {
         },
         onError: (e: any) => setErr(e?.response?.data?.detail || 'تعذر تنفيذ الفحص السريع'),
     });
+
+    const decisionModel = useMemo(() => {
+        const urgent: DecisionItem[] = [];
+        const improve: DecisionItem[] = [];
+        const extra: DecisionItem[] = [];
+
+        const isBreaking = String(context?.article?.urgency || '').toLowerCase() === 'breaking';
+
+        const pushUnique = (list: DecisionItem[], item: DecisionItem) => {
+            if (list.some((x) => x.id === item.id)) return;
+            list.push(item);
+        };
+
+        if (readiness) {
+            const blockers = (readiness.gates?.items || []).filter((x: any) => x?.severity === 'blocker');
+            blockers.forEach((block: any, idx: number) => {
+                const msg = cleanText(block?.message || 'مانع نشر غير محدد');
+                pushUnique(urgent, {
+                    id: `gate-blocker-${block?.code || idx}`,
+                    title: 'مانع نشر',
+                    reason: msg || 'يوجد مانع في بوابة النشر.',
+                    impact: impactBySeverity('critical'),
+                    rule: 'بوابة النشر: معالجة الموانع قبل الإرسال.',
+                    severity: 'critical',
+                    confidence: 0.8,
+                    action: 'publish_gate',
+                });
+            });
+            (readiness.blocking_reasons || []).forEach((reason: string, idx: number) => {
+                const msg = cleanText(reason || '');
+                if (!msg) return;
+                pushUnique(urgent, {
+                    id: `readiness-block-${idx}`,
+                    title: 'غير جاهز للنشر',
+                    reason: msg,
+                    impact: impactBySeverity('critical'),
+                    rule: 'يجب معالجة أسباب عدم الجاهزية قبل الإرسال.',
+                    severity: 'critical',
+                    confidence: 0.78,
+                    action: 'publish_gate',
+                });
+            });
+        } else {
+            pushUnique(urgent, {
+                id: 'readiness-missing',
+                title: 'لم يتم تشغيل بوابة النشر',
+                reason: 'لا توجد نتيجة جاهزية حالياً.',
+                impact: 'قد يتم إرسال مسودة غير جاهزة بدون تنبيه.',
+                rule: 'تفعيل بوابة النشر قبل الاعتماد.',
+                severity: 'high',
+                confidence: 0.7,
+                action: 'publish_gate',
+            });
+        }
+
+        (claims || []).forEach((claim: any, idx: number) => {
+            if (!claim?.blocking) return;
+            const text = cleanText(claim?.text || '');
+            pushUnique(urgent, {
+                id: `claim-${claim?.id || idx}`,
+                title: 'ادعاء يحتاج إسناداً',
+                reason: text || 'ادعاء دون إسناد كافٍ.',
+                impact: impactBySeverity('high'),
+                rule: 'لا ادعاء دون مصدر واضح.',
+                severity: 'high',
+                confidence: Number(claim?.confidence || 0),
+                action: 'verify',
+            });
+        });
+
+        const proofIssues = (proofread?.issues || []) as Array<any>;
+        proofIssues.forEach((issue, idx) => {
+            const sev = (issue?.severity as DecisionSeverity) || (issue?.kind === 'headline' ? 'medium' : 'low');
+            const target = sev === 'critical' || sev === 'high' ? urgent : improve;
+            pushUnique(target, {
+                id: `proof-${issue?.kind || idx}-${idx}`,
+                title: issue?.kind === 'headline' ? 'عنوان يحتاج ضبطاً' : 'ملاحظة أسلوبية',
+                reason: cleanText(issue?.message || '') || 'ملاحظة تحريرية/لغوية.',
+                impact: issue?.impact ? cleanText(issue?.impact) : impactBySeverity(sev),
+                rule: cleanText(issue?.rule || 'قواعد التحرير اللغوي والأسلوبي.'),
+                severity: sev,
+                confidence: Number(issue?.confidence || 0.6),
+                action: 'proofread',
+            });
+        });
+
+        (quality?.actionable_fixes || []).forEach((fix: string, idx: number) => {
+            const cleanFix = cleanText(fix || '');
+            if (!cleanFix) return;
+            pushUnique(improve, {
+                id: `quality-fix-${idx}`,
+                title: 'تحسين جودة التحرير',
+                reason: cleanFix,
+                impact: impactBySeverity('medium'),
+                rule: 'رفع وضوح وبنية الخبر.',
+                severity: 'medium',
+                confidence: 0.7,
+                action: 'quality',
+            });
+        });
+
+        if (!quality) {
+            pushUnique(improve, {
+                id: 'quality-missing',
+                title: 'لم يتم تشغيل تقييم الجودة',
+                reason: 'لا توجد درجة جودة حالياً.',
+                impact: 'قد تمرّ مشكلات وضوح أو بنية دون تنبيه.',
+                rule: 'شغّل تقييم الجودة قبل الاعتماد.',
+                severity: 'medium',
+                confidence: 0.6,
+                action: 'quality',
+            });
+        }
+
+        if (!seoPack) {
+            pushUnique(extra, {
+                id: 'seo-missing',
+                title: 'SEO غير مُفعل',
+                reason: 'لم يتم توليد عنوان ووصف وكلمات مفتاحية.',
+                impact: 'تحسين إضافي لنتائج البحث.',
+                rule: 'تهيئة SEO قبل النشر النهائي.',
+                severity: 'low',
+                confidence: 0.55,
+                action: 'seo',
+            });
+        }
+        if (!headlines.length) {
+            pushUnique(extra, {
+                id: 'headlines-missing',
+                title: 'اقتراح العناوين غير مشغّل',
+                reason: 'لا توجد بدائل تحريرية للعنوان.',
+                impact: 'تحسين إضافي يمكن أن يرفع وضوح الخبر.',
+                rule: 'توليد عناوين متعددة للمقارنة.',
+                severity: 'low',
+                confidence: 0.55,
+                action: 'headlines',
+            });
+        }
+        if (!social) {
+            pushUnique(extra, {
+                id: 'social-missing',
+                title: 'نسخ السوشيال غير مولدة',
+                reason: 'لا توجد نسخ للنشر الاجتماعي.',
+                impact: 'تحسين إضافي لفريق الديجيتال.',
+                rule: 'توليد نسخ السوشيال قبل الجدولة.',
+                severity: 'low',
+                confidence: 0.5,
+                action: 'social',
+            });
+        }
+        if (!linkSuggestions.length) {
+            pushUnique(extra, {
+                id: 'links-missing',
+                title: 'روابط مقترحة غير متاحة',
+                reason: 'لم يتم توليد روابط داخلية/خارجية بعد.',
+                impact: 'تحسين إضافي للسياق والSEO.',
+                rule: 'توليد روابط سياقية عند الحاجة.',
+                severity: 'low',
+                confidence: 0.5,
+                action: 'links',
+            });
+        }
+
+        const headlineCandidates = headlines.length
+            ? headlines.map((h: any) => String(h?.headline || '')).filter(Boolean)
+            : [title || context?.article?.title_ar || context?.article?.original_title || ''];
+        const scored = headlineCandidates.map((h) => ({ headline: h, ...evaluateHeadline(h, isBreaking) }));
+        scored.sort((a, b) => b.score - a.score);
+        const bestHeadline = scored[0] || { headline: '', score: 0, risks: [], reasons: [] };
+
+        urgent.sort((a, b) => severityRank(b.severity) - severityRank(a.severity));
+        improve.sort((a, b) => severityRank(b.severity) - severityRank(a.severity));
+        extra.sort((a, b) => severityRank(b.severity) - severityRank(a.severity));
+
+        return { urgent, improve, extra, bestHeadline };
+    }, [readiness, claims, proofread, quality, seoPack, headlines, social, linkSuggestions, context?.article?.urgency, context?.article?.title_ar, context?.article?.original_title, title]);
     const runAudienceSimulation = useMutation({
         mutationFn: async () => {
             const headline = cleanText(title || context?.article?.title_ar || context?.article?.original_title || '');
@@ -712,6 +974,20 @@ function WorkspaceDraftsPageContent() {
         autoCreateAttemptRef.current = true;
         createDraftFromArticle.mutate();
     }, [articleNumericId, listLoading, workId, drafts.length, createDraftFromArticle]);
+
+    const decisionActionHandlers: Record<DecisionActionId, () => void> = {
+        verify: () => runVerifier.mutate(),
+        quality: () => runQuality.mutate(),
+        proofread: () => runProofread.mutate(),
+        seo: () => runSeo.mutate(),
+        headlines: () => runHeadlines.mutate(),
+        links: () => runLinks.mutate(),
+        social: () => runSocial.mutate(),
+        publish_gate: () => runReadiness.mutate(),
+        quick_check: () => runQuickCheck.mutate(),
+    };
+
+    const showSidePanels = viewMode === 'deep';
 
     const saveNode = useMemo(() => {
         if (saveState === 'saved') return <span className="text-emerald-300 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" />محفوظ</span>;
@@ -903,9 +1179,94 @@ function WorkspaceDraftsPageContent() {
                     <button disabled={runReadiness.isPending} onClick={() => runWithGuide('publish_gate', () => runReadiness.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-200 text-xs disabled:opacity-60">{runReadiness.isPending ? 'جاري الفحص...' : 'بوابة النشر'}</button>
                     <button disabled={applyToArticle.isPending} onClick={() => runWithGuide('apply', () => applyToArticle.mutate())} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs disabled:opacity-60">{applyToArticle.isPending ? 'جاري الإرسال...' : 'إرسال لاعتماد رئيس التحرير'}</button>
                     <button disabled={autosave.isPending} onClick={() => runWithGuide('save', () => { setSaveState('saving'); autosave.mutate(); })} className="shrink-0 min-h-10 px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs flex items-center gap-2 disabled:opacity-60"><Save className="w-4 h-4" />حفظ</button>
+                    <div className="ml-auto flex items-center gap-2">
+                        <button
+                            onClick={() => setViewMode('speed')}
+                            className={cn('min-h-10 px-3 py-2 rounded-xl border text-xs', viewMode === 'speed' ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-100' : 'bg-white/5 border-white/15 text-gray-300')}
+                        >
+                            وضع السرعة
+                        </button>
+                        <button
+                            onClick={() => setViewMode('deep')}
+                            className={cn('min-h-10 px-3 py-2 rounded-xl border text-xs', viewMode === 'deep' ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-100' : 'bg-white/5 border-white/15 text-gray-300')}
+                        >
+                            وضع العمق
+                        </button>
+                    </div>
                 </div>
 
                 {(err || ok) && <div className={cn('mt-3 rounded-xl px-3 py-2 text-xs', err ? 'bg-red-500/15 text-red-200 border border-red-500/30' : 'bg-emerald-500/15 text-emerald-200 border border-emerald-500/30')}>{err || ok}</div>}
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h2 className="text-sm text-white font-semibold">مساعد المحرر</h2>
+                        <p className="text-[11px] text-gray-400">قرارات واضحة قبل النشر: ما يمنع النشر وما يمكن إصلاحه سريعاً.</p>
+                    </div>
+                    <button
+                        onClick={() => decisionActionHandlers.quick_check()}
+                        className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200"
+                    >
+                        تشغيل فحص السرعة
+                    </button>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                    {[
+                        { title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد موانع حرجة حالياً.' },
+                        { title: 'يحسّن الجودة', items: decisionModel.improve, empty: 'لا توجد تحسينات عاجلة للجودة.' },
+                        { title: 'تحسينات إضافية', items: decisionModel.extra, empty: 'لا توجد تحسينات إضافية الآن.' },
+                    ].map((section) => (
+                        <div key={section.title} className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
+                            <h3 className="text-xs text-gray-200 font-semibold">{section.title}</h3>
+                            {section.items.length === 0 ? (
+                                <p className="text-[11px] text-gray-500">{section.empty}</p>
+                            ) : (
+                                section.items.slice(0, 4).map((item) => {
+                                    const styles = severityStyles(item.severity);
+                                    return (
+                                        <div key={item.id} className={cn('rounded-lg border p-2 space-y-1', styles.border)}>
+                                            <div className="flex items-center justify-between gap-2">
+                                                <p className="text-[11px] text-white">{item.title}</p>
+                                                <span className={cn('px-2 py-0.5 rounded text-[10px]', styles.badge)}>
+                                                    {item.severity === 'critical' ? 'حرج' : item.severity === 'high' ? 'عاجل' : item.severity === 'medium' ? 'متوسط' : 'خفيف'}
+                                                </span>
+                                            </div>
+                                            <p className="text-[11px] text-gray-200">{item.reason}</p>
+                                            <p className="text-[10px] text-gray-400">الأثر: {item.impact}</p>
+                                            <p className="text-[10px] text-gray-500">القاعدة: {item.rule}</p>
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-[10px] text-gray-500">
+                                                    الثقة: {item.confidence ? `${Math.round(item.confidence * 100)}%` : '—'}
+                                                </span>
+                                                {item.action && (
+                                                    <button
+                                                        onClick={() => decisionActionHandlers[item.action]?.()}
+                                                        className="text-[10px] px-2 py-1 rounded bg-white/10 text-gray-200"
+                                                    >
+                                                        إصلاح الآن
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
+                    ))}
+                </div>
+
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-100 space-y-1">
+                    <p className="font-semibold text-emerald-200">أفضل عنوان مقترح</p>
+                    <p>{cleanText(decisionModel.bestHeadline.headline || 'لا يوجد عنوان مقترح حالياً.')}</p>
+                    {!!decisionModel.bestHeadline.reasons?.length && (
+                        <p className="text-[11px] text-emerald-200/90">السبب: {decisionModel.bestHeadline.reasons.slice(0, 2).join(' • ')}</p>
+                    )}
+                    {!!decisionModel.bestHeadline.risks?.length && (
+                        <p className="text-[11px] text-amber-200">مخاطر محتملة: {decisionModel.bestHeadline.risks.slice(0, 2).join(' • ')}</p>
+                    )}
+                </div>
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
@@ -967,6 +1328,7 @@ function WorkspaceDraftsPageContent() {
                     )}
                 </main>
 
+                {showSidePanels && (
                 <aside className="order-2 xl:order-1 xl:col-span-3 space-y-4">
                     <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4">
                         <h2 className="text-sm text-white mb-2">المسودات</h2>
@@ -990,7 +1352,9 @@ function WorkspaceDraftsPageContent() {
                         )}
                     </div>
                 </aside>
+                )}
 
+                {showSidePanels && (
                 <aside className="order-3 xl:order-3 xl:col-span-3 space-y-4">
                     <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4">
                         <div className="flex gap-2 overflow-x-auto pb-1 xl:flex-wrap xl:overflow-visible">
@@ -1431,6 +1795,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
                 </aside>
+                )}
             </div>
 
             {newDraftOpen && (

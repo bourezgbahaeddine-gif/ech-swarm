@@ -61,6 +61,47 @@ TEMPLATE_NOISE_PATTERNS = [
     r"(?i)\btemplate\b",
 ]
 
+STYLE_RULES = [
+    {
+        "id": "avoid_qam_ba",
+        "pattern": r"\bقام(?:ت|وا|ن)?\s+ب",
+        "message": "صياغة ثقيلة تعتمد على «قام بـ».",
+        "rule": "يُفضّل استخدام الفعل المباشر بدل «قام بـ».",
+        "replacement": "استخدم الفعل المباشر (مثل: زار/افتتح/أعلن).",
+        "severity": "medium",
+        "confidence": 0.7,
+    },
+    {
+        "id": "avoid_tamma_masdar",
+        "pattern": r"\bتم\s+\w+",
+        "message": "صياغة مبنية للمجهول «تم + مصدر».",
+        "rule": "تجنّب «تم + مصدر» عندما توجد صياغة عربية أقوى.",
+        "replacement": "استخدم الفعل المباشر (مثل: أُعلن/أُنشئ/أُقرّ).",
+        "severity": "medium",
+        "confidence": 0.65,
+    },
+    {
+        "id": "avoid_akkada_bi",
+        "pattern": r"\bأكد\s+بأن\b",
+        "message": "تركيب غير مفضّل تحريرياً «أكد بأن».",
+        "rule": "يُفضّل «أكد أن» بدلاً من «أكد بأن».",
+        "replacement": "أكد أن",
+        "severity": "low",
+        "confidence": 0.8,
+    },
+    {
+        "id": "avoid_da3a_ila_darura",
+        "pattern": r"\bدعا\s+إلى\s+ضرورة\b",
+        "message": "حشو لغوي في «دعا إلى ضرورة».",
+        "rule": "يُفضّل الاختصار: «دعا إلى المشاركة».",
+        "replacement": "دعا إلى المشاركة",
+        "severity": "low",
+        "confidence": 0.75,
+    },
+]
+
+HEADLINE_VAGUE_PATTERN = r"\b(هذا|هذه|هؤلاء|ذلك|تلك)\b"
+
 
 @dataclass
 class DiffResult:
@@ -268,11 +309,103 @@ class SmartEditorService:
                         "before": str(item.get("before") or "").strip()[:280],
                         "after": str(item.get("after") or "").strip()[:280],
                         "count": item.get("count"),
+                        "rule": str(item.get("rule") or "").strip()[:280],
+                        "severity": str(item.get("severity") or "").strip()[:32],
+                        "confidence": item.get("confidence"),
                     }
                 )
             elif isinstance(item, str):
-                out.append({"kind": "language", "message": item.strip()[:280], "before": "", "after": "", "count": None})
+                out.append(
+                    {
+                        "kind": "language",
+                        "message": item.strip()[:280],
+                        "before": "",
+                        "after": "",
+                        "count": None,
+                        "rule": "",
+                        "severity": "",
+                        "confidence": None,
+                    }
+                )
         return [x for x in out if x.get("message")]
+
+    @staticmethod
+    def _dedupe_issues(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        seen: set[str] = set()
+        out: list[dict[str, Any]] = []
+        for item in issues or []:
+            key = f"{item.get('kind')}::{item.get('message')}::{item.get('before')}"
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(item)
+        return out
+
+    @staticmethod
+    def _editorial_style_issues(title: str, text: str) -> list[dict[str, Any]]:
+        issues: list[dict[str, Any]] = []
+        clean_title = (title or "").strip()
+        clean_text = (text or "").strip()
+
+        if clean_title and re.search(HEADLINE_VAGUE_PATTERN, clean_title):
+            issues.append(
+                {
+                    "kind": "headline",
+                    "message": "العنوان يستخدم ضمير إشارة وقد يكون مبهماً.",
+                    "before": clean_title[:160],
+                    "after": "",
+                    "rule": "العنوان يجب أن يفصح عن العنصر الخبري الأساسي.",
+                    "severity": "medium",
+                    "confidence": 0.7,
+                }
+            )
+        if clean_title:
+            words = re.findall(r"\\S+", clean_title)
+            if len(words) < 5 or len(words) > 16:
+                issues.append(
+                    {
+                        "kind": "headline",
+                        "message": "طول العنوان غير مناسب (قصير جداً أو طويل جداً).",
+                        "before": clean_title[:160],
+                        "after": "",
+                        "rule": "طول العنوان الصحفي المفضل بين 8 و14 كلمة.",
+                        "severity": "low",
+                        "confidence": 0.6,
+                    }
+                )
+
+        for rule in STYLE_RULES:
+            for match in re.finditer(rule["pattern"], clean_text):
+                snippet = clean_text[max(0, match.start() - 40) : match.end() + 40]
+                issues.append(
+                    {
+                        "kind": "style",
+                        "message": rule["message"],
+                        "before": snippet[:180],
+                        "after": rule.get("replacement", ""),
+                        "rule": rule["rule"],
+                        "severity": rule["severity"],
+                        "confidence": rule["confidence"],
+                    }
+                )
+
+        sentences = [s.strip() for s in re.split(r"[.!؟\\n]+", clean_text) if s.strip()]
+        for sentence in sentences:
+            if len(re.findall(r"\\S+", sentence)) >= 35:
+                issues.append(
+                    {
+                        "kind": "clarity",
+                        "message": "جملة طويلة قد تُضعف الوضوح وتحتاج اختصاراً.",
+                        "before": sentence[:180],
+                        "after": "",
+                        "rule": "يفضل تقسيم الجمل الطويلة لضمان وضوح القراءة.",
+                        "severity": "medium",
+                        "confidence": 0.55,
+                    }
+                )
+                break
+
+        return issues
 
     async def rewrite_suggestion(
         self,
@@ -403,6 +536,9 @@ title, body_html, note, issues
         issues = self._normalize_proofread_issues(data.get("issues"))
         if not issues:
             issues = local_issues
+        style_issues = self._editorial_style_issues(title, after_text)
+        if style_issues:
+            issues = self._dedupe_issues(issues + style_issues)
 
         diff_text = self.build_diff(plain_before, after_text)
         diff_html = self.build_diff(draft_html, sanitized)
