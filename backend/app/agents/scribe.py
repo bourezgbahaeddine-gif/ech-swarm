@@ -99,7 +99,7 @@ class ScribeAgent:
         try:
             content = article.original_content or article.summary or article.original_title
             category = article.category.value if article.category else "general"
-            support_articles = await self._retrieve_supporting_articles(db, article.id, content)
+            support_articles = await self._retrieve_supporting_articles(db, article, content)
             context_block = self._format_supporting_context(support_articles)
             content_with_context = f"{context_block}\n\n{content}" if context_block else content
 
@@ -190,7 +190,7 @@ class ScribeAgent:
     async def _retrieve_supporting_articles(
         self,
         db: AsyncSession,
-        article_id: int,
+        article: Article,
         text: str,
         limit: int = 3,
     ) -> list[dict]:
@@ -213,7 +213,7 @@ class ScribeAgent:
             .where(
                 ArticleVector.vector_type == "summary",
                 Article.status != NewsStatus.ARCHIVED,
-                Article.id != article_id,
+                Article.id != article.id,
             )
             .order_by(ArticleVector.embedding.cosine_distance(query_vec))
             .limit(limit * 4)
