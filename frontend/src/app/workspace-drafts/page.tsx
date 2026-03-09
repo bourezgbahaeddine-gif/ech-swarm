@@ -1225,6 +1225,8 @@ function WorkspaceDraftsPageContent() {
                             ) : (
                                 section.items.slice(0, 4).map((item) => {
                                     const styles = severityStyles(item.severity);
+                                    const actionKey = item.action;
+                                    const actionHandler = actionKey ? decisionActionHandlers[actionKey] : undefined;
                                     return (
                                         <div key={item.id} className={cn('rounded-lg border p-2 space-y-1', styles.border)}>
                                             <div className="flex items-center justify-between gap-2">
@@ -1240,9 +1242,9 @@ function WorkspaceDraftsPageContent() {
                                                 <span className="text-[10px] text-gray-500">
                                                     الثقة: {item.confidence ? `${Math.round(item.confidence * 100)}%` : '—'}
                                                 </span>
-                                                {item.action && (
+                                                {actionHandler && (
                                                     <button
-                                                        onClick={() => decisionActionHandlers[item.action]?.()}
+                                                        onClick={() => actionHandler()}
                                                         className="text-[10px] px-2 py-1 rounded bg-white/10 text-gray-200"
                                                     >
                                                         إصلاح الآن
