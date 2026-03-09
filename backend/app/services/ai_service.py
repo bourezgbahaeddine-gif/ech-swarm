@@ -142,33 +142,48 @@ Output Schema (JSON only, no markdown):
         """
         Rewrite an article in Echorouk style using Groq (fast) or Gemini Flash.
         """
-        prompt = f"""Role: You are a Senior Editor at Echorouk, Algeria's leading newspaper.
-Task: Rewrite this news content into a professional Arabic newsroom draft.
+        prompt = f"""أنت رئيس تحرير رقمي في جريدة الشروق.
+المطلوب: صياغة مسودة خبر عربية احترافية من النص التالي فقط، بدون اختراع أي معلومة.
 
-Guidelines:
-1. Use the Inverted Pyramid style (most important first).
-2. Tone: Professional, objective, suitable for digital news.
-3. No side comments, no explanation, no markdown, no code fences.
-4. Strictly avoid WordPress/Gutenberg artifacts like <!-- wp:... -->.
-5. body_html must be clean semantic HTML only.
-6. body_html must contain exactly one <h1> at the top, then multiple <p> and optional <h2>.
-7. Include at least one internal link to Echorouk (href starts with /news or /).
-8. Use at least two Arabic transition words between paragraphs (مثل: لذلك، بالمقابل، إضافة إلى ذلك).
-9. Keep body around 220-420 words.
-10. Include SEO-friendly title and meta description.
+قواعد صارمة:
+1) لا تضف حقائق غير موجودة في النص أو السياق الداعم.
+2) حافظ على الأسماء والأرقام والتواريخ كما وردت.
+3) إن لم تُذكر معلومة أساسية، لا تخمّنها ولا تلمّح إليها.
+4) ممنوع أي شرح خارج النص أو تعليقات جانبية أو Markdown أو كتل كود.
+5) تجنّب الصيغ المترهلة مثل "تم + مصدر" و"قام بـ" قدر الإمكان.
+6) النبرة خبرية محايدة، بلا مبالغة أو أحكام.
 
-Category: {category}
+بنية التحرير (الهرم المقلوب):
+- فقرة أولى قوية تلخّص أهم العناصر: ماذا/من/أين/متى/لماذا إن وُجدت.
+- تفاصيل إضافية مرتبة، ثم خلفية قصيرة إذا كانت موجودة في النص.
+- استخدم جُملاً قصيرة واضحة، وفقرات من 2-4 جمل.
+- أضف انتقالين عربيين على الأقل بين الفقرات (مثال: لذلك، بالمقابل، إضافة إلى ذلك، في المقابل).
 
-Output Format (JSON only):
+تنسيق HTML:
+- body_html يجب أن يكون HTML نظيفاً فقط.
+- يحتوي <h1> واحداً في البداية، ثم فقرات <p>، و<h2> اختياري عند الحاجة.
+- أضف رابطاً داخلياً واحداً على الأقل للشروق (href يبدأ بـ /news أو /).
+
+قيود الحجم:
+- بين 220 و420 كلمة تقريباً.
+
+SEO:
+- seo_title واضح ومباشر (30-65 حرفاً).
+- seo_description بين 80 و170 حرفاً وتلخّص الخبر دون مبالغة.
+- tags بين 3 و6 كلمات مفتاحية عربية واقعية من النص.
+
+التصنيف: {category}
+
+صيغة الإخراج (JSON فقط):
 {{
-  "headline": "String (Arabic, clear, max 15 words)",
-  "body_html": "String (Clean HTML only: one h1 + paragraphs + optional h2 + at least one internal link)",
-  "seo_title": "String (30-65 chars)",
-  "seo_description": "String (80-170 chars)",
-  "tags": ["tag1", "tag2"]
+  "headline": "عنوان عربي واضح (حد أقصى 15 كلمة)",
+  "body_html": "HTML نظيف: H1 واحد + فقرات + H2 اختياري + رابط داخلي واحد على الأقل",
+  "seo_title": "عنوان SEO (30-65 حرفاً)",
+  "seo_description": "وصف SEO (80-170 حرفاً)",
+  "tags": ["كلمة1", "كلمة2", "كلمة3"]
 }}
 
-Content to rewrite:
+النص لإعادة الصياغة:
 {content[:6000]}"""
 
         async def _run(provider_name: str) -> dict:
