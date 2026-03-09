@@ -29,10 +29,6 @@ export interface ApiEnvelope<T> {
         timestamp?: string;
         [key: string]: unknown;
     };
-    review_report?: string | null;
-    review_verdict?: string | null;
-    review_recommendation?: string | null;
-    review_priority?: string | null;
 }
 
 function isApiEnvelope(value: unknown): value is ApiEnvelope<unknown> {
@@ -343,6 +339,10 @@ export interface PublishedMonitorItem {
     grade: string;
     issues: string[];
     suggestions: string[];
+    review_report?: string | null;
+    review_verdict?: string | null;
+    review_recommendation?: string | null;
+    review_priority?: string | null;
     metrics: {
         title_length: number;
         word_count: number;
