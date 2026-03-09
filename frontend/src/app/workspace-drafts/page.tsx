@@ -59,6 +59,14 @@ type DecisionItem = {
     confidence?: number;
     action?: DecisionActionId;
 };
+type ReviewCard = {
+    id: string;
+    title: string;
+    value: string;
+    hint: string;
+    severity: DecisionSeverity;
+    action?: DecisionActionId;
+};
 
 const TABS: Array<{ id: RightTab; label: string }> = [
     { id: 'evidence', label: 'التحقق والأدلة' },
@@ -90,6 +98,18 @@ const ACTION_HELP: Record<ActionId, { title: string; description: string }> = {
     save: { title: 'زر الحفظ', description: 'يحفظ التعديلات فورياً ويحدّث النسخ.' },
     manual_draft: { title: 'زر مسودة جديدة', description: 'ينشئ مسودة خاصة لموضوع غير وارد من المصادر الآلية.' },
     audience_test: { title: 'زر محاكي الجمهور', description: 'يحاكي ردود الجمهور المتوقعة ويعرض مخاطر المحتوى وقابلية الانتشار قبل الاعتماد.' },
+};
+
+const ACTION_SOURCE_LABELS: Record<DecisionActionId, string> = {
+    verify: 'تحقق الادعاءات',
+    quality: 'تقييم الجودة',
+    proofread: 'تدقيق لغوي',
+    seo: 'SEO',
+    headlines: 'عناوين',
+    links: 'روابط',
+    social: 'سوشيال',
+    publish_gate: 'بوابة النشر',
+    quick_check: 'فحص سريع',
 };
 
 const STAGE_LABELS: Record<string, string> = {
@@ -203,6 +223,10 @@ function severityStyles(sev: DecisionSeverity): { badge: string; border: string 
     }
 }
 
+function severityLabel(sev: DecisionSeverity): string {
+    return sev === 'critical' ? 'حرج' : sev === 'high' ? 'عاجل' : sev === 'medium' ? 'متوسط' : 'خفيف';
+}
+
 function impactBySeverity(sev: DecisionSeverity): string {
     switch (sev) {
         case 'critical':
@@ -256,6 +280,34 @@ function evaluateHeadline(headline: string, isBreaking: boolean): { score: numbe
 
     score = Math.max(0, Math.min(100, score));
     return { score, risks, reasons };
+}
+
+function classifyClaimSource(text: string): { label: string; reason: string; severity: DecisionSeverity } {
+    const clean = cleanText(text || '');
+    const hasNumber = /\d/.test(clean);
+    const hasDate = /\b(20\d{2}|19\d{2})\b/.test(clean);
+    const hasQuote = /["«»]/.test(clean);
+    const hasAttribution = /(بحسب|وفق|أفاد|أعلن|صرّح|أكد|ذكر)/.test(clean);
+
+    if (hasNumber || hasDate || hasQuote) {
+        return {
+            label: 'يحتاج مصدراً أولياً',
+            reason: 'يتضمن رقماً/تاريخاً/اقتباساً يستلزم مصدرًا مباشرًا.',
+            severity: 'high',
+        };
+    }
+    if (hasAttribution) {
+        return {
+            label: 'مصدر مذكور',
+            reason: 'يوجد إسناد داخل الجملة لكن يلزم التحقق منه.',
+            severity: 'medium',
+        };
+    }
+    return {
+        label: 'مصدر ثانوي مقبول',
+        reason: 'ادعاء وصفي بدون أرقام مباشرة.',
+        severity: 'low',
+    };
 }
 
 function actionKey(action: ActionId): string {
@@ -870,6 +922,125 @@ function WorkspaceDraftsPageContent() {
 
         return { urgent, improve, extra, bestHeadline };
     }, [readiness, claims, proofread, quality, seoPack, headlines, social, linkSuggestions, context?.article?.urgency, context?.article?.title_ar, context?.article?.original_title, title]);
+
+    const headlineInsights = useMemo(() => {
+        const isBreaking = String(context?.article?.urgency || '').toLowerCase() === 'breaking';
+        const candidates = (headlines.length
+            ? headlines.map((h: any) => String(h?.headline || '')).filter(Boolean)
+            : [title || context?.article?.title_ar || context?.article?.original_title || ''].filter(Boolean));
+        const scored = candidates.map((headline) => ({ headline, ...evaluateHeadline(headline, isBreaking) }));
+        scored.sort((a, b) => b.score - a.score);
+        return scored;
+    }, [headlines, title, context?.article?.title_ar, context?.article?.original_title, context?.article?.urgency]);
+
+    const professionalReview = useMemo(() => {
+        const proofIssues = (proofread?.issues || []) as Array<any>;
+        const proofHigh = proofIssues.filter((issue) => ['critical', 'high'].includes(String(issue?.severity))).length;
+        const proofTotal = proofIssues.length;
+        const claimTotal = claims.length;
+        const claimBlocking = claims.filter((claim: any) => claim?.blocking).length;
+        const claimHighRisk = claims.filter((claim: any) => String(claim?.risk_level || '').toLowerCase() === 'high').length;
+        const qualityScore = typeof quality?.score === 'number' ? Number(quality.score) : null;
+        const readinessReady = Boolean(readiness?.ready_for_publish);
+
+        const cards: ReviewCard[] = [
+            {
+                id: 'readiness',
+                title: 'بوابة النشر',
+                value: readiness ? (readinessReady ? 'جاهز للنشر' : 'غير جاهز') : 'غير مفعلة',
+                hint: readiness ? (readinessReady ? 'لا توجد موانع حرجة حالياً.' : 'راجع أسباب المنع قبل الإرسال.') : 'شغّل بوابة النشر للتحقق من الجاهزية.',
+                severity: readiness ? (readinessReady ? 'low' : 'high') : 'medium',
+                action: 'publish_gate',
+            },
+            {
+                id: 'claims',
+                title: 'الادعاءات',
+                value: claimTotal ? `${claimBlocking} حرجة من ${claimTotal}` : 'لا ادعاءات بعد',
+                hint: claimBlocking ? 'ادعاءات بحاجة مصادر مباشرة.' : claimHighRisk ? 'يوجد ادعاءات عالية المخاطر.' : 'لا توجد ادعاءات حرجة.',
+                severity: claimBlocking ? 'high' : claimTotal ? 'medium' : 'low',
+                action: 'verify',
+            },
+            {
+                id: 'proofread',
+                title: 'التدقيق والأسلوب',
+                value: proofTotal ? `${proofTotal} ملاحظة` : 'نظيف',
+                hint: proofHigh ? `${proofHigh} ملاحظة عالية الأثر.` : proofTotal ? 'تحتاج تحسينات لغوية/أسلوبية.' : 'لا توجد ملاحظات كبيرة.',
+                severity: proofHigh ? 'high' : proofTotal ? 'medium' : 'low',
+                action: 'proofread',
+            },
+            {
+                id: 'quality',
+                title: 'جودة التحرير',
+                value: qualityScore !== null ? `${qualityScore}/100` : 'غير متاح',
+                hint: qualityScore !== null ? 'راجع مؤشرات البنية والوضوح.' : 'شغّل تقييم الجودة للحصول على الدرجة.',
+                severity: qualityScore !== null ? (qualityScore < 70 ? 'high' : qualityScore < 85 ? 'medium' : 'low') : 'medium',
+                action: 'quality',
+            },
+            {
+                id: 'headlines',
+                title: 'العناوين',
+                value: headlines.length ? `${headlines.length} عنوان` : 'غير مولدة',
+                hint: headlines.length ? 'قارن مع أفضل عنوان مقترح.' : 'ولّد بدائل للعنوان قبل الاعتماد.',
+                severity: headlines.length ? 'low' : 'medium',
+                action: 'headlines',
+            },
+            {
+                id: 'seo',
+                title: 'SEO + روابط',
+                value: seoPack ? 'جاهز' : 'غير مشغّل',
+                hint: linkSuggestions.length ? `روابط مقترحة: ${linkSuggestions.length}` : 'لم يتم توليد روابط بعد.',
+                severity: seoPack ? 'low' : 'medium',
+                action: 'seo',
+            },
+            {
+                id: 'social',
+                title: 'السوشيال',
+                value: social ? 'جاهز' : 'غير مشغّل',
+                hint: social ? 'نسخ جاهزة للنشر الرقمي.' : 'ولّد النسخ الاجتماعية قبل الجدولة.',
+                severity: social ? 'low' : 'low',
+                action: 'social',
+            },
+        ];
+
+        if (simResult) {
+            cards.push({
+                id: 'audience',
+                title: 'محاكي الجمهور',
+                value: `مخاطر ${Number(simResult?.risk_score || 0).toFixed(1)}/10`,
+                hint: `ثقة ${Number(simResult?.confidence_score || 0).toFixed(1)}% • انتشار ${Number(simResult?.virality_score || 0).toFixed(1)}/10`,
+                severity: Number(simResult?.risk_score || 0) >= 7 ? 'high' : Number(simResult?.risk_score || 0) >= 4 ? 'medium' : 'low',
+            });
+        } else {
+            cards.push({
+                id: 'audience',
+                title: 'محاكي الجمهور',
+                value: 'غير مشغّل',
+                hint: 'شغّل المحاكي لمعرفة المخاطر قبل الاعتماد.',
+                severity: 'low',
+            });
+        }
+
+        if (xrayItems.length) {
+            cards.push({
+                id: 'xray',
+                title: 'زوايا المنافسين',
+                value: `${xrayItems.length} زاوية متاحة`,
+                hint: 'استفد من Brief المقترح لإبراز قيمة الخبر.',
+                severity: 'low',
+            });
+        }
+
+        return cards;
+    }, [claims, headlines, linkSuggestions.length, proofread, quality, readiness, seoPack, simResult, social, xrayItems.length]);
+
+    const explanationItems = useMemo(() => {
+        const items = [...decisionModel.urgent, ...decisionModel.improve, ...decisionModel.extra];
+        return items.slice(0, 12).map((item) => ({
+            ...item,
+            source: item.action ? ACTION_SOURCE_LABELS[item.action] : 'تحليل آلي',
+        }));
+    }, [decisionModel]);
+
     const runAudienceSimulation = useMutation({
         mutationFn: async () => {
             const headline = cleanText(title || context?.article?.title_ar || context?.article?.original_title || '');
@@ -1232,7 +1403,7 @@ function WorkspaceDraftsPageContent() {
                                             <div className="flex items-center justify-between gap-2">
                                                 <p className="text-[11px] text-white">{item.title}</p>
                                                 <span className={cn('px-2 py-0.5 rounded text-[10px]', styles.badge)}>
-                                                    {item.severity === 'critical' ? 'حرج' : item.severity === 'high' ? 'عاجل' : item.severity === 'medium' ? 'متوسط' : 'خفيف'}
+                                                    {severityLabel(item.severity)}
                                                 </span>
                                             </div>
                                             <p className="text-[11px] text-gray-200">{item.reason}</p>
@@ -1270,6 +1441,74 @@ function WorkspaceDraftsPageContent() {
                     )}
                 </div>
             </div>
+
+            {viewMode === 'deep' && (
+                <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3">
+                    <div>
+                        <h2 className="text-sm text-white font-semibold">مراجعة احترافية</h2>
+                        <p className="text-[11px] text-gray-400">تلخيص سريع لمخرجات الجودة والتحقق والتهيئة قبل الاعتماد.</p>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                        {professionalReview.map((card) => {
+                            const styles = severityStyles(card.severity);
+                            const actionHandler = card.action ? decisionActionHandlers[card.action] : undefined;
+                            return (
+                                <div key={card.id} className={cn('rounded-xl border p-3 space-y-1', styles.border)}>
+                                    <div className="flex items-center justify-between gap-2">
+                                        <p className="text-[11px] text-white font-semibold">{card.title}</p>
+                                        <span className={cn('px-2 py-0.5 rounded text-[10px]', styles.badge)}>
+                                            {severityLabel(card.severity)}
+                                        </span>
+                                    </div>
+                                    <p className="text-sm text-gray-100">{card.value}</p>
+                                    <p className="text-[10px] text-gray-400">{card.hint}</p>
+                                    {actionHandler && (
+                                        <button
+                                            onClick={() => actionHandler()}
+                                            className="mt-1 rounded-lg border border-white/15 bg-white/10 px-2 py-1 text-[10px] text-gray-200"
+                                        >
+                                            فتح الأداة
+                                        </button>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+
+            {viewMode === 'deep' && (
+                <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3">
+                    <div>
+                        <h2 className="text-sm text-white font-semibold">ثقة وتفسير</h2>
+                        <p className="text-[11px] text-gray-400">لماذا ظهرت هذه الملاحظات؟ وما أثرها التحريري؟</p>
+                    </div>
+                    {explanationItems.length ? (
+                        <div className="space-y-2">
+                            {explanationItems.map((item) => {
+                                const styles = severityStyles(item.severity);
+                                return (
+                                    <div key={`explain-${item.id}`} className={cn('rounded-xl border p-3 space-y-1', styles.border)}>
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <p className="text-xs text-white font-semibold">{item.title}</p>
+                                            <div className="flex items-center gap-2">
+                                                <span className={cn('px-2 py-0.5 rounded text-[10px]', styles.badge)}>{severityLabel(item.severity)}</span>
+                                                <span className="text-[10px] text-gray-400">{item.source}</span>
+                                            </div>
+                                        </div>
+                                        <p className="text-[11px] text-gray-200">{item.reason}</p>
+                                        <p className="text-[10px] text-gray-400">الأثر: {item.impact}</p>
+                                        <p className="text-[10px] text-gray-500">القاعدة: {item.rule}</p>
+                                        <p className="text-[10px] text-gray-500">الثقة: {item.confidence ? `${Math.round(item.confidence * 100)}%` : '—'}</p>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ) : (
+                        <Empty text="لا توجد ملاحظات مفسّرة حالياً." />
+                    )}
+                </div>
+            )}
 
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
                 <main className="order-1 xl:order-2 xl:col-span-6 space-y-4">
@@ -1373,6 +1612,8 @@ function WorkspaceDraftsPageContent() {
                                     {claims.map((claim) => {
                                         const claimId = String(claim?.id || '');
                                         const draft = claimOverrideDrafts[claimId] || claimDraftFromClaim(claim);
+                                        const sourceInfo = classifyClaimSource(claim?.text || '');
+                                        const sourceStyles = severityStyles(sourceInfo.severity);
                                         return (
                                             <div
                                                 key={claimId}
@@ -1398,6 +1639,15 @@ function WorkspaceDraftsPageContent() {
                                                             {String(claim?.risk_level || 'low')}
                                                         </span>
                                                     </div>
+                                                </div>
+                                                <div className={cn('rounded-lg border px-2 py-1 text-[10px]', sourceStyles.border)}>
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <span className={cn('px-2 py-0.5 rounded text-[10px]', sourceStyles.badge)}>
+                                                            {sourceInfo.label}
+                                                        </span>
+                                                        <span className="text-gray-400">تصنيف المصدر</span>
+                                                    </div>
+                                                    <p className="text-gray-200 mt-1">{sourceInfo.reason}</p>
                                                 </div>
                                                 <textarea
                                                     value={draft.evidenceLinksRaw}
@@ -1645,7 +1895,23 @@ function WorkspaceDraftsPageContent() {
                                     </div>
                                 )}
                             </div>
-                            {!!headlines.length && <div className="mt-2 rounded-xl border border-white/10 bg-black/20 p-2 text-xs text-gray-200"><p className="text-gray-400 mb-1">العناوين المقترحة</p>{headlines.map((h: any, i: number) => <p key={`${h?.label || 'h'}-${i}`}>- {cleanText(h?.headline || '')}</p>)}</div>}
+                            {!!headlineInsights.length && (
+                                <div className="mt-2 rounded-xl border border-white/10 bg-black/20 p-2 text-xs text-gray-200 space-y-2">
+                                    <p className="text-gray-400 mb-1">تحليل العناوين (وضوح + SEO)</p>
+                                    {headlineInsights.map((item, idx) => (
+                                        <div key={`headline-${idx}-${item.headline}`} className="rounded-lg border border-white/10 bg-black/20 p-2 space-y-1">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <p className="text-gray-200 line-clamp-2">{cleanText(item.headline || '')}</p>
+                                                <span className={cn('px-2 py-0.5 rounded text-[10px]', item.score >= 80 ? 'bg-emerald-500/20 text-emerald-100' : item.score >= 65 ? 'bg-amber-500/20 text-amber-100' : 'bg-rose-500/20 text-rose-100')}>
+                                                    {item.score}/100
+                                                </span>
+                                            </div>
+                                            {!!item.reasons?.length && <p className="text-[10px] text-emerald-200">أسباب القوة: {item.reasons.slice(0, 2).join(' • ')}</p>}
+                                            {!!item.risks?.length && <p className="text-[10px] text-amber-200">مخاطر: {item.risks.slice(0, 2).join(' • ')}</p>}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </Panel>
                     )}
 
