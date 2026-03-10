@@ -485,6 +485,8 @@ function WorkspaceDraftsPageContent() {
     const paletteInputRef = useRef<HTMLInputElement | null>(null);
     const [diffOpen, setDiffOpen] = useState(false);
     const [storyOpen, setStoryOpen] = useState(false);
+    const [overrideOpen, setOverrideOpen] = useState(false);
+    const [overrideNote, setOverrideNote] = useState('');
     const lastSavedRef = useRef<{ title: string; body: string }>({ title: '', body: '' });
     const allowedTabs = useMemo(() => TABS.filter((tab) => (tab.id === 'msi' ? isDirector : true)), [isDirector]);
     const visibleTabs = useMemo(() => {
@@ -1341,6 +1343,27 @@ function WorkspaceDraftsPageContent() {
             }
             queryClient.invalidateQueries({ queryKey: ['smart-editor-context', workId] });
         },
+        onError: (e: any) => {
+            const detail = e?.response?.data?.detail;
+            if (detail?.blocking_reasons) {
+                setErr('لا يمكن الإرسال بسبب موانع. يمكنك إرسال طلب بتحفّظ.');
+                setOverrideOpen(true);
+                return;
+            }
+            setErr(detail || e?.message || 'تعذر إرسال النسخة.');
+        },
+    });
+    const submitWithReservations = useMutation({
+        mutationFn: () => editorialApi.submitWorkspaceDraftWithReservations(workId!, { notes: overrideNote.trim() }),
+        onSuccess: (res) => {
+            const data = res.data || {};
+            setOk(data?.message || 'تم إرسال طلب اعتماد بتحفظات.');
+            setErr(null);
+            setOverrideOpen(false);
+            setOverrideNote('');
+            queryClient.invalidateQueries({ queryKey: ['smart-editor-context', workId] });
+        },
+        onError: (e: any) => setErr(e?.response?.data?.detail || e?.message || 'تعذر إرسال الطلب بتحفظات'),
     });
     const createManualDraft = useMutation({
         mutationFn: () =>
@@ -1507,6 +1530,12 @@ function WorkspaceDraftsPageContent() {
                 label: 'Story Mode',
                 keywords: ['story', 'timeline'],
                 run: () => setStoryOpen(true),
+            },
+            {
+                id: 'submit_with_reservations',
+                label: 'إرسال بتحفّظ',
+                keywords: ['override', 'reservations'],
+                run: () => setOverrideOpen(true),
             },
             {
                 id: 'new_draft',
@@ -1856,6 +1885,13 @@ function WorkspaceDraftsPageContent() {
                                 </button>
                             )}
                             <button
+                                onClick={() => setOverrideOpen(true)}
+                                disabled={!workId}
+                                className="px-2 py-1 rounded bg-amber-500/20 border border-amber-500/30 text-[10px] text-amber-100 disabled:opacity-60"
+                            >
+                                إرسال بتحفّظ
+                            </button>
+                            <button
                                 onClick={() => { setDetailsOpen(true); setShowUrgentAll(true); }}
                                 className="px-2 py-1 rounded bg-black/20 border border-white/15 text-[10px]"
                             >
@@ -1977,7 +2013,7 @@ function WorkspaceDraftsPageContent() {
                 </div>
 
                 {!detailsOpen && (
-                    <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4">
+                    <div className="rounded-xl border border-white/10 bg-gray-950/50 p-3">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                             <div>
                                 <p className="text-xs text-gray-200">الجاهزية: {compactStatus.readinessLabel} • ادعاءات حرجة: {compactStatus.blockingClaims} • الجودة: {compactStatus.qualityScore}</p>
@@ -2020,7 +2056,7 @@ function WorkspaceDraftsPageContent() {
                 </div>
 
                 {blockerSummary.count > 0 && (
-                    <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-[11px] text-red-100 space-y-2">
+                    <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-[10px] text-red-100 space-y-2">
                         <div className="flex items-center justify-between gap-2">
                             <p className="font-semibold">موانع حرجة ({blockerSummary.count})</p>
                             <div className="flex items-center gap-2">
@@ -2032,6 +2068,13 @@ function WorkspaceDraftsPageContent() {
                                         حل الآن
                                     </button>
                                 )}
+                                <button
+                                    onClick={() => setOverrideOpen(true)}
+                                    disabled={!workId}
+                                    className="px-2 py-1 rounded bg-amber-500/20 border border-amber-500/30 text-[10px] text-amber-100 disabled:opacity-60"
+                                >
+                                    إرسال بتحفّظ
+                                </button>
                                 <button
                                     onClick={() => setBlockersOpen((prev) => !prev)}
                                     className="px-2 py-1 rounded bg-black/20 border border-white/15 text-[10px]"
@@ -2045,9 +2088,9 @@ function WorkspaceDraftsPageContent() {
                                 const styles = severityStyles(item.severity);
                                 const actionHandler = item.action ? decisionActionHandlers[item.action] : undefined;
                                 return (
-                                    <div key={`blocker-${item.id}`} className={cn('rounded-md border p-2', styles.border)}>
+                                    <div key={`blocker-${item.id}`} className={cn('rounded-md border p-1', styles.border)}>
                                         <div className="flex items-center justify-between gap-2">
-                                            <p className="text-[11px] text-white line-clamp-1">{item.title}</p>
+                                            <p className="text-[10px] text-white line-clamp-1">{item.title}</p>
                                             {actionHandler && (
                                                 <button onClick={() => actionHandler()} className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-gray-100">
                                                     معالجة
@@ -2336,7 +2379,7 @@ function WorkspaceDraftsPageContent() {
 
                 {showSidePanels && (
                 <aside className="order-2 xl:order-1 xl:col-span-2 space-y-4 xl:sticky xl:top-24 self-start max-h-[calc(100vh-140px)] overflow-auto pr-1">
-                    <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3">
+                    <div className="rounded-xl border border-white/10 bg-gray-950/50 p-3 space-y-3">
                         <div className="flex flex-wrap items-center gap-2">
                             <button
                                 onClick={() => setLeftTab('drafts')}
@@ -2363,7 +2406,7 @@ function WorkspaceDraftsPageContent() {
                                 <h2 className="text-sm text-white mb-2">المسودات</h2>
                                 <div className="space-y-2 max-h-[260px] overflow-auto">
                                     {drafts.map((d) => (
-                                        <button key={`${d.work_id}-${d.id}`} onClick={() => setWorkId(d.work_id)} className={cn('w-full text-right rounded-xl border p-2', workId === d.work_id ? 'border-emerald-400/40 bg-emerald-500/10' : 'border-white/10 bg-white/5')}>
+                                        <button key={`${d.work_id}-${d.id}`} onClick={() => setWorkId(d.work_id)} className={cn('w-full text-right rounded-lg border p-2', workId === d.work_id ? 'border-emerald-400/40 bg-emerald-500/10' : 'border-white/10 bg-white/5')}>
                                             <div className="text-xs text-gray-200">{truncate(cleanText(d.title || 'بدون عنوان'), 58)}</div>
                                             <div className="text-[10px] text-gray-500 mt-1">{formatRelativeTime(d.updated_at)}</div>
                                         </button>
@@ -2426,7 +2469,7 @@ function WorkspaceDraftsPageContent() {
                                 )}
                                 <div className="space-y-2 max-h-[320px] overflow-auto">
                                     {archiveItems.map((item) => (
-                                        <div key={`archive-${item.id}`} className="rounded-xl border border-white/10 bg-black/20 p-2">
+                                        <div key={`archive-${item.id}`} className="rounded-lg border border-white/10 bg-black/20 p-2">
                                             <p className="text-xs text-gray-200 line-clamp-2">{cleanText(item.title || 'بدون عنوان')}</p>
                                             <p className="text-[10px] text-gray-500 mt-1">
                                                 {item.published_at ? new Date(item.published_at).toLocaleDateString('ar-DZ') : 'بدون تاريخ'}
@@ -2539,7 +2582,7 @@ function WorkspaceDraftsPageContent() {
                         </div>
                     </Panel>
 
-                    {detailsOpen && (
+                    {detailsOpen && toolsExpanded && (
                     <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4">
                         <div className="flex gap-2 overflow-x-auto pb-1 xl:flex-wrap xl:overflow-visible">
                             {visibleTabs.map((t) => (
@@ -2555,7 +2598,7 @@ function WorkspaceDraftsPageContent() {
                     </div>
                     )}
 
-                    {detailsOpen && activeTab === 'evidence' && (
+                    {detailsOpen && toolsExpanded && activeTab === 'evidence' && (
                         <Panel title="نتائج التحقق">
                             {claims.length ? (
                                 <div className="space-y-2">
@@ -2652,7 +2695,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {detailsOpen && activeTab === 'proofread' && (
+                    {detailsOpen && toolsExpanded && activeTab === 'proofread' && (
                         <Panel title="نتائج التدقيق اللغوي">
                             {proofread ? (
                                 <div className="space-y-2 text-xs text-gray-200">
@@ -2704,7 +2747,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {detailsOpen && activeTab === 'quality' && (
+                    {detailsOpen && toolsExpanded && activeTab === 'quality' && (
                         <Panel title="تقييم الجودة">
                             {quality ? (
                                 <div className="space-y-2 text-xs text-gray-200">
@@ -2772,7 +2815,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {detailsOpen && activeTab === 'seo' && (
+                    {detailsOpen && toolsExpanded && activeTab === 'seo' && (
                         <Panel title="نتائج SEO">
                             {seoPack ? (
                                 <div className="space-y-2 text-xs text-gray-200">
@@ -2898,7 +2941,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {detailsOpen && activeTab === 'social' && (
+                    {detailsOpen && toolsExpanded && activeTab === 'social' && (
                         <Panel title="نسخ السوشيال">
                             {social ? (
                                 <div className="space-y-2 text-xs text-gray-200">
@@ -2912,7 +2955,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {detailsOpen && activeTab === 'msi' && (
+                    {detailsOpen && toolsExpanded && activeTab === 'msi' && (
                         <Panel title="MSI السياقي">
                             {msiContextHit ? (
                                 <div className={cn('rounded-xl border p-2 text-xs', Number(msiContextHit.msi || 100) < 60 ? 'border-red-500/30 bg-red-500/10 text-red-100' : 'border-amber-500/30 bg-amber-500/10 text-amber-100')}>
@@ -2945,7 +2988,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {detailsOpen && activeTab === 'simulator' && (
+                    {detailsOpen && toolsExpanded && activeTab === 'simulator' && (
                         <Panel title="محاكي الجمهور">
                             {simResult ? (
                                 <div className="space-y-2 text-xs text-gray-200">
@@ -2977,7 +3020,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {detailsOpen && activeTab === 'xray' && (
+                    {detailsOpen && toolsExpanded && activeTab === 'xray' && (
                         <Panel title="زوايا المنافسين">
                             {xrayItems.length ? (
                                 <div className="space-y-2 text-xs text-gray-200">
@@ -3025,7 +3068,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {detailsOpen && activeTab === 'context' && (
+                    {detailsOpen && toolsExpanded && activeTab === 'context' && (
                         <Panel title="السياق والنسخ">
                             <div className="space-y-1 max-h-32 overflow-auto">
                                 {versions.map((v) => <button key={v.id} onClick={() => restoreVersion.mutate(v.version)} className="w-full text-right rounded bg-white/5 px-2 py-1 text-xs text-gray-200">الإصدار v{v.version} • {v.change_origin || 'يدوي'}</button>)}
@@ -3189,6 +3232,56 @@ function WorkspaceDraftsPageContent() {
                                     </div>
                                 ))}
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {overrideOpen && (
+                <div className="fixed inset-0 z-[88] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-gray-950 p-5 space-y-4" dir="rtl">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h2 className="text-lg text-white font-semibold">إرسال بتحفّظ (تجاوز الموانع)</h2>
+                                <p className="text-[11px] text-gray-400">سيتم إرسال الخبر لرئيس التحرير مع توثيق سبب التجاوز.</p>
+                            </div>
+                            <button onClick={() => setOverrideOpen(false)} className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-gray-200">
+                                إغلاق
+                            </button>
+                        </div>
+                        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-[11px] text-red-100 space-y-1">
+                            <p className="font-semibold">الموانع الحالية</p>
+                            {blockerSummary.items.length === 0 ? (
+                                <p className="text-[10px] text-red-200">لا توجد موانع حرجة حالياً.</p>
+                            ) : (
+                                blockerSummary.items.slice(0, 6).map((item) => (
+                                    <p key={`override-${item.id}`} className="text-[10px] text-red-100 line-clamp-1">- {item.title}</p>
+                                ))
+                            )}
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-xs text-gray-300">سبب التجاوز (إلزامي)</label>
+                            <textarea
+                                value={overrideNote}
+                                onChange={(e) => setOverrideNote(e.target.value)}
+                                className="w-full min-h-[90px] rounded-xl bg-black/30 border border-white/15 px-3 py-2 text-xs text-gray-100 placeholder:text-gray-500"
+                                placeholder="اكتب سبب التجاوز بوضوح... (مثال: عاجل ويحتاج النشر مع متابعة لاحقة للتدقيق)"
+                            />
+                        </div>
+                        <div className="flex items-center justify-end gap-2">
+                            <button
+                                onClick={() => setOverrideOpen(false)}
+                                className="rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-[11px] text-gray-200"
+                            >
+                                إلغاء
+                            </button>
+                            <button
+                                disabled={submitWithReservations.isPending || overrideNote.trim().length < 5}
+                                onClick={() => submitWithReservations.mutate()}
+                                className="rounded-lg bg-amber-500/30 border border-amber-500/40 px-3 py-2 text-[11px] text-amber-100 disabled:opacity-60"
+                            >
+                                {submitWithReservations.isPending ? 'جاري الإرسال...' : 'إرسال بتحفّظ'}
+                            </button>
                         </div>
                     </div>
                 </div>

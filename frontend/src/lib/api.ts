@@ -906,6 +906,8 @@ export const editorialApi = {
         api.post(`/editorial/workspace/drafts/${workId}/apply`),
     submitWorkspaceDraftForChief: (workId: string) =>
         api.post(`/editorial/workspace/drafts/${workId}/submit-for-chief-approval`),
+    submitWorkspaceDraftWithReservations: (workId: string, data: { notes: string }) =>
+        api.post(`/editorial/workspace/drafts/${workId}/submit-with-reservations`, data),
     archiveWorkspaceDraft: (workId: string) =>
         api.post(`/editorial/workspace/drafts/${workId}/archive`),
     regenerateWorkspaceDraft: (workId: string) =>

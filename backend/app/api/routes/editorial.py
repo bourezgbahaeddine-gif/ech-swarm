@@ -135,6 +135,10 @@ class ChiefFinalDecisionRequest(BaseModel):
     notes: Optional[str] = Field(default=None, max_length=1000)
 
 
+class ReservationSubmitRequest(BaseModel):
+    notes: str = Field(..., min_length=5, max_length=1000)
+
+
 class ManualWorkspaceDraftCreateRequest(BaseModel):
     title: str = Field(..., min_length=5, max_length=1024)
     body: str = Field(..., min_length=30, max_length=50000)
@@ -776,6 +780,130 @@ async def _submit_draft_for_chief_approval(
         "status_message": status_message,
         "submitted_for_chief_approval": submitted_for_chief_approval,
         "journalist_direct_path": journalist_direct_path,
+        "blocking_reasons": blockers or policy_report.get("blocking_reasons", []),
+        "actionable_fixes": policy_report.get("actionable_fixes", []),
+        "gate_summary": gate_summary,
+    }
+
+
+async def _submit_draft_with_reservations(
+    *,
+    db: AsyncSession,
+    draft: EditorialDraft,
+    current_user: User,
+    notes: str,
+) -> dict[str, Any]:
+    article_result = await db.execute(select(Article).where(Article.id == draft.article_id))
+    article = article_result.scalar_one_or_none()
+    if not article:
+        raise HTTPException(404, "Article not found")
+
+    if draft.title:
+        article.title_ar = draft.title
+    if draft.body:
+        article.body_html = smart_editor_service.sanitize_html(draft.body)
+
+    source_text = "\n".join(
+        [
+            article.original_title or "",
+            article.summary or "",
+            article.original_content or "",
+        ]
+    ).strip()
+
+    readability_report = await _latest_stage_report(db, article_id=article.id, stage="READABILITY")
+    quality_report = await _latest_stage_report(db, article_id=article.id, stage="QUALITY_SCORE")
+    fact_report = await _latest_stage_report(db, article_id=article.id, stage="FACT_CHECK")
+
+    policy_report = await smart_editor_service.editorial_policy_review(
+        title=article.title_ar or article.original_title,
+        body_html=article.body_html or "",
+        source_text=source_text,
+        readability_report=(readability_report.report_json if readability_report else {}),
+        quality_report=(quality_report.report_json if quality_report else {}),
+        fact_report=(fact_report.report_json if fact_report else {}),
+    )
+
+    await quality_gate_service.save_report(
+        db,
+        article_id=article.id,
+        stage="EDITORIAL_POLICY",
+        passed=bool(policy_report["passed"]),
+        score=policy_report.get("score"),
+        blocking_reasons=policy_report.get("blocking_reasons", []),
+        actionable_fixes=policy_report.get("actionable_fixes", []),
+        report_json=policy_report,
+        created_by=current_user.full_name_ar,
+        upsert_by_stage=True,
+    )
+
+    blockers: list[str] = []
+    try:
+        await _assert_publish_gate_and_constitution(db, article_id=article.id, user=current_user)
+    except HTTPException as exc:
+        if exc.status_code == 412 and isinstance(exc.detail, dict):
+            blockers = list(exc.detail.get("blocking_reasons") or [])
+        else:
+            raise
+
+    gate_result = await quality_gate_service.run_submission_quality_gates(
+        db,
+        article_id=article.id,
+        policy_report=policy_report,
+    )
+    gate_summary = quality_gate_service.summarize_gate_result(gate_result)
+
+    await _transition_article_status(
+        db=db,
+        article=article,
+        target_status=NewsStatus.APPROVAL_REQUEST_WITH_RESERVATIONS,
+        actor=current_user,
+        action="submit_for_chief_with_reservations",
+        reason=notes,
+        details={
+            "work_id": draft.work_id,
+            "policy_score": policy_report.get("score"),
+            "blocking_reasons": blockers,
+            "reservation_note": notes,
+        },
+    )
+
+    draft.status = "applied"
+    draft.applied_by = current_user.full_name_ar
+    draft.applied_at = datetime.utcnow()
+    draft.updated_by = current_user.full_name_ar
+
+    await audit_service.log_action(
+        db,
+        action="draft_submit_with_reservations",
+        entity_type="editorial_draft",
+        entity_id=draft.id,
+        actor=current_user,
+        reason="reservation_request",
+        details={"work_id": draft.work_id, "version": draft.version},
+    )
+
+    db.add(
+        EditorDecision(
+            article_id=article.id,
+            editor_name=current_user.full_name_ar,
+            decision="process:submit_for_chief_with_reservations",
+            reason=notes,
+            edited_title=draft.title,
+            edited_body=draft.body,
+        )
+    )
+
+    await article_index_service.upsert_article(db, article)
+    await db.commit()
+
+    return {
+        "article_id": article.id,
+        "work_id": draft.work_id,
+        "policy_decision": "reservations",
+        "status": article.status.value,
+        "status_message": "تم إرسال طلب اعتماد مع تحفظات إلى رئيس التحرير.",
+        "submitted_for_chief_approval": True,
         "blocking_reasons": blockers or policy_report.get("blocking_reasons", []),
         "actionable_fixes": policy_report.get("actionable_fixes", []),
         "gate_summary": gate_summary,
@@ -2186,6 +2314,30 @@ async def submit_draft_for_chief_approval(
             if submission.get("submitted_for_chief_approval")
             else "تم اعتماد النسخة داخل المسار المباشر بدون تصعيد لرئيس التحرير."
         ),
+    }
+
+
+@router.post("/workspace/drafts/{work_id}/submit-with-reservations")
+async def submit_draft_with_reservations(
+    work_id: str,
+    payload: ReservationSubmitRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(current_user, AUTHOR_ROLES)
+    draft = await _get_latest_draft_or_404(db, work_id)
+    if draft.status not in {"draft", "applied"}:
+        raise HTTPException(409, "Draft already archived")
+    submission = await _submit_draft_with_reservations(
+        db=db,
+        draft=draft,
+        current_user=current_user,
+        notes=payload.notes,
+    )
+    return {
+        **submission,
+        "submitted_for_chief_approval": True,
+        "message": "تم إرسال طلب اعتماد مع تحفظات إلى رئيس التحرير.",
     }
 
 
