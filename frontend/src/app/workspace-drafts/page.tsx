@@ -1212,7 +1212,7 @@ function WorkspaceDraftsPageContent() {
         createDraftFromArticle.mutate();
     }, [articleNumericId, listLoading, workId, drafts.length, createDraftFromArticle]);
 
-    const showSidePanels = true;
+    const showSidePanels = detailsOpen;
 
     const decisionSections = viewMode === 'deep'
         ? [
@@ -1362,7 +1362,9 @@ function WorkspaceDraftsPageContent() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                         <h1 className="text-xl font-semibold text-white">المحرر الذكي لغرفة الشروق</h1>
-                        <p className="text-xs text-gray-400">كتابة عربية احترافية + اقتراحات AI + تحقق + بوابة نشر</p>
+                        {detailsOpen && (
+                            <p className="text-xs text-gray-400">كتابة عربية احترافية + اقتراحات AI + تحقق + بوابة نشر</p>
+                        )}
                     </div>
                     <div className="flex w-full sm:w-auto flex-wrap items-center justify-start sm:justify-end gap-2">
                         <NextLink
@@ -1382,14 +1384,16 @@ function WorkspaceDraftsPageContent() {
                     </div>
                 </div>
 
-                <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
-                    <div className="rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100">
-                        الذكاء الاصطناعي يقترح فقط. لا يوجد تعديل تلقائي للنص بدون موافقتك.
+                {detailsOpen && (
+                    <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+                        <div className="rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100">
+                            الذكاء الاصطناعي يقترح فقط. لا يوجد تعديل تلقائي للنص بدون موافقتك.
+                        </div>
+                        <div className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
+                            كل تعديل يُحفظ كنسخة مستقلة ويمكن الرجوع له من تبويب «السياق والنسخ».
+                        </div>
                     </div>
-                    <div className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
-                        كل تعديل يُحفظ كنسخة مستقلة ويمكن الرجوع له من تبويب «السياق والنسخ».
-                    </div>
-                </div>
+                )}
 
                 <div className="mt-3 space-y-3">
                     {detailsOpen && (
@@ -1467,8 +1471,8 @@ function WorkspaceDraftsPageContent() {
                                 {toolsExpanded ? 'إخفاء الأدوات' : 'إظهار الأدوات'}
                             </button>
                         )}
-                        <div className="ml-auto flex items-center gap-2">
-                            {detailsOpen && (
+                        {detailsOpen && (
+                            <div className="ml-auto flex items-center gap-2">
                                 <button
                                     disabled={autosave.isPending}
                                     onClick={() => runWithGuide('save', () => { setSaveState('saving'); autosave.mutate(); })}
@@ -1476,22 +1480,22 @@ function WorkspaceDraftsPageContent() {
                                 >
                                     <Save className="w-4 h-4" />حفظ
                                 </button>
-                            )}
-                            <button
-                                onClick={() => setViewMode('speed')}
-                                className={cn('min-h-10 px-3 py-2 rounded-xl border text-xs', viewMode === 'speed' ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-100' : 'bg-white/5 border-white/15 text-gray-300')}
-                            >
-                                وضع السرعة
-                            </button>
-                            <button
-                                onClick={() => setViewMode('deep')}
-                                className={cn('min-h-10 px-3 py-2 rounded-xl border text-xs', viewMode === 'deep' ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-100' : 'bg-white/5 border-white/15 text-gray-300')}
-                            >
-                                وضع العمق
-                            </button>
-                        </div>
+                                <button
+                                    onClick={() => setViewMode('speed')}
+                                    className={cn('min-h-10 px-3 py-2 rounded-xl border text-xs', viewMode === 'speed' ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-100' : 'bg-white/5 border-white/15 text-gray-300')}
+                                >
+                                    وضع السرعة
+                                </button>
+                                <button
+                                    onClick={() => setViewMode('deep')}
+                                    className={cn('min-h-10 px-3 py-2 rounded-xl border text-xs', viewMode === 'deep' ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-100' : 'bg-white/5 border-white/15 text-gray-300')}
+                                >
+                                    وضع العمق
+                                </button>
+                            </div>
+                        )}
                     </div>
-                    {nextAction.description && (
+                    {detailsOpen && nextAction.description && (
                         <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-[11px] text-gray-300">
                             {nextAction.description}
                         </div>
@@ -1521,101 +1525,91 @@ function WorkspaceDraftsPageContent() {
                     )}
                 </div>
 
+                {!detailsOpen && (
+                    <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                                <p className="text-xs text-gray-200">الجاهزية: {compactStatus.readinessLabel} • ادعاءات حرجة: {compactStatus.blockingClaims} • الجودة: {compactStatus.qualityScore}</p>
+                                <p className="text-[11px] text-gray-500 mt-1">أهم خطوة الآن: {nextAction.description || 'لا توجد خطوة عاجلة حالياً.'}</p>
+                            </div>
+                            <button
+                                onClick={() => nextAction.handler()}
+                                className={cn('min-h-9 px-3 py-2 rounded-xl border text-[11px]', severityStyles(nextAction.severity).badge, 'border-white/15')}
+                            >
+                                نفّذ الآن
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 {(err || ok) && <div className={cn('mt-3 rounded-xl px-3 py-2 text-xs', err ? 'bg-red-500/15 text-red-200 border border-red-500/30' : 'bg-emerald-500/15 text-emerald-200 border border-emerald-500/30')}>{err || ok}</div>}
             </div>
 
+            {detailsOpen && (
             <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-4">
                 <div className="flex items-center justify-between">
                     <div>
                         <h2 className="text-sm text-white font-semibold">مساعد المحرر</h2>
                         <p className="text-[11px] text-gray-400">مساعدة مركزة بدون تشتيت.</p>
                     </div>
-                    {detailsOpen && (
-                        <button
-                            onClick={() => decisionActionHandlers.quick_check()}
-                            className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200"
-                        >
-                            تشغيل فحص السرعة
-                        </button>
-                    )}
+                    <button
+                        onClick={() => decisionActionHandlers.quick_check()}
+                        className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200"
+                    >
+                        تشغيل فحص السرعة
+                    </button>
                 </div>
 
-                {!detailsOpen ? (
-                    <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
-                        <div className="flex items-center justify-between">
-                            <p className="text-xs text-gray-300">
-                                الجاهزية: {compactStatus.readinessLabel} • ادعاءات حرجة: {compactStatus.blockingClaims} • الجودة: {compactStatus.qualityScore}
-                            </p>
-                            <button
-                                onClick={() => setDetailsOpen(true)}
-                                className="text-[11px] text-gray-200 underline decoration-dotted"
-                            >
-                                عرض التفاصيل
-                            </button>
-                        </div>
-                        <div className="rounded-lg border border-white/10 bg-white/5 p-2">
-                            <p className="text-[11px] text-gray-200">أهم خطوة الآن</p>
-                            <p className="text-[11px] text-gray-400 line-clamp-2">{nextAction.description}</p>
-                            <button
-                                onClick={() => nextAction.handler()}
-                                className={cn('mt-2 px-2 py-1 rounded-lg border text-[11px]', severityStyles(nextAction.severity).badge, 'border-white/15')}
-                            >
-                                نفّذ الآن
-                            </button>
-                        </div>
-                    </div>
-                ) : (
-                    <div className={cn('grid gap-3', viewMode === 'deep' ? 'grid-cols-1 lg:grid-cols-3' : 'grid-cols-1 lg:grid-cols-2')}>
-                        {decisionSections.map((section) => (
-                            <div key={section.title} className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
-                                <h3 className="text-xs text-gray-200 font-semibold">{section.title}</h3>
-                                {section.items.length === 0 ? (
-                                    <p className="text-[11px] text-gray-500">{section.empty}</p>
-                                ) : (
-                                    section.items.slice(0, section.showAll ? section.items.length : 1).map((item) => {
-                                        const styles = severityStyles(item.severity);
-                                        const actionKey = item.action;
-                                        const actionHandler = actionKey ? decisionActionHandlers[actionKey] : undefined;
-                                        return (
-                                            <div key={item.id} className={cn('rounded-lg border p-2 space-y-1', styles.border)}>
-                                                <div className="flex items-center justify-between gap-2">
-                                                    <p className="text-[11px] text-white">{item.title}</p>
-                                                    <span className={cn('px-2 py-0.5 rounded text-[10px]', styles.badge)}>
-                                                        {severityLabel(item.severity)}
-                                                    </span>
-                                                </div>
-                                                <p className="text-[11px] text-gray-200 line-clamp-2">{item.reason}</p>
-                                                <p className="text-[10px] text-gray-400">الأثر: {item.impact}</p>
-                                                <p className="text-[10px] text-gray-500">القاعدة: {item.rule}</p>
-                                                <div className="flex items-center justify-between">
-                                                    <span className="text-[10px] text-gray-500">
-                                                        الثقة: {item.confidence ? `${Math.round(item.confidence * 100)}%` : '—'}
-                                                    </span>
-                                                    {actionHandler && (
-                                                        <button
-                                                            onClick={() => actionHandler()}
-                                                            className="text-[10px] px-2 py-1 rounded bg-white/10 text-gray-200"
-                                                        >
-                                                            إصلاح الآن
-                                                        </button>
-                                                    )}
-                                                </div>
+                <div className={cn('grid gap-3', viewMode === 'deep' ? 'grid-cols-1 lg:grid-cols-3' : 'grid-cols-1 lg:grid-cols-2')}>
+                    {decisionSections.map((section) => (
+                        <div key={section.title} className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
+                            <h3 className="text-xs text-gray-200 font-semibold">{section.title}</h3>
+                            {section.items.length === 0 ? (
+                                <p className="text-[11px] text-gray-500">{section.empty}</p>
+                            ) : (
+                                section.items.slice(0, section.showAll ? section.items.length : 1).map((item) => {
+                                    const styles = severityStyles(item.severity);
+                                    const actionKey = item.action;
+                                    const actionHandler = actionKey ? decisionActionHandlers[actionKey] : undefined;
+                                    return (
+                                        <div key={item.id} className={cn('rounded-lg border p-2 space-y-1', styles.border)}>
+                                            <div className="flex items-center justify-between gap-2">
+                                                <p className="text-[11px] text-white">{item.title}</p>
+                                                <span className={cn('px-2 py-0.5 rounded text-[10px]', styles.badge)}>
+                                                    {severityLabel(item.severity)}
+                                                </span>
                                             </div>
-                                        );
-                                    })
-                                )}
-                                {section.items.length > 1 && (
-                                    <button
-                                        onClick={section.toggle}
-                                        className="text-[11px] text-gray-300 underline decoration-dotted"
-                                    >
-                                        {section.showAll ? 'عرض أقل' : 'عرض الكل'}
-                                    </button>
-                                )}
-                            </div>
-                        ))}
-                    </div>
-                )}
+                                            <p className="text-[11px] text-gray-200 line-clamp-2">{item.reason}</p>
+                                            <p className="text-[10px] text-gray-400">الأثر: {item.impact}</p>
+                                            <p className="text-[10px] text-gray-500">القاعدة: {item.rule}</p>
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-[10px] text-gray-500">
+                                                    الثقة: {item.confidence ? `${Math.round(item.confidence * 100)}%` : '—'}
+                                                </span>
+                                                {actionHandler && (
+                                                    <button
+                                                        onClick={() => actionHandler()}
+                                                        className="text-[10px] px-2 py-1 rounded bg-white/10 text-gray-200"
+                                                    >
+                                                        إصلاح الآن
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })
+                            )}
+                            {section.items.length > 1 && (
+                                <button
+                                    onClick={section.toggle}
+                                    className="text-[11px] text-gray-300 underline decoration-dotted"
+                                >
+                                    {section.showAll ? 'عرض أقل' : 'عرض الكل'}
+                                </button>
+                            )}
+                        </div>
+                    ))}
+                </div>
 
                 {viewMode === 'deep' && (
                     <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-100 space-y-1">
@@ -1630,8 +1624,9 @@ function WorkspaceDraftsPageContent() {
                     </div>
                 )}
             </div>
+            )}
 
-            {viewMode === 'deep' && (
+            {detailsOpen && viewMode === 'deep' && (
                 <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3">
                     <div className="flex items-center justify-between gap-2">
                         <div>
@@ -1688,7 +1683,7 @@ function WorkspaceDraftsPageContent() {
                 </div>
             )}
 
-            {viewMode === 'deep' && (
+            {detailsOpen && viewMode === 'deep' && (
                 <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3">
                     <div className="flex items-center justify-between gap-2">
                         <div>
