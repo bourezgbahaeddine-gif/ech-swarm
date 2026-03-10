@@ -504,7 +504,9 @@ title, body_html, note, issues
 - يُسمح باستبدال صيغ ثقيلة (مثل "تم + مصدر" أو "أكد بأن") بصيغ عربية أخف عند الحاجة.
 - لا تغيّر ترتيب الفقرات أو بنية الخبر.
 - body_html يجب أن يكون HTML صالحاً مع H1 واحد وفقرات واضحة.
-- issues قائمة مختصرة بعناصر: kind, message, before, after.
+- issues قائمة مختصرة بعناصر: kind, message, before, after, rule, severity, confidence.
+- kind يجب أن يكون واحداً من: spelling | grammar | punctuation | style | clarity | headline.
+- severity واحدة من: critical | high | medium | low.
 - ممنوع أي شروحات خارج JSON.
 
 العنوان الحالي:
@@ -557,6 +559,54 @@ title, body_html, note, issues
             },
             "generated_at": datetime.utcnow().isoformat(),
         }
+
+    async def inline_suggestion(
+        self,
+        *,
+        text: str,
+        action: str,
+        instruction: str = "",
+        source_text: str = "",
+    ) -> dict[str, Any]:
+        action = (action or "rewrite").strip().lower()
+        clean_input = (text or "").strip()
+        if not clean_input:
+            return {"text": ""}
+
+        action_map = {
+            "rewrite": "أعد صياغة المقطع بأسلوب صحفي واضح دون تغيير المعنى.",
+            "shorten": "اختصر المقطع بنسبة 30-40% مع الحفاظ على كل المعلومات الأساسية.",
+            "expand": "وسّع المقطع بشرح إضافي ضمن نفس المعنى دون إضافة حقائق جديدة.",
+            "clarify": "بسّط المقطع بجمل أقصر ووضوح أكبر دون تغيير المحتوى.",
+        }
+        action_prompt = action_map.get(action, action_map["rewrite"])
+
+        prompt = f"""
+أنت محرر في غرفة أخبار الشروق.
+المطلوب: {action_prompt}
+
+قواعد إلزامية:
+- لا تضف أي معلومة جديدة غير موجودة في المقطع أو في السياق.
+- حافظ على الأسماء والأرقام والتواريخ كما هي.
+- أعد النص الناتج فقط دون شروح أو تعليقات أو تنسيق إضافي.
+- لا تستخدم Markdown أو code fences.
+
+السياق (اختياري):
+{(source_text or "")[:1500]}
+
+المقطع:
+{clean_input}
+"""
+        ai = self._get_ai_service()
+        if not ai:
+            return {"text": clean_input}
+
+        raw = await ai.generate_text(prompt)
+        cleaned = self._strip_side_comments(raw)
+        cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+        if not cleaned or self._contains_template_noise(cleaned):
+            cleaned = clean_input
+        return {"text": cleaned, "action": action}
 
     async def headline_suggestions(self, *, source_text: str, draft_title: str) -> list[dict[str, str]]:
         prompt = f"""

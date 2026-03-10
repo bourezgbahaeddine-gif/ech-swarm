@@ -928,6 +928,8 @@ export const editorialApi = {
         api.post(`/editorial/workspace/drafts/${workId}/restore/${version}`),
     aiRewriteSuggestion: (workId: string, data: { mode: 'formal' | 'breaking' | 'analysis' | 'simple'; instruction?: string }) =>
         api.post(`/editorial/workspace/drafts/${workId}/ai/rewrite`, data),
+    aiInlineSuggestion: (workId: string, data: { action: 'rewrite' | 'shorten' | 'expand' | 'clarify'; text: string }) =>
+        api.post(`/editorial/workspace/drafts/${workId}/ai/inline`, data),
     aiProofreadSuggestion: (workId: string) =>
         api.post(`/editorial/workspace/drafts/${workId}/ai/proofread`),
     aiHeadlineSuggestion: (workId: string, count = 5) =>

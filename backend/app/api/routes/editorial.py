@@ -100,6 +100,12 @@ class RewriteSuggestionRequest(BaseModel):
     instruction: Optional[str] = Field(default=None, max_length=1000)
 
 
+class InlineAiRequest(BaseModel):
+    action: Literal["rewrite", "shorten", "expand", "clarify"] = "rewrite"
+    text: str = Field(..., min_length=5, max_length=4000)
+    instruction: Optional[str] = Field(default=None, max_length=1000)
+
+
 class HeadlineSuggestionRequest(BaseModel):
     count: int = Field(default=5, ge=1, le=10)
 
@@ -1806,6 +1812,29 @@ async def workspace_ai_rewrite(
         wait_for_result_override=wait,
         wait_timeout_seconds_override=wait_timeout_seconds,
     )
+
+
+@router.post("/workspace/drafts/{work_id}/ai/inline")
+async def workspace_ai_inline(
+    work_id: str,
+    payload: InlineAiRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(current_user, NEWSROOM_ROLES)
+    draft = await _get_latest_draft_or_404(db, work_id)
+    article_row = await db.execute(select(Article).where(Article.id == draft.article_id))
+    article = article_row.scalar_one_or_none()
+    source_text = ""
+    if article:
+        source_text = article.original_content or article.summary or article.original_title or ""
+    result = await smart_editor_service.inline_suggestion(
+        text=payload.text,
+        action=payload.action,
+        instruction=payload.instruction or "",
+        source_text=source_text,
+    )
+    return result
 
 
 @router.post("/workspace/drafts/{work_id}/ai/proofread")

@@ -30,9 +30,11 @@ import {
     jobsApi,
     msiApi,
     simApi,
+    sourcesApi,
     type ClaimOverrideInput,
     type ArchiveSearchItem,
     type FactCheckClaim,
+    type Source,
     type WorkspacePublishReadiness,
 } from '@/lib/api';
 import { constitutionApi } from '@/lib/constitution-api';
@@ -388,6 +390,9 @@ function WorkspaceDraftsPageContent() {
     const [showImproveAll, setShowImproveAll] = useState(false);
     const [showExtraAll, setShowExtraAll] = useState(false);
     const [detailsOpen, setDetailsOpen] = useState(false);
+    const [inlineAiOpen, setInlineAiOpen] = useState(false);
+    const [inlineSourceOpen, setInlineSourceOpen] = useState(false);
+    const [inlineAiError, setInlineAiError] = useState<string | null>(null);
     const lastSavedRef = useRef<{ title: string; body: string }>({ title: '', body: '' });
     const allowedTabs = useMemo(() => TABS.filter((tab) => (tab.id === 'msi' ? isDirector : true)), [isDirector]);
     const visibleTabs = useMemo(() => {
@@ -430,6 +435,13 @@ function WorkspaceDraftsPageContent() {
         queryFn: () => editorialApi.workspaceDrafts({ status: 'draft', limit: 200, article_id: articleNumericId || undefined }),
     });
     const drafts = listData?.data || [];
+
+    const { data: sourcesData } = useQuery({
+        queryKey: ['smart-editor-sources'],
+        queryFn: () => sourcesApi.list({ enabled: true }),
+        staleTime: 1000 * 60 * 10,
+    });
+    const sources = (sourcesData?.data || []) as Source[];
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
@@ -790,6 +802,21 @@ function WorkspaceDraftsPageContent() {
             setOk('اكتمل الفحص السريع: تم تحديث التحقق والجودة وحالة الجاهزية.');
         },
         onError: (e: any) => setErr(e?.response?.data?.detail || 'تعذر تنفيذ الفحص السريع'),
+    });
+
+    const runInlineAi = useMutation({
+        mutationFn: (payload: { action: 'rewrite' | 'shorten' | 'expand' | 'clarify'; text: string; from: number; to: number }) =>
+            editorialApi.aiInlineSuggestion(workId!, { action: payload.action, text: payload.text }),
+        onSuccess: (res, payload) => {
+            const nextText = cleanText(res?.data?.text || '');
+            if (editor && nextText) {
+                editor.chain().focus().insertContentAt({ from: payload.from, to: payload.to }, nextText).run();
+                setSaveState('unsaved');
+            }
+            setInlineAiOpen(false);
+            setInlineAiError(null);
+        },
+        onError: () => setInlineAiError('تعذر تنفيذ الإجراء على المقطع المحدد.'),
     });
 
     const decisionModel = useMemo(() => {
@@ -1294,6 +1321,37 @@ function WorkspaceDraftsPageContent() {
         const label = dateLabel ? `${titleLine} (${dateLabel})` : titleLine;
         const html = `<p>مصدر من الأرشيف: ${label}</p>${urlLine ? `<p>${urlLine}</p>` : ''}`;
         editor.chain().focus().insertContent(html).run();
+        setSaveState('unsaved');
+    }
+
+    function handleInlineAiAction(action: 'rewrite' | 'shorten' | 'expand' | 'clarify') {
+        setInlineAiError(null);
+        if (!editor || !workId) {
+            setInlineAiError('المحرر غير جاهز الآن.');
+            return;
+        }
+        const { from, to } = editor.state.selection;
+        if (from === to) {
+            setInlineAiError('حدد جزءاً من النص أولاً.');
+            return;
+        }
+        const selectedText = editor.state.doc.textBetween(from, to, ' ');
+        if (!selectedText.trim()) {
+            setInlineAiError('لا يوجد نص واضح داخل التحديد.');
+            return;
+        }
+        runInlineAi.mutate({ action, text: selectedText, from, to });
+    }
+
+    function insertSourceInline(source: Source) {
+        if (!editor) return;
+        const label = cleanText(source.name || source.url || 'مصدر');
+        const html = source.url
+            ? ` <a href="${source.url}" target="_blank" rel="noreferrer">المصدر: ${label}</a>`
+            : ` (المصدر: ${label})`;
+        const { to } = editor.state.selection;
+        editor.chain().focus().insertContentAt(to, html).run();
+        setInlineSourceOpen(false);
         setSaveState('unsaved');
     }
 
@@ -1822,10 +1880,36 @@ function WorkspaceDraftsPageContent() {
                         </div>
                         {editor && (
                             <BubbleMenu editor={editor}>
-                                <div className="rounded-xl bg-gray-950/95 border border-white/20 p-1 flex gap-1 text-xs">
+                                <div className="relative rounded-xl bg-gray-950/95 border border-white/20 p-1 flex gap-1 text-xs">
                                     <button onClick={() => editor.chain().focus().toggleBold().run()} className="px-2 py-1 rounded bg-white/10">عريض</button>
                                     <button onClick={() => editor.chain().focus().toggleItalic().run()} className="px-2 py-1 rounded bg-white/10">مائل</button>
                                     <button onClick={() => editor.chain().focus().toggleHighlight().run()} className="px-2 py-1 rounded bg-white/10">تمييز</button>
+                                    <span className="w-px bg-white/10 mx-1" />
+                                    <button onClick={() => { setInlineAiOpen((v) => !v); setInlineSourceOpen(false); }} className="px-2 py-1 rounded bg-emerald-500/20 text-emerald-100">AI</button>
+
+                                    {inlineAiOpen && (
+                                        <div className="absolute right-0 top-full mt-2 w-44 rounded-xl border border-white/20 bg-gray-950/95 p-2 space-y-1 text-[11px] text-gray-200 z-20">
+                                            <button onClick={() => handleInlineAiAction('rewrite')} className="w-full text-right px-2 py-1 rounded bg-white/10">إعادة صياغة</button>
+                                            <button onClick={() => handleInlineAiAction('shorten')} className="w-full text-right px-2 py-1 rounded bg-white/10">اختصار</button>
+                                            <button onClick={() => handleInlineAiAction('expand')} className="w-full text-right px-2 py-1 rounded bg-white/10">توسيع</button>
+                                            <button onClick={() => handleInlineAiAction('clarify')} className="w-full text-right px-2 py-1 rounded bg-white/10">توضيح</button>
+                                            <button onClick={() => setInlineSourceOpen((v) => !v)} className="w-full text-right px-2 py-1 rounded bg-white/10">إضافة مصدر</button>
+                                            {inlineSourceOpen && (
+                                                <div className="mt-1 max-h-40 overflow-auto rounded-lg border border-white/10 bg-black/30 p-1 space-y-1">
+                                                    {(sources || []).slice(0, 10).map((source) => (
+                                                        <button
+                                                            key={`source-inline-${source.id}`}
+                                                            onClick={() => insertSourceInline(source)}
+                                                            className="w-full text-right px-2 py-1 rounded bg-white/10 text-[10px]"
+                                                        >
+                                                            {cleanText(source.name || source.url)}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            {inlineAiError && <p className="text-[10px] text-red-300">{inlineAiError}</p>}
+                                        </div>
+                                    )}
                                 </div>
                             </BubbleMenu>
                         )}
