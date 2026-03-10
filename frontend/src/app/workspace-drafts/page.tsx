@@ -371,6 +371,9 @@ function WorkspaceDraftsPageContent() {
     const [explainOpen, setExplainOpen] = useState(false);
     const [toolsExpanded, setToolsExpanded] = useState(false);
     const [showAdvancedTabs, setShowAdvancedTabs] = useState(false);
+    const [showUrgentAll, setShowUrgentAll] = useState(false);
+    const [showImproveAll, setShowImproveAll] = useState(false);
+    const [showExtraAll, setShowExtraAll] = useState(false);
     const lastSavedRef = useRef<{ title: string; body: string }>({ title: '', body: '' });
     const allowedTabs = useMemo(() => TABS.filter((tab) => (tab.id === 'msi' ? isDirector : true)), [isDirector]);
     const visibleTabs = useMemo(() => {
@@ -1201,6 +1204,17 @@ function WorkspaceDraftsPageContent() {
 
     const showSidePanels = viewMode === 'deep';
 
+    const decisionSections = viewMode === 'deep'
+        ? [
+            { key: 'urgent', title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد موانع حرجة حالياً.', showAll: showUrgentAll, toggle: () => setShowUrgentAll((v) => !v) },
+            { key: 'improve', title: 'يحسّن الجودة', items: decisionModel.improve, empty: 'لا توجد تحسينات عاجلة للجودة.', showAll: showImproveAll, toggle: () => setShowImproveAll((v) => !v) },
+            { key: 'extra', title: 'تحسينات إضافية', items: decisionModel.extra, empty: 'لا توجد تحسينات إضافية الآن.', showAll: showExtraAll, toggle: () => setShowExtraAll((v) => !v) },
+        ]
+        : [
+            { key: 'urgent', title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد موانع حرجة حالياً.', showAll: showUrgentAll, toggle: () => setShowUrgentAll((v) => !v) },
+            { key: 'improve', title: 'يحسّن الجودة', items: decisionModel.improve, empty: 'لا توجد تحسينات عاجلة للجودة.', showAll: showImproveAll, toggle: () => setShowImproveAll((v) => !v) },
+        ];
+
     const saveNode = useMemo(() => {
         if (saveState === 'saved') return <span className="text-emerald-300 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" />محفوظ</span>;
         if (saveState === 'saving') return <span className="text-sky-300 flex items-center gap-1"><Loader2 className="w-4 h-4 animate-spin" />جاري الحفظ...</span>;
@@ -1369,6 +1383,43 @@ function WorkspaceDraftsPageContent() {
                 </div>
 
                 <div className="mt-3 space-y-3">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                        <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-gray-200 space-y-1">
+                            <p className="text-[11px] text-gray-400">الخطوة 1</p>
+                            <p className="font-semibold">فحص سريع</p>
+                            <p className="text-[11px] text-gray-500">تحقق + جودة + جاهزية في خطوة واحدة.</p>
+                            <button
+                                onClick={() => runWithGuide('quick_check', () => runQuickCheck.mutate())}
+                                disabled={runQuickCheck.isPending}
+                                className="mt-1 px-2 py-1 rounded-lg bg-indigo-500/20 border border-indigo-500/30 text-indigo-100 text-[11px] disabled:opacity-60"
+                            >
+                                {runQuickCheck.isPending ? 'جاري الفحص...' : 'ابدأ'}
+                            </button>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-gray-200 space-y-1">
+                            <p className="text-[11px] text-gray-400">الخطوة 2</p>
+                            <p className="font-semibold">عالج الأهم</p>
+                            <p className="text-[11px] text-gray-500 line-clamp-2">{nextAction.description}</p>
+                            <button
+                                onClick={() => nextAction.handler()}
+                                className={cn('mt-1 px-2 py-1 rounded-lg border text-[11px]', severityStyles(nextAction.severity).badge, 'border-white/15')}
+                            >
+                                نفّذ الآن
+                            </button>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-gray-200 space-y-1">
+                            <p className="text-[11px] text-gray-400">الخطوة 3</p>
+                            <p className="font-semibold">إرسال للاعتماد</p>
+                            <p className="text-[11px] text-gray-500">أرسل النسخة لرئيس التحرير بعد المراجعة.</p>
+                            <button
+                                disabled={applyToArticle.isPending}
+                                onClick={() => runWithGuide('apply', () => applyToArticle.mutate())}
+                                className="mt-1 px-2 py-1 rounded-lg bg-white/10 border border-white/15 text-gray-200 text-[11px] disabled:opacity-60"
+                            >
+                                {applyToArticle.isPending ? 'جاري الإرسال...' : 'إرسال'}
+                            </button>
+                        </div>
+                    </div>
                     <div className="flex flex-wrap items-center gap-2">
                         <button
                             onClick={() => runWithGuide('quick_check', () => runQuickCheck.mutate())}
@@ -1458,22 +1509,13 @@ function WorkspaceDraftsPageContent() {
                 </div>
 
                 <div className={cn('grid gap-3', viewMode === 'deep' ? 'grid-cols-1 lg:grid-cols-3' : 'grid-cols-1 lg:grid-cols-2')}>
-                    {(viewMode === 'deep'
-                        ? [
-                            { title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد موانع حرجة حالياً.' },
-                            { title: 'يحسّن الجودة', items: decisionModel.improve, empty: 'لا توجد تحسينات عاجلة للجودة.' },
-                            { title: 'تحسينات إضافية', items: decisionModel.extra, empty: 'لا توجد تحسينات إضافية الآن.' },
-                        ]
-                        : [
-                            { title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد موانع حرجة حالياً.' },
-                            { title: 'يحسّن الجودة', items: decisionModel.improve, empty: 'لا توجد تحسينات عاجلة للجودة.' },
-                        ]).map((section) => (
+                    {decisionSections.map((section) => (
                         <div key={section.title} className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
                             <h3 className="text-xs text-gray-200 font-semibold">{section.title}</h3>
                             {section.items.length === 0 ? (
                                 <p className="text-[11px] text-gray-500">{section.empty}</p>
                             ) : (
-                                section.items.slice(0, 3).map((item) => {
+                                section.items.slice(0, section.showAll ? section.items.length : 1).map((item) => {
                                     const styles = severityStyles(item.severity);
                                     const actionKey = item.action;
                                     const actionHandler = actionKey ? decisionActionHandlers[actionKey] : undefined;
@@ -1504,6 +1546,14 @@ function WorkspaceDraftsPageContent() {
                                         </div>
                                     );
                                 })
+                            )}
+                            {section.items.length > 1 && (
+                                <button
+                                    onClick={section.toggle}
+                                    className="text-[11px] text-gray-300 underline decoration-dotted"
+                                >
+                                    {section.showAll ? 'عرض أقل' : 'عرض الكل'}
+                                </button>
                             )}
                         </div>
                     ))}
