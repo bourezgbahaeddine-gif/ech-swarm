@@ -3181,7 +3181,7 @@ function WorkspaceDraftsPageContent() {
 
             {storyOpen && (
                 <div className="fixed inset-0 z-[88] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-                    <div className="w-full max-w-4xl rounded-2xl border border-white/10 bg-gray-950 p-5 space-y-4" dir="rtl">
+                    <div className="w-full max-w-3xl max-h-[80vh] overflow-auto rounded-2xl border border-white/10 bg-gray-950 p-4 space-y-4" dir="rtl">
                         <div className="flex items-center justify-between">
                             <div>
                                 <h2 className="text-lg text-white font-semibold">Story Mode</h2>
