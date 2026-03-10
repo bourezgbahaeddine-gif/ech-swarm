@@ -75,6 +75,13 @@ type ReviewCard = {
     severity: DecisionSeverity;
     action?: DecisionActionId;
 };
+type BlockerExplanation = {
+    title: string;
+    detail: string;
+    action?: DecisionActionId;
+    stage?: string;
+    raw?: string;
+};
 
 const TABS: Array<{ id: RightTab; label: string }> = [
     { id: 'evidence', label: 'التحقق والأدلة' },
@@ -133,6 +140,187 @@ const STAGE_ACTIONS: Record<string, DecisionActionId | null> = {
     READABILITY: 'quality',
     QUALITY_SCORE: 'quality',
 };
+
+function explainBlockerReason(reason: string): BlockerExplanation {
+    const msg = cleanText(reason || '');
+    if (!msg) {
+        return {
+            title: 'مانع نشر غير محدد',
+            detail: 'لا يوجد وصف واضح للمانع. شغّل بوابة النشر لإعادة التحقق.',
+            action: 'publish_gate',
+            raw: reason,
+        };
+    }
+
+    const stageMatch = msg.match(/(?:تقرير مفقود:|stage|مرحلة)\s*([A-Z_]+)/i);
+    const stage = stageMatch?.[1]?.toUpperCase();
+    if (stage && STAGE_LABELS[stage]) {
+        return {
+            title: `تقرير مفقود: ${STAGE_LABELS[stage]}`,
+            detail: `شغّل ${STAGE_LABELS[stage]} لإزالة هذا المانع.`,
+            action: STAGE_ACTIONS[stage] || 'publish_gate',
+            stage,
+            raw: msg,
+        };
+    }
+
+    if (/claim|ادعاء|ادعاءات|مصدر|إسناد/i.test(msg)) {
+        return {
+            title: 'ادعاءات بلا مصادر كافية',
+            detail: msg,
+            action: 'verify',
+            raw: msg,
+        };
+    }
+    if (/seo/i.test(msg)) {
+        return {
+            title: 'مانع SEO',
+            detail: msg,
+            action: 'seo',
+            raw: msg,
+        };
+    }
+    if (/readability|قابلية|قراءة/i.test(msg)) {
+        return {
+            title: 'مانع قابلية القراءة',
+            detail: msg,
+            action: 'quality',
+            raw: msg,
+        };
+    }
+    if (/quality|جودة/i.test(msg)) {
+        return {
+            title: 'مانع جودة التحرير',
+            detail: msg,
+            action: 'quality',
+            raw: msg,
+        };
+    }
+    if (/policy|دستور|سياسة/i.test(msg)) {
+        return {
+            title: 'مانع سياسة تحريرية',
+            detail: msg,
+            action: 'publish_gate',
+            raw: msg,
+        };
+    }
+
+    return {
+        title: 'مانع نشر',
+        detail: msg,
+        action: 'publish_gate',
+        raw: msg,
+    };
+}
+
+function buildBlockerExplanations(params: {
+    readiness?: any;
+    quality?: any;
+    proofread?: any;
+    claims?: any[];
+    seoPack?: any;
+}): BlockerExplanation[] {
+    const { readiness, quality, proofread, claims, seoPack } = params;
+    const blockingClaims = (claims || []).filter((claim: any) => claim?.blocking);
+
+    if (readiness?.ready_for_publish && blockingClaims.length === 0) {
+        return [];
+    }
+
+    if (!readiness) {
+        return [{
+            title: 'بوابة النشر غير مشغّلة',
+            detail: 'شغّل بوابة النشر لإظهار الموانع الفعلية.',
+            action: 'publish_gate',
+            raw: 'readiness_missing',
+        }];
+    }
+
+    const list: BlockerExplanation[] = [];
+    const pushUnique = (item: BlockerExplanation | null | undefined) => {
+        if (!item) return;
+        const key = `${item.title}|${item.detail}`;
+        if (list.some((x) => `${x.title}|${x.detail}` === key)) return;
+        list.push(item);
+    };
+
+    const reasons: string[] = [];
+    (readiness.blocking_reasons || []).forEach((reason: string) => {
+        if (reason) reasons.push(String(reason));
+    });
+    const gateItems = (readiness.gates?.items || []).filter((item: any) => item?.severity === 'blocker');
+    gateItems.forEach((item: any) => {
+        if (item?.message) reasons.push(String(item.message));
+        else if (item?.rule) reasons.push(String(item.rule));
+    });
+
+    const cleaned = reasons.map((r) => cleanText(r)).filter(Boolean);
+    const genericPattern = /(غير جاهز|غير جاهزة|مانع نشر|blocked|not ready)/i;
+    const specific = cleaned.filter((r) => !genericPattern.test(r));
+
+    if (specific.length) {
+        specific.forEach((reason) => pushUnique(explainBlockerReason(reason)));
+    }
+
+    if (blockingClaims.length) {
+        pushUnique({
+            title: `ادعاءات تحتاج إسناداً (${blockingClaims.length})`,
+            detail: cleanText(blockingClaims[0]?.text || 'يوجد ادعاءات دون مصادر كافية.'),
+            action: 'verify',
+            raw: 'claims_blocking',
+        });
+    }
+
+    if (!specific.length) {
+        if (!quality) {
+            pushUnique({
+                title: 'تقرير الجودة غير متاح',
+                detail: 'شغّل تقييم الجودة لاستكمال جاهزية النشر.',
+                action: 'quality',
+                raw: 'quality_missing',
+            });
+        }
+        if (!proofread) {
+            pushUnique({
+                title: 'تدقيق لغوي غير منفّذ',
+                detail: 'شغّل التدقيق اللغوي لاكتشاف الأخطاء قبل الاعتماد.',
+                action: 'proofread',
+                raw: 'proofread_missing',
+            });
+        }
+        if (!claims || claims.length === 0) {
+            pushUnique({
+                title: 'التحقق من الادعاءات غير منفّذ',
+                detail: 'شغّل التحقق قبل إرسال الخبر للاعتماد.',
+                action: 'verify',
+                raw: 'verify_missing',
+            });
+        }
+        if (!seoPack) {
+            pushUnique({
+                title: 'تقرير SEO غير متاح',
+                detail: 'شغّل أدوات SEO لضبط العنوان والوصف والكلمات المفتاحية.',
+                action: 'seo',
+                raw: 'seo_missing',
+            });
+        }
+    }
+
+    if (list.length === 0) {
+        if (cleaned.length) {
+            pushUnique(explainBlockerReason(cleaned[0]));
+        } else {
+            pushUnique({
+                title: 'موانع غير موصوفة',
+                detail: 'أعد تشغيل بوابة النشر لتوليد سبب واضح.',
+                action: 'publish_gate',
+                raw: 'unknown',
+            });
+        }
+    }
+
+    return list;
+}
 
 const METRIC_LABELS: Record<string, string> = {
     clarity: 'الوضوح',
@@ -921,6 +1109,14 @@ function WorkspaceDraftsPageContent() {
         onError: () => setInlineAiError('تعذر تنفيذ الإجراء على المقطع المحدد.'),
     });
 
+    const readinessBlockers = useMemo(() => buildBlockerExplanations({
+        readiness,
+        quality,
+        proofread,
+        claims,
+        seoPack,
+    }), [readiness, quality, proofread, claims, seoPack]);
+
     const decisionModel = useMemo(() => {
         const urgent: DecisionItem[] = [];
         const improve: DecisionItem[] = [];
@@ -933,45 +1129,18 @@ function WorkspaceDraftsPageContent() {
             list.push(item);
         };
 
-        if (readiness) {
-            const blockers = (readiness.gates?.items || []).filter((x: any) => x?.severity === 'blocker');
-            blockers.forEach((block: any, idx: number) => {
-                const msg = cleanText(block?.message || 'مانع نشر غير محدد');
+        if (readinessBlockers.length) {
+            readinessBlockers.forEach((explained, idx) => {
                 pushUnique(urgent, {
-                    id: `gate-blocker-${block?.code || idx}`,
-                    title: 'مانع نشر',
-                    reason: msg || 'يوجد مانع في بوابة النشر.',
+                    id: `readiness-block-${idx}`,
+                    title: explained.title,
+                    reason: explained.detail,
                     impact: impactBySeverity('critical'),
                     rule: 'بوابة النشر: معالجة الموانع قبل الإرسال.',
                     severity: 'critical',
-                    confidence: 0.8,
-                    action: 'publish_gate',
+                    confidence: 0.82,
+                    action: explained.action || 'publish_gate',
                 });
-            });
-            (readiness.blocking_reasons || []).forEach((reason: string, idx: number) => {
-                const msg = cleanText(reason || '');
-                if (!msg) return;
-                pushUnique(urgent, {
-                    id: `readiness-block-${idx}`,
-                    title: 'غير جاهز للنشر',
-                    reason: msg,
-                    impact: impactBySeverity('critical'),
-                    rule: 'يجب معالجة أسباب عدم الجاهزية قبل الإرسال.',
-                    severity: 'critical',
-                    confidence: 0.78,
-                    action: 'publish_gate',
-                });
-            });
-        } else {
-            pushUnique(urgent, {
-                id: 'readiness-missing',
-                title: 'لم يتم تشغيل بوابة النشر',
-                reason: 'لا توجد نتيجة جاهزية حالياً.',
-                impact: 'قد يتم إرسال مسودة غير جاهزة بدون تنبيه.',
-                rule: 'تفعيل بوابة النشر قبل الاعتماد.',
-                severity: 'high',
-                confidence: 0.7,
-                action: 'publish_gate',
             });
         }
 
@@ -1095,7 +1264,7 @@ function WorkspaceDraftsPageContent() {
         extra.sort((a, b) => severityRank(b.severity) - severityRank(a.severity));
 
         return { urgent, improve, extra, bestHeadline };
-    }, [readiness, claims, proofread, quality, seoPack, headlines, social, linkSuggestions, context?.article?.urgency, context?.article?.title_ar, context?.article?.original_title, title]);
+    }, [readinessBlockers, claims, proofread, quality, seoPack, headlines, social, linkSuggestions, context?.article?.urgency, context?.article?.title_ar, context?.article?.original_title, title]);
 
     const headlineInsights = useMemo(() => {
         const isBreaking = String(context?.article?.urgency || '').toLowerCase() === 'breaking';
@@ -1262,6 +1431,8 @@ function WorkspaceDraftsPageContent() {
             top: blockers[0] || null,
         };
     }, [decisionModel]);
+
+    const explainedBlockers = useMemo(() => readinessBlockers, [readinessBlockers]);
 
     const blockerActionHandler = blockerSummary.top?.action
         ? decisionActionHandlers[blockerSummary.top.action]
@@ -1873,7 +2044,9 @@ function WorkspaceDraftsPageContent() {
                     <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] text-red-100 flex flex-wrap items-center justify-between gap-2">
                         <div className="space-y-0.5">
                             <p className="font-semibold">موانع حرجة ({blockerSummary.count})</p>
-                            <p className="text-[10px] text-red-200 line-clamp-1">{blockerSummary.top?.title || 'موانع تحتاج معالجة قبل الإرسال.'}</p>
+                            <p className="text-[10px] text-red-200 line-clamp-1">
+                                {explainedBlockers[0]?.title || blockerSummary.top?.title || 'موانع تحتاج معالجة قبل الإرسال.'}
+                            </p>
                         </div>
                         <div className="flex items-center gap-2">
                             {blockerActionHandler && (
@@ -2097,9 +2270,9 @@ function WorkspaceDraftsPageContent() {
                                                 </button>
                                             )}
                                         </div>
-                                        {decisionDetailOpen && (
-                                            <p className="text-[10px] text-gray-200 mt-1">{item.reason}</p>
-                                        )}
+                                        <p className={cn('text-[10px] text-gray-200 mt-1', decisionDetailOpen ? '' : 'line-clamp-1')}>
+                                            {item.reason}
+                                        </p>
                                     </div>
                                 );
                             })}
@@ -2763,7 +2936,18 @@ function WorkspaceDraftsPageContent() {
                                     <div className={cn('rounded-xl border p-2', readiness.ready_for_publish ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100' : 'border-red-500/30 bg-red-500/10 text-red-100')}>
                                         {readiness.ready_for_publish ? 'جاهز للنشر بعد المراجعة البشرية.' : 'غير جاهز للنشر. توجد موانع.'}
                                     </div>
-                                    {!readiness.ready_for_publish && <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-2 text-red-100">{(readiness.blocking_reasons || []).map((r: string, i: number) => <p key={`${r}-${i}`}>- {cleanText(r)}</p>)}</div>}
+                                    {!readiness.ready_for_publish && (
+                                        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-2 text-red-100 space-y-1">
+                                            {explainedBlockers.length === 0
+                                                ? <p className="text-[11px]">توجد موانع غير موضحة بعد.</p>
+                                                : explainedBlockers.map((item, i) => (
+                                                    <div key={`ready-${i}`} className="text-[11px]">
+                                                        <span className="font-semibold">{item.title}</span>
+                                                        <span className="text-red-200/80"> — {item.detail}</span>
+                                                    </div>
+                                                ))}
+                                        </div>
+                                    )}
                                     <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-gray-300 space-y-1">
                                         {Object.entries(readiness.reports || {}).map(([stage, report]) => (
                                             <div key={stage} className="flex items-center justify-between gap-2">
@@ -3249,13 +3433,27 @@ function WorkspaceDraftsPageContent() {
                                 إغلاق
                             </button>
                         </div>
-                        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-[11px] text-red-100 space-y-1">
-                            <p className="font-semibold">الموانع الحالية</p>
-                            {blockerSummary.items.length === 0 ? (
+                        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-[11px] text-red-100 space-y-2">
+                            <p className="font-semibold">الموانع الحالية (سبب + إجراء)</p>
+                            {explainedBlockers.length === 0 ? (
                                 <p className="text-[10px] text-red-200">لا توجد موانع حرجة حالياً.</p>
                             ) : (
-                                blockerSummary.items.slice(0, 6).map((item) => (
-                                    <p key={`override-${item.id}`} className="text-[10px] text-red-100 line-clamp-1">- {item.title}</p>
+                                explainedBlockers.slice(0, 6).map((item, idx) => (
+                                    <div key={`override-${idx}`} className="rounded-lg border border-white/10 bg-black/20 p-2">
+                                        <p className="text-[10px] text-red-100">{item.title}</p>
+                                        <p className="text-[10px] text-red-200/80 mt-1 line-clamp-2">{item.detail}</p>
+                                        {item.action && ACTION_SOURCE_LABELS[item.action as DecisionActionId] && (
+                                            <p className="text-[10px] text-amber-200/80 mt-1">الإجراء المقترح: {ACTION_SOURCE_LABELS[item.action as DecisionActionId]}</p>
+                                        )}
+                                        {item.action && (
+                                            <button
+                                                onClick={() => decisionActionHandlers[item.action as DecisionActionId]()}
+                                                className="mt-2 px-2 py-0.5 rounded bg-white/10 text-[10px] text-gray-200"
+                                            >
+                                                فتح الأداة
+                                            </button>
+                                        )}
+                                    </div>
                                 ))
                             )}
                         </div>
