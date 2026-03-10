@@ -301,11 +301,20 @@ async def get_pending_candidates(
 ):
     """Get articles pending editorial review."""
     freshness_cutoff = datetime.utcnow() - timedelta(hours=settings.scout_max_article_age_hours)
+    pending_statuses = [NewsStatus.CANDIDATE]
+    if settings.editorial_desk_include_pre_candidate:
+        pending_statuses = [
+            NewsStatus.NEW,
+            NewsStatus.CLEANED,
+            NewsStatus.DEDUPED,
+            NewsStatus.CLASSIFIED,
+            NewsStatus.CANDIDATE,
+        ]
     result = await db.execute(
         select(Article)
         .where(
             and_(
-                Article.status == NewsStatus.CANDIDATE,
+                Article.status.in_(pending_statuses),
                 func.coalesce(Article.published_at, Article.crawled_at) >= freshness_cutoff,
             )
         )

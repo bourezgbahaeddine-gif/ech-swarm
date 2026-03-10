@@ -220,6 +220,7 @@ class Settings(BaseSettings):
     truth_score_verify_threshold: float = 0.8
     editorial_min_importance: int = 6
     editorial_require_local_signal: bool = True
+    editorial_desk_include_pre_candidate: bool = True
     editorial_direct_publish_enabled: bool = True
     editorial_sensitive_categories: str = "politics,international,health,society,environment"
     editorial_sensitive_urgency_levels: str = "high,breaking"
