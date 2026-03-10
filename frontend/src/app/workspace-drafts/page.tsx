@@ -1212,7 +1212,7 @@ function WorkspaceDraftsPageContent() {
         createDraftFromArticle.mutate();
     }, [articleNumericId, listLoading, workId, drafts.length, createDraftFromArticle]);
 
-    const showSidePanels = viewMode === 'deep';
+    const showSidePanels = true;
 
     const decisionSections = viewMode === 'deep'
         ? [
@@ -1459,6 +1459,14 @@ function WorkspaceDraftsPageContent() {
                         >
                             {detailsOpen ? 'إخفاء التفاصيل' : 'عرض التفاصيل'}
                         </button>
+                        {detailsOpen && (
+                            <button
+                                onClick={() => setToolsExpanded((prev) => !prev)}
+                                className="min-h-10 px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-gray-300 text-xs"
+                            >
+                                {toolsExpanded ? 'إخفاء الأدوات' : 'إظهار الأدوات'}
+                            </button>
+                        )}
                         <div className="ml-auto flex items-center gap-2">
                             {detailsOpen && (
                                 <button
@@ -1822,6 +1830,62 @@ function WorkspaceDraftsPageContent() {
 
                 {showSidePanels && (
                 <aside className="order-3 xl:order-3 xl:col-span-3 space-y-4">
+                    <Panel title="مساعد التحرير (Copilot)">
+                        <div className="space-y-3 text-xs text-gray-200">
+                            <div className="rounded-lg border border-white/10 bg-black/20 p-2">
+                                <p className="text-gray-400 mb-1">الحالة الحالية</p>
+                                <p>الجاهزية: {compactStatus.readinessLabel}</p>
+                                <p>الادعاءات الحرجة: {compactStatus.blockingClaims}</p>
+                                <p>الجودة: {compactStatus.qualityScore}</p>
+                            </div>
+                            <div className="rounded-lg border border-white/10 bg-black/20 p-2">
+                                <p className="text-gray-400 mb-1">ما ينقص الخبر</p>
+                                {[...decisionModel.urgent, ...decisionModel.improve].slice(0, 3).map((item) => (
+                                    <p key={`need-${item.id}`} className="text-gray-200">- {item.title}</p>
+                                ))}
+                                {decisionModel.urgent.length === 0 && decisionModel.improve.length === 0 && <p className="text-gray-500">لا توجد ملاحظات حرجة الآن.</p>}
+                            </div>
+                            <div className="rounded-lg border border-white/10 bg-black/20 p-2">
+                                <p className="text-gray-400 mb-1">اقتراح عناوين</p>
+                                {headlineInsights.slice(0, 3).map((h, idx) => (
+                                    <div key={`headline-cp-${idx}`} className="flex items-center justify-between gap-2">
+                                        <span className="text-gray-200 line-clamp-1">{cleanText(h.headline || '')}</span>
+                                        <button
+                                            onClick={() => { setTitle(cleanText(h.headline || '')); setSaveState('unsaved'); }}
+                                            className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-gray-200"
+                                        >
+                                            استخدم
+                                        </button>
+                                    </div>
+                                ))}
+                                {!headlineInsights.length && <p className="text-gray-500">لم يتم توليد عناوين بعد.</p>}
+                            </div>
+                            <div className="rounded-lg border border-white/10 bg-black/20 p-2">
+                                <p className="text-gray-400 mb-1">جودة الخبر</p>
+                                {quality ? (
+                                    <>
+                                        <p>الدرجة: {quality.score ?? '-'}/100</p>
+                                        {(quality.actionable_fixes || []).slice(0, 2).map((f: string, i: number) => (
+                                            <p key={`cp-fix-${i}`} className="text-gray-300">- {cleanText(f)}</p>
+                                        ))}
+                                    </>
+                                ) : <p className="text-gray-500">شغّل تقييم الجودة لرؤية التقرير.</p>}
+                            </div>
+                            <div className="rounded-lg border border-white/10 bg-black/20 p-2">
+                                <p className="text-gray-400 mb-1">التحقق</p>
+                                <p>الادعاءات: {claims.length}</p>
+                                <p>الحرجة: {claims.filter((c: any) => c?.blocking).length}</p>
+                            </div>
+                            <button
+                                onClick={() => setDetailsOpen(true)}
+                                className="w-full rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-[11px] text-gray-200"
+                            >
+                                فتح الأدوات المتقدمة
+                            </button>
+                        </div>
+                    </Panel>
+
+                    {detailsOpen && (
                     <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4">
                         <div className="flex gap-2 overflow-x-auto pb-1 xl:flex-wrap xl:overflow-visible">
                             {visibleTabs.map((t) => (
@@ -1835,8 +1899,9 @@ function WorkspaceDraftsPageContent() {
                             </button>
                         </div>
                     </div>
+                    )}
 
-                    {activeTab === 'evidence' && (
+                    {detailsOpen && activeTab === 'evidence' && (
                         <Panel title="نتائج التحقق">
                             {claims.length ? (
                                 <div className="space-y-2">
@@ -1913,7 +1978,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {activeTab === 'proofread' && (
+                    {detailsOpen && activeTab === 'proofread' && (
                         <Panel title="نتائج التدقيق اللغوي">
                             {proofread ? (
                                 <div className="space-y-2 text-xs text-gray-200">
@@ -1965,7 +2030,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {activeTab === 'quality' && (
+                    {detailsOpen && activeTab === 'quality' && (
                         <Panel title="تقييم الجودة">
                             {quality ? (
                                 <div className="space-y-2 text-xs text-gray-200">
@@ -2020,7 +2085,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {activeTab === 'seo' && (
+                    {detailsOpen && activeTab === 'seo' && (
                         <Panel title="نتائج SEO">
                             {seoPack ? (
                                 <div className="space-y-2 text-xs text-gray-200">
@@ -2146,7 +2211,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {activeTab === 'social' && (
+                    {detailsOpen && activeTab === 'social' && (
                         <Panel title="نسخ السوشيال">
                             {social ? (
                                 <div className="space-y-2 text-xs text-gray-200">
@@ -2160,7 +2225,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {activeTab === 'msi' && (
+                    {detailsOpen && activeTab === 'msi' && (
                         <Panel title="MSI السياقي">
                             {msiContextHit ? (
                                 <div className={cn('rounded-xl border p-2 text-xs', Number(msiContextHit.msi || 100) < 60 ? 'border-red-500/30 bg-red-500/10 text-red-100' : 'border-amber-500/30 bg-amber-500/10 text-amber-100')}>
@@ -2193,7 +2258,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {activeTab === 'simulator' && (
+                    {detailsOpen && activeTab === 'simulator' && (
                         <Panel title="محاكي الجمهور">
                             {simResult ? (
                                 <div className="space-y-2 text-xs text-gray-200">
@@ -2225,7 +2290,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {activeTab === 'xray' && (
+                    {detailsOpen && activeTab === 'xray' && (
                         <Panel title="زوايا المنافسين">
                             {xrayItems.length ? (
                                 <div className="space-y-2 text-xs text-gray-200">
@@ -2273,7 +2338,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {activeTab === 'context' && (
+                    {detailsOpen && activeTab === 'context' && (
                         <Panel title="السياق والنسخ">
                             <div className="space-y-1 max-h-32 overflow-auto">
                                 {versions.map((v) => <button key={v.id} onClick={() => restoreVersion.mutate(v.version)} className="w-full text-right rounded bg-white/5 px-2 py-1 text-xs text-gray-200">الإصدار v{v.version} • {v.change_origin || 'يدوي'}</button>)}
