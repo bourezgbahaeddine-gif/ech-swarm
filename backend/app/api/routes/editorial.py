@@ -171,6 +171,69 @@ def _can_review_decision(user: User, decision: str) -> None:
     raise HTTPException(status_code=400, detail="قرار التحرير غير صالح")
 
 
+def _parse_csv(value: str | None) -> set[str]:
+    return {item.strip().lower() for item in (value or "").split(",") if item.strip()}
+
+
+def _category_label(category: NewsCategory | None) -> str:
+    if not category:
+        return ""
+    mapping = {
+        NewsCategory.POLITICS: "سياسة",
+        NewsCategory.INTERNATIONAL: "دولي",
+        NewsCategory.HEALTH: "صحة",
+        NewsCategory.SOCIETY: "مجتمع",
+        NewsCategory.ENVIRONMENT: "بيئة",
+        NewsCategory.ECONOMY: "اقتصاد",
+        NewsCategory.LOCAL_ALGERIA: "محلي الجزائر",
+        NewsCategory.TECHNOLOGY: "تكنولوجيا",
+        NewsCategory.SPORTS: "رياضة",
+        NewsCategory.CULTURE: "ثقافة",
+    }
+    return mapping.get(category, category.value)
+
+
+def _is_sensitive_article(
+    *,
+    article: Article,
+    policy_report: dict[str, Any] | None,
+    fact_report: ArticleQualityReport | None,
+) -> tuple[bool, list[str]]:
+    reasons: list[str] = []
+    urgency_raw = str(article.urgency.value if isinstance(article.urgency, UrgencyLevel) else article.urgency or "").lower()
+    sensitive_urgency = _parse_csv(getattr(settings, "editorial_sensitive_urgency_levels", "high,breaking"))
+    sensitive_categories = _parse_csv(getattr(settings, "editorial_sensitive_categories", "politics,international,health,society,environment"))
+    importance_threshold = int(getattr(settings, "editorial_sensitive_importance_threshold", 8) or 8)
+
+    if article.is_breaking or urgency_raw in sensitive_urgency:
+        reasons.append("خبر عاجل أو أولوية عالية")
+
+    if article.category and article.category.value.lower() in sensitive_categories:
+        reasons.append(f"تصنيف حساس: {_category_label(article.category)}")
+
+    if int(article.importance_score or 0) >= importance_threshold:
+        reasons.append(f"أهمية تحريرية مرتفعة (>= {importance_threshold})")
+
+    fact_payload = (fact_report.report_json if fact_report else {}) or {}
+    claims = fact_payload.get("claims") if isinstance(fact_payload.get("claims"), list) else []
+    sensitive_claims = [
+        claim for claim in claims
+        if str(claim.get("risk_level") or "").lower() == "high" or bool(claim.get("sensitive"))
+    ]
+    if sensitive_claims:
+        reasons.append(f"ادعاءات حساسة تتطلب مراجعة ({len(sensitive_claims)})")
+
+    policy_reasons = policy_report.get("reasons") if isinstance(policy_report, dict) else []
+    if isinstance(policy_reasons, list):
+        for reason in policy_reasons:
+            reason_text = str(reason or "").lower()
+            if any(term in reason_text for term in ["قانون", "محكمة", "قضاء", "أمني", "اتهام", "تحقيق"]):
+                reasons.append("مؤشرات حساسة في السياسة التحريرية")
+                break
+
+    return (len(reasons) > 0), reasons
+
+
 def _clean_editorial_output(text: str) -> str:
     cleaned = (text or "").strip()
     patterns = [
@@ -694,17 +757,25 @@ async def _submit_draft_for_chief_approval(
         decision = "reservations"
 
     blockers = [issue.message for issue in gate_result.blockers]
+    is_sensitive, sensitivity_reasons = _is_sensitive_article(
+        article=article,
+        policy_report=policy_report,
+        fact_report=fact_report,
+    )
     journalist_direct_path = current_user.role == UserRole.journalist
     submitted_for_chief_approval = False
     transition_action = "submit_for_chief_approval"
 
-    if decision == "approved" and journalist_direct_path:
+    if decision == "approved" and journalist_direct_path and settings.editorial_direct_publish_enabled and not is_sensitive:
         target_status = NewsStatus.READY_FOR_MANUAL_PUBLISH
         status_message = "تم اعتماد النسخة من الصحفي وأصبحت جاهزة للنشر اليدوي."
         transition_action = "journalist_direct_approval"
     elif decision == "approved":
         target_status = NewsStatus.READY_FOR_CHIEF_APPROVAL
         status_message = "جاهز لاعتماد رئيس التحرير"
+        if journalist_direct_path and is_sensitive:
+            status_message = "ملف حسّاس: تم تحويله إلى رئيس التحرير للاعتماد"
+            transition_action = "submit_for_chief_sensitive"
         submitted_for_chief_approval = True
     else:
         if journalist_direct_path:
@@ -728,6 +799,8 @@ async def _submit_draft_for_chief_approval(
             "policy_score": policy_report.get("score"),
             "blocking_reasons": blockers,
             "journalist_direct_path": journalist_direct_path,
+            "sensitive": is_sensitive,
+            "sensitivity_reasons": sensitivity_reasons,
         },
     )
 
@@ -780,6 +853,8 @@ async def _submit_draft_for_chief_approval(
         "status_message": status_message,
         "submitted_for_chief_approval": submitted_for_chief_approval,
         "journalist_direct_path": journalist_direct_path,
+        "sensitive": is_sensitive,
+        "sensitivity_reasons": sensitivity_reasons,
         "blocking_reasons": blockers or policy_report.get("blocking_reasons", []),
         "actionable_fixes": policy_report.get("actionable_fixes", []),
         "gate_summary": gate_summary,

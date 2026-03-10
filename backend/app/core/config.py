@@ -220,6 +220,10 @@ class Settings(BaseSettings):
     truth_score_verify_threshold: float = 0.8
     editorial_min_importance: int = 6
     editorial_require_local_signal: bool = True
+    editorial_direct_publish_enabled: bool = True
+    editorial_sensitive_categories: str = "politics,international,health,society,environment"
+    editorial_sensitive_urgency_levels: str = "high,breaking"
+    editorial_sensitive_importance_threshold: int = 8
     quality_claim_support_enforcement_enabled: bool = True
     quality_claim_sensitive_threshold: float = 0.80
     quality_claim_require_non_aggregator_support: bool = False
