@@ -325,6 +325,14 @@ function workflowDot(status: 'done' | 'warn' | 'pending'): string {
     return 'bg-slate-500';
 }
 
+function appendEvidenceLink(existing: string, nextValue: string): string {
+    const cleaned = cleanText(nextValue || '').trim();
+    if (!cleaned) return existing;
+    const base = (existing || '').trim();
+    if (!base) return cleaned;
+    return `${base}\n${cleaned}`;
+}
+
 function WorkspaceDraftsPageContent() {
     const queryClient = useQueryClient();
     const { user } = useAuth();
@@ -390,6 +398,7 @@ function WorkspaceDraftsPageContent() {
     const [showImproveAll, setShowImproveAll] = useState(false);
     const [showExtraAll, setShowExtraAll] = useState(false);
     const [detailsOpen, setDetailsOpen] = useState(false);
+    const [focusMode, setFocusMode] = useState(false);
     const [inlineAiOpen, setInlineAiOpen] = useState(false);
     const [inlineSourceOpen, setInlineSourceOpen] = useState(false);
     const [inlineAiError, setInlineAiError] = useState<string | null>(null);
@@ -1282,7 +1291,8 @@ function WorkspaceDraftsPageContent() {
         createDraftFromArticle.mutate();
     }, [articleNumericId, listLoading, workId, drafts.length, createDraftFromArticle]);
 
-    const showSidePanels = detailsOpen;
+    const showSidePanels = detailsOpen && !focusMode;
+    const mainSpanClass = showSidePanels ? 'xl:col-span-8' : 'xl:col-span-12';
 
     useEffect(() => {
         if (leftTab !== 'archive') return;
@@ -1530,40 +1540,37 @@ function WorkspaceDraftsPageContent() {
 
                 <div className="mt-3 space-y-3">
                     {detailsOpen && (
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                            <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-gray-200 space-y-1">
-                                <p className="text-[11px] text-gray-400">الخطوة 1</p>
-                                <p className="font-semibold">فحص سريع</p>
-                                <p className="text-[11px] text-gray-500">تحقق + جودة + جاهزية في خطوة واحدة.</p>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10px] text-gray-200">
+                                <span className="text-[10px] text-gray-400">1</span>
+                                <span>فحص سريع</span>
                                 <button
                                     onClick={() => runWithGuide('quick_check', () => runQuickCheck.mutate())}
                                     disabled={runQuickCheck.isPending}
-                                    className="mt-1 px-2 py-1 rounded-lg bg-indigo-500/20 border border-indigo-500/30 text-indigo-100 text-[11px] disabled:opacity-60"
+                                    className="px-2 py-0.5 rounded bg-indigo-500/20 border border-indigo-500/30 text-indigo-100 text-[10px] disabled:opacity-60"
                                 >
-                                    {runQuickCheck.isPending ? 'جاري الفحص...' : 'ابدأ'}
+                                    {runQuickCheck.isPending ? 'جاري...' : 'ابدأ'}
                                 </button>
                             </div>
-                            <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-gray-200 space-y-1">
-                                <p className="text-[11px] text-gray-400">الخطوة 2</p>
-                                <p className="font-semibold">عالج الأهم</p>
-                                <p className="text-[11px] text-gray-500 line-clamp-2">{nextAction.description}</p>
+                            <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10px] text-gray-200">
+                                <span className="text-[10px] text-gray-400">2</span>
+                                <span>عالج الأهم</span>
                                 <button
                                     onClick={() => nextAction.handler()}
-                                    className={cn('mt-1 px-2 py-1 rounded-lg border text-[11px]', severityStyles(nextAction.severity).badge, 'border-white/15')}
+                                    className={cn('px-2 py-0.5 rounded border text-[10px]', severityStyles(nextAction.severity).badge, 'border-white/15')}
                                 >
                                     نفّذ الآن
                                 </button>
                             </div>
-                            <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-gray-200 space-y-1">
-                                <p className="text-[11px] text-gray-400">الخطوة 3</p>
-                                <p className="font-semibold">إرسال للاعتماد</p>
-                                <p className="text-[11px] text-gray-500">أرسل النسخة لرئيس التحرير بعد المراجعة.</p>
+                            <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10px] text-gray-200">
+                                <span className="text-[10px] text-gray-400">3</span>
+                                <span>إرسال</span>
                                 <button
                                     disabled={applyToArticle.isPending}
                                     onClick={() => runWithGuide('apply', () => applyToArticle.mutate())}
-                                    className="mt-1 px-2 py-1 rounded-lg bg-white/10 border border-white/15 text-gray-200 text-[11px] disabled:opacity-60"
+                                    className="px-2 py-0.5 rounded bg-white/10 border border-white/15 text-gray-200 text-[10px] disabled:opacity-60"
                                 >
-                                    {applyToArticle.isPending ? 'جاري الإرسال...' : 'إرسال'}
+                                    {applyToArticle.isPending ? 'جاري...' : 'إرسال'}
                                 </button>
                             </div>
                         </div>
@@ -1572,36 +1579,44 @@ function WorkspaceDraftsPageContent() {
                         <button
                             onClick={() => runWithGuide('quick_check', () => runQuickCheck.mutate())}
                             disabled={runQuickCheck.isPending}
-                            className="min-h-10 px-4 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-100 text-xs flex items-center gap-2 disabled:opacity-60"
+                            className="min-h-9 px-3 py-2 rounded-lg bg-indigo-500/20 border border-indigo-500/30 text-indigo-100 text-[11px] flex items-center gap-2 disabled:opacity-60"
                         >
                             <ShieldCheck className="w-4 h-4" />
                             {runQuickCheck.isPending ? 'جاري الفحص...' : 'فحص سريع'}
                         </button>
                         <button
                             onClick={() => nextAction.handler()}
-                            className={cn('min-h-10 px-4 py-2 rounded-xl border text-xs flex items-center gap-2', severityStyles(nextAction.severity).badge, 'border-white/15')}
+                            className={cn('min-h-9 px-3 py-2 rounded-lg border text-[11px] flex items-center gap-2', severityStyles(nextAction.severity).badge, 'border-white/15')}
                         >
                             {nextAction.label}
                         </button>
                         <button
                             disabled={applyToArticle.isPending}
                             onClick={() => runWithGuide('apply', () => applyToArticle.mutate())}
-                            className="min-h-10 px-4 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs disabled:opacity-60"
+                            className="min-h-9 px-3 py-2 rounded-lg bg-white/10 border border-white/15 text-gray-200 text-[11px] disabled:opacity-60"
                         >
                             {applyToArticle.isPending ? 'جاري الإرسال...' : 'إرسال لاعتماد رئيس التحرير'}
                         </button>
                         <button
                             onClick={() => setDetailsOpen((prev) => !prev)}
-                            className="min-h-10 px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-gray-300 text-xs"
+                            className="min-h-9 px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-gray-300 text-[11px]"
                         >
                             {detailsOpen ? 'إخفاء التفاصيل' : 'عرض التفاصيل'}
                         </button>
                         {detailsOpen && (
                             <button
                                 onClick={() => setToolsExpanded((prev) => !prev)}
-                                className="min-h-10 px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-gray-300 text-xs"
+                                className="min-h-9 px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-gray-300 text-[11px]"
                             >
                                 {toolsExpanded ? 'إخفاء الأدوات' : 'إظهار الأدوات'}
+                            </button>
+                        )}
+                        {detailsOpen && (
+                            <button
+                                onClick={() => setFocusMode((prev) => !prev)}
+                                className="min-h-9 px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-gray-300 text-[11px]"
+                            >
+                                {focusMode ? 'إلغاء التركيز' : 'وضع التركيز'}
                             </button>
                         )}
                         {detailsOpen && (
@@ -1693,9 +1708,9 @@ function WorkspaceDraftsPageContent() {
                     </button>
                 </div>
 
-                <div className={cn('grid gap-3', viewMode === 'deep' ? 'grid-cols-1 lg:grid-cols-3' : 'grid-cols-1 lg:grid-cols-2')}>
+                <div className={cn('grid gap-2', viewMode === 'deep' ? 'grid-cols-1 lg:grid-cols-3' : 'grid-cols-1 lg:grid-cols-2')}>
                     {decisionSections.map((section) => (
-                        <div key={section.title} className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
+                        <div key={section.title} className="rounded-lg border border-white/10 bg-black/20 p-2 space-y-1">
                             <h3 className="text-xs text-gray-200 font-semibold">{section.title}</h3>
                             {section.items.length === 0 ? (
                                 <p className="text-[11px] text-gray-500">{section.empty}</p>
@@ -1705,7 +1720,7 @@ function WorkspaceDraftsPageContent() {
                                     const actionKey = item.action;
                                     const actionHandler = actionKey ? decisionActionHandlers[actionKey] : undefined;
                                     return (
-                                        <div key={item.id} className={cn('rounded-lg border p-2 space-y-1', styles.border)}>
+                                        <div key={item.id} className={cn('rounded-md border p-2 space-y-1', styles.border)}>
                                             <div className="flex items-center justify-between gap-2">
                                                 <p className="text-[11px] text-white">{item.title}</p>
                                                 <span className={cn('px-2 py-0.5 rounded text-[10px]', styles.badge)}>
@@ -1872,7 +1887,7 @@ function WorkspaceDraftsPageContent() {
             )}
 
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
-                <main className="order-1 xl:order-2 xl:col-span-6 space-y-4">
+                <main className={cn('order-1 xl:order-2 space-y-4', mainSpanClass)}>
                     <div className="rounded-2xl border border-white/10 bg-gray-900/50 overflow-hidden">
                         <div className="border-b border-white/10 p-4">
                             <input value={title} onChange={(e) => { setTitle(cleanText(e.target.value)); setSaveState('unsaved'); }} className="w-full rounded-xl bg-white/5 border border-white/15 px-3 py-2 text-white text-lg" dir="rtl" />
@@ -1957,7 +1972,7 @@ function WorkspaceDraftsPageContent() {
                 </main>
 
                 {showSidePanels && (
-                <aside className="order-2 xl:order-1 xl:col-span-3 space-y-4">
+                <aside className="order-2 xl:order-1 xl:col-span-2 space-y-4">
                     <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3">
                         <div className="flex flex-wrap items-center gap-2">
                             <button
@@ -2068,7 +2083,7 @@ function WorkspaceDraftsPageContent() {
                 )}
 
                 {showSidePanels && (
-                <aside className="order-3 xl:order-3 xl:col-span-3 space-y-4">
+                <aside className="order-3 xl:order-3 xl:col-span-2 space-y-4">
                     <Panel title="مساعد التحرير (Copilot)">
                         <div className="space-y-3 text-xs text-gray-200">
                             <div className="rounded-lg border border-white/10 bg-black/20 p-2 space-y-2">
@@ -2199,6 +2214,26 @@ function WorkspaceDraftsPageContent() {
                                                     placeholder="روابط الأدلة أو مراجع DocIntel (سطر لكل مرجع أو مفصولة بفاصلة)"
                                                     className="w-full min-h-14 rounded-lg bg-black/20 border border-white/15 px-2 py-1 text-[11px] text-gray-100 placeholder:text-gray-500"
                                                 />
+                                                {sources.length > 0 && (
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {sources.slice(0, 6).map((source) => (
+                                                            <button
+                                                                key={`claim-source-${claimId}-${source.id}`}
+                                                                onClick={() =>
+                                                                    setClaimOverrideDraftField(claimId, {
+                                                                        evidenceLinksRaw: appendEvidenceLink(
+                                                                            draft.evidenceLinksRaw,
+                                                                            source.url || source.name,
+                                                                        ),
+                                                                    })
+                                                                }
+                                                                className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-gray-200"
+                                                            >
+                                                                {cleanText(source.name || source.url)}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
                                                 <label className="flex items-center gap-2 text-[11px] text-gray-200">
                                                     <input
                                                         type="checkbox"
