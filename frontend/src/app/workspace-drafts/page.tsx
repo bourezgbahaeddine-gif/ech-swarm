@@ -24,12 +24,14 @@ import {
 } from 'lucide-react';
 
 import {
+    archiveApi,
     competitorXrayApi,
     editorialApi,
     jobsApi,
     msiApi,
     simApi,
     type ClaimOverrideInput,
+    type ArchiveSearchItem,
     type FactCheckClaim,
     type WorkspacePublishReadiness,
 } from '@/lib/api';
@@ -42,6 +44,7 @@ type RightTab = 'evidence' | 'proofread' | 'quality' | 'seo' | 'social' | 'conte
 type GuideType = 'welcome' | 'action';
 type ActionId = 'quick_check' | 'verify' | 'proofread' | 'improve' | 'headlines' | 'seo' | 'links' | 'social' | 'quality' | 'publish_gate' | 'apply' | 'save' | 'manual_draft' | 'audience_test';
 type ViewMode = 'speed' | 'deep';
+type LeftTab = 'drafts' | 'source' | 'archive';
 type ClaimOverrideDraft = {
     evidenceLinksRaw: string;
     unverifiable: boolean;
@@ -314,6 +317,12 @@ function actionKey(action: ActionId): string {
     return `${ACTION_HELP_PREFIX}${action}`;
 }
 
+function workflowDot(status: 'done' | 'warn' | 'pending'): string {
+    if (status === 'done') return 'bg-emerald-400';
+    if (status === 'warn') return 'bg-amber-400';
+    return 'bg-slate-500';
+}
+
 function WorkspaceDraftsPageContent() {
     const queryClient = useQueryClient();
     const { user } = useAuth();
@@ -360,6 +369,10 @@ function WorkspaceDraftsPageContent() {
     const [manualSummary, setManualSummary] = useState('');
     const [manualCategory, setManualCategory] = useState('local_algeria');
     const [manualUrgency, setManualUrgency] = useState('medium');
+    const [leftTab, setLeftTab] = useState<LeftTab>('drafts');
+    const [archiveQuery, setArchiveQuery] = useState('');
+    const [archiveItems, setArchiveItems] = useState<ArchiveSearchItem[]>([]);
+    const [archiveError, setArchiveError] = useState<string | null>(null);
 
     const [guideOpen, setGuideOpen] = useState(false);
     const [guideType, setGuideType] = useState<GuideType>('welcome');
@@ -739,6 +752,20 @@ function WorkspaceDraftsPageContent() {
         onSuccess: (data) => { setHeadlines(data?.headlines || []); setActiveTab('seo'); },
         onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر توليد العناوين'),
     });
+    const runArchiveSearch = useMutation({
+        mutationFn: (query: string) => archiveApi.search({ q: query, limit: 8, sort: 'recent' }),
+        onSuccess: (res) => {
+            const items = res?.data?.items || [];
+            const sorted = [...items].sort((a, b) => {
+                const da = a.published_at ? new Date(a.published_at).getTime() : 0;
+                const db = b.published_at ? new Date(b.published_at).getTime() : 0;
+                return db - da;
+            });
+            setArchiveItems(sorted);
+            setArchiveError(null);
+        },
+        onError: () => setArchiveError('تعذر البحث في الأرشيف الآن.'),
+    });
     const runReadiness = useMutation({ mutationFn: () => editorialApi.publishReadiness(workId!), onSuccess: (r) => { setReadiness(r.data); setActiveTab('quality'); } });
     const runQuickCheck = useMutation({
         mutationFn: async () => {
@@ -1107,6 +1134,22 @@ function WorkspaceDraftsPageContent() {
         return { readinessLabel, blockingClaims, qualityScore };
     }, [readiness, claims, quality]);
 
+    const bodyText = useMemo(() => htmlToReadableText(bodyHtml || ''), [bodyHtml]);
+    const workflowSteps = useMemo(() => {
+        const hasContext = Boolean(cleanText(context?.article?.summary || context?.article?.original_content || '').trim());
+        const hasDraft = bodyText.trim().length >= 400;
+        const hasQuality = typeof quality?.score === 'number';
+        const hasVerification = claims.length > 0 || Boolean(readiness);
+        const readyToSend = Boolean(readiness?.ready_for_publish);
+        return [
+            { id: 'context', label: 'فهم الخبر', status: hasContext ? 'done' : 'pending' },
+            { id: 'draft', label: 'المسودة', status: hasDraft ? 'done' : hasContext ? 'warn' : 'pending' },
+            { id: 'quality', label: 'تحسين النص', status: hasQuality ? 'done' : 'pending' },
+            { id: 'verify', label: 'التحقق', status: hasVerification ? (claims.some((c: any) => c?.blocking) ? 'warn' : 'done') : 'pending' },
+            { id: 'send', label: 'الإرسال', status: readiness ? (readyToSend ? 'done' : 'warn') : 'pending' },
+        ] as Array<{ id: string; label: string; status: 'done' | 'warn' | 'pending' }>;
+    }, [context?.article?.summary, context?.article?.original_content, bodyText, quality, claims, readiness]);
+
     const runAudienceSimulation = useMutation({
         mutationFn: async () => {
             const headline = cleanText(title || context?.article?.title_ar || context?.article?.original_title || '');
@@ -1214,6 +1257,18 @@ function WorkspaceDraftsPageContent() {
 
     const showSidePanels = detailsOpen;
 
+    useEffect(() => {
+        if (leftTab !== 'archive') return;
+        if (archiveQuery.trim().length > 1) return;
+        const seed = cleanText(title || context?.article?.original_title || '');
+        if (seed.length > 2) setArchiveQuery(seed.slice(0, 80));
+    }, [leftTab, archiveQuery, title, context?.article?.original_title]);
+
+    useEffect(() => {
+        if (archiveQuery.trim().length >= 2) return;
+        if (archiveItems.length) setArchiveItems([]);
+    }, [archiveQuery, archiveItems.length]);
+
     const decisionSections = viewMode === 'deep'
         ? [
             { key: 'urgent', title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد موانع حرجة حالياً.', showAll: showUrgentAll, toggle: () => setShowUrgentAll((v) => !v) },
@@ -1230,6 +1285,17 @@ function WorkspaceDraftsPageContent() {
         if (saveState === 'unsaved') return <span className="text-amber-300 flex items-center gap-1"><Clock3 className="w-4 h-4" />غير محفوظ</span>;
         return <span className="text-red-300 flex items-center gap-1"><AlertTriangle className="w-4 h-4" />خطأ في الحفظ</span>;
     }, [saveState]);
+
+    function insertArchiveItem(item: ArchiveSearchItem) {
+        if (!editor) return;
+        const dateLabel = item.published_at ? new Date(item.published_at).toLocaleDateString('ar-DZ') : '';
+        const titleLine = cleanText(item.title || 'بدون عنوان');
+        const urlLine = cleanText(item.url || '');
+        const label = dateLabel ? `${titleLine} (${dateLabel})` : titleLine;
+        const html = `<p>مصدر من الأرشيف: ${label}</p>${urlLine ? `<p>${urlLine}</p>` : ''}`;
+        editor.chain().focus().insertContent(html).run();
+        setSaveState('unsaved');
+    }
 
     function openWelcomeGuide() {
         setGuideType('welcome');
@@ -1394,6 +1460,15 @@ function WorkspaceDraftsPageContent() {
                         </div>
                     </div>
                 )}
+
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {workflowSteps.map((step) => (
+                        <div key={step.id} className="flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-3 py-1 text-[11px] text-gray-200">
+                            <span className={cn('h-2 w-2 rounded-full', workflowDot(step.status))} />
+                            <span>{step.label}</span>
+                        </div>
+                    ))}
+                </div>
 
                 <div className="mt-3 space-y-3">
                     {detailsOpen && (
@@ -1799,24 +1874,109 @@ function WorkspaceDraftsPageContent() {
 
                 {showSidePanels && (
                 <aside className="order-2 xl:order-1 xl:col-span-3 space-y-4">
-                    <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4">
-                        <h2 className="text-sm text-white mb-2">المسودات</h2>
-                        <div className="space-y-2 max-h-[260px] overflow-auto">
-                            {drafts.map((d) => (
-                                <button key={`${d.work_id}-${d.id}`} onClick={() => setWorkId(d.work_id)} className={cn('w-full text-right rounded-xl border p-2', workId === d.work_id ? 'border-emerald-400/40 bg-emerald-500/10' : 'border-white/10 bg-white/5')}>
-                                    <div className="text-xs text-gray-200">{truncate(cleanText(d.title || 'بدون عنوان'), 58)}</div>
-                                    <div className="text-[10px] text-gray-500 mt-1">{formatRelativeTime(d.updated_at)}</div>
-                                </button>
-                            ))}
+                    <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button
+                                onClick={() => setLeftTab('drafts')}
+                                className={cn('px-3 py-1 rounded-lg text-[11px] border', leftTab === 'drafts' ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-100' : 'bg-white/5 border-white/10 text-gray-300')}
+                            >
+                                المسودات
+                            </button>
+                            <button
+                                onClick={() => setLeftTab('source')}
+                                className={cn('px-3 py-1 rounded-lg text-[11px] border', leftTab === 'source' ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-100' : 'bg-white/5 border-white/10 text-gray-300')}
+                            >
+                                المصدر
+                            </button>
+                            <button
+                                onClick={() => setLeftTab('archive')}
+                                className={cn('px-3 py-1 rounded-lg text-[11px] border', leftTab === 'archive' ? 'bg-amber-500/20 border-amber-500/40 text-amber-100' : 'bg-white/5 border-white/10 text-gray-300')}
+                            >
+                                الأرشيف
+                            </button>
                         </div>
-                    </div>
-                    <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4">
-                        <h2 className="text-sm text-white mb-2">المصدر والبيانات</h2>
-                        {contextLoading ? <p className="text-xs text-gray-500">جاري التحميل...</p> : (
-                            <div className="text-xs space-y-2" dir="rtl">
-                                <p className="text-gray-200">{cleanText(context?.article?.original_title || 'لا يوجد عنوان مصدر')}</p>
-                                <p className="text-gray-400">{cleanText(context?.article?.router_rationale || 'لا يوجد تفسير توجيه')}</p>
-                                <div className="rounded-xl border border-white/10 bg-black/25 p-2 text-gray-300 max-h-56 overflow-auto">{cleanText(context?.article?.summary || context?.article?.original_content || 'لا يوجد نص مصدر متاح')}</div>
+
+                        {leftTab === 'drafts' && (
+                            <div>
+                                <h2 className="text-sm text-white mb-2">المسودات</h2>
+                                <div className="space-y-2 max-h-[260px] overflow-auto">
+                                    {drafts.map((d) => (
+                                        <button key={`${d.work_id}-${d.id}`} onClick={() => setWorkId(d.work_id)} className={cn('w-full text-right rounded-xl border p-2', workId === d.work_id ? 'border-emerald-400/40 bg-emerald-500/10' : 'border-white/10 bg-white/5')}>
+                                            <div className="text-xs text-gray-200">{truncate(cleanText(d.title || 'بدون عنوان'), 58)}</div>
+                                            <div className="text-[10px] text-gray-500 mt-1">{formatRelativeTime(d.updated_at)}</div>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {leftTab === 'source' && (
+                            <div>
+                                <h2 className="text-sm text-white mb-2">المصدر والبيانات</h2>
+                                {contextLoading ? <p className="text-xs text-gray-500">جاري التحميل...</p> : (
+                                    <div className="text-xs space-y-2" dir="rtl">
+                                        <p className="text-gray-200">{cleanText(context?.article?.original_title || 'لا يوجد عنوان مصدر')}</p>
+                                        <p className="text-gray-400">{cleanText(context?.article?.router_rationale || 'لا يوجد تفسير توجيه')}</p>
+                                        <div className="rounded-xl border border-white/10 bg-black/25 p-2 text-gray-300 max-h-56 overflow-auto">{cleanText(context?.article?.summary || context?.article?.original_content || 'لا يوجد نص مصدر متاح')}</div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {leftTab === 'archive' && (
+                            <div className="space-y-2" dir="rtl">
+                                <h2 className="text-sm text-white">الأرشيف</h2>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        value={archiveQuery}
+                                        onChange={(e) => setArchiveQuery(e.target.value)}
+                                        placeholder="ابحث في أرشيف الشروق..."
+                                        className="w-full rounded-xl bg-white/5 border border-white/15 px-3 py-2 text-xs text-white"
+                                    />
+                                    <button
+                                        disabled={runArchiveSearch.isPending || archiveQuery.trim().length < 2}
+                                        onClick={() => {
+                                            setArchiveError(null);
+                                            runArchiveSearch.mutate(archiveQuery.trim());
+                                        }}
+                                        className="px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-100 text-xs disabled:opacity-60"
+                                    >
+                                        {runArchiveSearch.isPending ? 'بحث...' : 'بحث'}
+                                    </button>
+                                </div>
+                                {archiveError && <p className="text-[11px] text-red-300">{archiveError}</p>}
+                                {archiveItems.length === 0 && !runArchiveSearch.isPending && (
+                                    <p className="text-[11px] text-gray-500">اكتب كلمات مفتاحية ثم اضغط بحث.</p>
+                                )}
+                                <div className="space-y-2 max-h-[320px] overflow-auto">
+                                    {archiveItems.map((item) => (
+                                        <div key={`archive-${item.id}`} className="rounded-xl border border-white/10 bg-black/20 p-2">
+                                            <p className="text-xs text-gray-200 line-clamp-2">{cleanText(item.title || 'بدون عنوان')}</p>
+                                            <p className="text-[10px] text-gray-500 mt-1">
+                                                {item.published_at ? new Date(item.published_at).toLocaleDateString('ar-DZ') : 'بدون تاريخ'}
+                                            </p>
+                                            {item.summary && <p className="text-[11px] text-gray-400 mt-1 line-clamp-2">{cleanText(item.summary)}</p>}
+                                            <div className="mt-2 flex items-center gap-2">
+                                                <button
+                                                    onClick={() => insertArchiveItem(item)}
+                                                    className="px-2 py-1 rounded-lg bg-white/10 text-[10px] text-gray-200"
+                                                >
+                                                    إدراج
+                                                </button>
+                                                {item.url && (
+                                                    <a
+                                                        href={item.url}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="text-[10px] text-cyan-300 underline decoration-dotted"
+                                                    >
+                                                        فتح المصدر
+                                                    </a>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         )}
                     </div>
@@ -1827,6 +1987,15 @@ function WorkspaceDraftsPageContent() {
                 <aside className="order-3 xl:order-3 xl:col-span-3 space-y-4">
                     <Panel title="مساعد التحرير (Copilot)">
                         <div className="space-y-3 text-xs text-gray-200">
+                            <div className="rounded-lg border border-white/10 bg-black/20 p-2 space-y-2">
+                                <p className="text-gray-400">إجراءات سريعة</p>
+                                <div className="flex flex-wrap gap-2">
+                                    <button onClick={() => runQuickCheck.mutate()} className="px-2 py-1 rounded bg-indigo-500/20 border border-indigo-500/30 text-indigo-100 text-[10px]">فحص سريع</button>
+                                    <button onClick={() => runQuality.mutate()} className="px-2 py-1 rounded bg-violet-500/20 border border-violet-500/30 text-violet-100 text-[10px]">جودة</button>
+                                    <button onClick={() => runVerifier.mutate()} className="px-2 py-1 rounded bg-cyan-500/20 border border-cyan-500/30 text-cyan-100 text-[10px]">تحقق</button>
+                                    <button onClick={() => runHeadlines.mutate()} className="px-2 py-1 rounded bg-indigo-500/20 border border-indigo-500/30 text-indigo-100 text-[10px]">عناوين</button>
+                                </div>
+                            </div>
                             <div className="rounded-lg border border-white/10 bg-black/20 p-2">
                                 <p className="text-gray-400 mb-1">الحالة الحالية</p>
                                 <p>الجاهزية: {compactStatus.readinessLabel}</p>

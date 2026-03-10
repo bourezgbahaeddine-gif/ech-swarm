@@ -43,12 +43,13 @@ async def echorouk_archive_status(
 async def echorouk_archive_search(
     q: str = Query(..., min_length=2),
     limit: int = Query(5, ge=1, le=20),
+    sort: str = Query("relevance", pattern="^(relevance|recent)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     _require_view(current_user)
     return {
-        "items": await echorouk_archive_service.semantic_search(db, q=q, limit=limit),
+        "items": await echorouk_archive_service.semantic_search(db, q=q, limit=limit, sort=sort),
         "query": q,
         "limit": limit,
     }

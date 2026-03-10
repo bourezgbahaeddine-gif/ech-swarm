@@ -841,7 +841,7 @@ export const newsApi = {
 };
 
 export const archiveApi = {
-    search: (params: { q: string; limit?: number }) =>
+    search: (params: { q: string; limit?: number; sort?: 'relevance' | 'recent' }) =>
         api.get<ArchiveSearchResponse>('/archive/echorouk/search', { params }),
 };
 

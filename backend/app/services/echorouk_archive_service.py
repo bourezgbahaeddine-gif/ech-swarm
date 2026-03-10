@@ -358,7 +358,13 @@ class EchoroukArchiveService:
             await db.commit()
         return refreshed
 
-    async def semantic_search(self, db: AsyncSession, q: str, limit: int = 5) -> list[dict[str, Any]]:
+    async def semantic_search(
+        self,
+        db: AsyncSession,
+        q: str,
+        limit: int = 5,
+        sort: str = "relevance",
+    ) -> list[dict[str, Any]]:
         query = (q or "").strip()
         if len(query) < 2:
             return []
@@ -387,7 +393,14 @@ class EchoroukArchiveService:
             if previous is None or distance < previous[1]:
                 best_by_article[article.id] = (article, distance)
 
-        ranked = sorted(best_by_article.values(), key=lambda item: item[1])[:limit]
+        if sort == "recent":
+            ranked = sorted(
+                best_by_article.values(),
+                key=lambda item: (item[0].published_at or datetime.min, -item[1]),
+                reverse=True,
+            )[:limit]
+        else:
+            ranked = sorted(best_by_article.values(), key=lambda item: item[1])[:limit]
         return [
             {
                 "id": article.id,

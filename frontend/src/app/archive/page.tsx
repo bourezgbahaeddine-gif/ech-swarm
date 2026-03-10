@@ -32,7 +32,7 @@ export default function ArchivePage() {
 
     const { data, isLoading, isFetching, error } = useQuery({
         queryKey: ['archive-search', debouncedQuery, limit],
-        queryFn: () => archiveApi.search({ q: debouncedQuery, limit }),
+        queryFn: () => archiveApi.search({ q: debouncedQuery, limit, sort: 'recent' }),
         enabled: debouncedQuery.length >= 2,
     });
 
