@@ -1212,7 +1212,6 @@ function WorkspaceDraftsPageContent() {
         ]
         : [
             { key: 'urgent', title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد موانع حرجة حالياً.', showAll: showUrgentAll, toggle: () => setShowUrgentAll((v) => !v) },
-            { key: 'improve', title: 'يحسّن الجودة', items: decisionModel.improve, empty: 'لا توجد تحسينات عاجلة للجودة.', showAll: showImproveAll, toggle: () => setShowImproveAll((v) => !v) },
         ];
 
     const saveNode = useMemo(() => {
@@ -1479,14 +1478,18 @@ function WorkspaceDraftsPageContent() {
                         <div className="flex flex-wrap gap-2">
                             <button disabled={runVerifier.isPending} onClick={() => runWithGuide('verify', () => runVerifier.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-cyan-500/20 border border-cyan-500/30 text-cyan-200 text-xs flex items-center gap-2 disabled:opacity-60"><SearchCheck className="w-4 h-4" />{runVerifier.isPending ? 'جاري التحقق...' : 'تحقق'}</button>
                             <button disabled={runProofread.isPending} onClick={() => runWithGuide('proofread', () => runProofread.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-lime-500/20 border border-lime-500/30 text-lime-200 text-xs disabled:opacity-60">{runProofread.isPending ? 'جاري التدقيق...' : 'تدقيق لغوي'}</button>
-                            <button disabled={rewrite.isPending} onClick={() => runWithGuide('improve', () => rewrite.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-2 disabled:opacity-60"><Sparkles className="w-4 h-4" />{rewrite.isPending ? 'جاري التحسين...' : 'تحسين'}</button>
-                            <button disabled={runHeadlines.isPending} onClick={() => runWithGuide('headlines', () => runHeadlines.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-200 text-xs disabled:opacity-60">{runHeadlines.isPending ? 'جاري التوليد...' : 'عناوين'}</button>
-                            <button disabled={runSeo.isPending} onClick={() => runWithGuide('seo', () => runSeo.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-200 text-xs disabled:opacity-60">{runSeo.isPending ? 'جاري التحليل...' : 'SEO'}</button>
-                            <button disabled={runLinks.isPending} onClick={() => runWithGuide('links', () => runLinks.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-teal-500/20 border border-teal-500/30 text-teal-200 text-xs disabled:opacity-60">{runLinks.isPending ? 'جاري جلب الروابط...' : 'روابط'}</button>
-                            <button disabled={runSocial.isPending} onClick={() => runWithGuide('social', () => runSocial.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-sky-500/20 border border-sky-500/30 text-sky-200 text-xs disabled:opacity-60">{runSocial.isPending ? 'جاري التوليد...' : 'سوشيال'}</button>
                             <button disabled={runQuality.isPending} onClick={() => runWithGuide('quality', () => runQuality.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs disabled:opacity-60">{runQuality.isPending ? 'جاري التقييم...' : 'جودة'}</button>
-                            <button disabled={runAudienceSimulation.isPending} onClick={() => runWithGuide('audience_test', () => runAudienceSimulation.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-100 text-xs disabled:opacity-60">محاكي الجمهور</button>
                             <button disabled={runReadiness.isPending} onClick={() => runWithGuide('publish_gate', () => runReadiness.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-200 text-xs disabled:opacity-60">{runReadiness.isPending ? 'جاري الفحص...' : 'بوابة النشر'}</button>
+                            {viewMode === 'deep' && (
+                                <>
+                                    <button disabled={rewrite.isPending} onClick={() => runWithGuide('improve', () => rewrite.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-2 disabled:opacity-60"><Sparkles className="w-4 h-4" />{rewrite.isPending ? 'جاري التحسين...' : 'تحسين'}</button>
+                                    <button disabled={runHeadlines.isPending} onClick={() => runWithGuide('headlines', () => runHeadlines.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-200 text-xs disabled:opacity-60">{runHeadlines.isPending ? 'جاري التوليد...' : 'عناوين'}</button>
+                                    <button disabled={runSeo.isPending} onClick={() => runWithGuide('seo', () => runSeo.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-200 text-xs disabled:opacity-60">{runSeo.isPending ? 'جاري التحليل...' : 'SEO'}</button>
+                                    <button disabled={runLinks.isPending} onClick={() => runWithGuide('links', () => runLinks.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-teal-500/20 border border-teal-500/30 text-teal-200 text-xs disabled:opacity-60">{runLinks.isPending ? 'جاري جلب الروابط...' : 'روابط'}</button>
+                                    <button disabled={runSocial.isPending} onClick={() => runWithGuide('social', () => runSocial.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-sky-500/20 border border-sky-500/30 text-sky-200 text-xs disabled:opacity-60">{runSocial.isPending ? 'جاري التوليد...' : 'سوشيال'}</button>
+                                    <button disabled={runAudienceSimulation.isPending} onClick={() => runWithGuide('audience_test', () => runAudienceSimulation.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-100 text-xs disabled:opacity-60">محاكي الجمهور</button>
+                                </>
+                            )}
                         </div>
                     )}
                 </div>
