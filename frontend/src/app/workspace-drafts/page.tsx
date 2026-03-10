@@ -1,16 +1,19 @@
 ﻿'use client';
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 
-import { Suspense, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, type MutableRefObject, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import NextLink from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'next/navigation';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { BubbleMenu } from '@tiptap/react/menus';
 import StarterKit from '@tiptap/starter-kit';
+import { Extension } from '@tiptap/core';
 import Link from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
 import Highlight from '@tiptap/extension-highlight';
+import { Plugin } from 'prosemirror-state';
+import { Decoration, DecorationSet } from 'prosemirror-view';
 import {
     AlertTriangle,
     CheckCircle2,
@@ -252,6 +255,68 @@ function impactBySeverity(sev: DecisionSeverity): string {
     }
 }
 
+function createSmartHighlightExtension(enabledRef: MutableRefObject<boolean>) {
+    return Extension.create({
+        name: 'smartHighlight',
+        addProseMirrorPlugins() {
+            const numberRegex = /(?:\d+[.,]?\d*|[٠-٩]+(?:[٫٬.]\d+)?)/g;
+            const quoteRegex = /“[^”]{3,}”|\"[^\"]{3,}\"|«[^»]{3,}»/g;
+            const claimVerbRegex = /(قال|أعلن|أكد|صرّح|صرح|أوضح|ذكر|أفاد|كشف|بيّن|أضاف|أردف)/g;
+
+            return [
+                new Plugin({
+                    props: {
+                        decorations(state) {
+                            if (!enabledRef.current) return DecorationSet.empty;
+                            const decorations: Decoration[] = [];
+                            state.doc.descendants((node, pos) => {
+                                if (!node.isText) return;
+                                const text = node.text || '';
+                                if (!text.trim()) return;
+
+                                let match: RegExpExecArray | null;
+                                numberRegex.lastIndex = 0;
+                                while ((match = numberRegex.exec(text))) {
+                                    const from = pos + match.index;
+                                    const to = from + match[0].length;
+                                    decorations.push(
+                                        Decoration.inline(from, to, {
+                                            style: 'background-color: rgba(56, 189, 248, 0.18); border-radius: 4px; padding: 0 2px;',
+                                        }),
+                                    );
+                                }
+
+                                quoteRegex.lastIndex = 0;
+                                while ((match = quoteRegex.exec(text))) {
+                                    const from = pos + match.index;
+                                    const to = from + match[0].length;
+                                    decorations.push(
+                                        Decoration.inline(from, to, {
+                                            style: 'background-color: rgba(167, 139, 250, 0.18); border-radius: 4px; padding: 0 2px;',
+                                        }),
+                                    );
+                                }
+
+                                claimVerbRegex.lastIndex = 0;
+                                while ((match = claimVerbRegex.exec(text))) {
+                                    const from = pos + match.index;
+                                    const to = from + match[0].length;
+                                    decorations.push(
+                                        Decoration.inline(from, to, {
+                                            style: 'background-color: rgba(251, 191, 36, 0.2); border-radius: 4px; padding: 0 2px;',
+                                        }),
+                                    );
+                                }
+                            });
+                            return DecorationSet.create(state.doc, decorations);
+                        },
+                    },
+                }),
+            ];
+        },
+    });
+}
+
 function evaluateHeadline(headline: string, isBreaking: boolean): { score: number; risks: string[]; reasons: string[] } {
     const cleaned = cleanText(headline);
     const words = cleaned.split(/\s+/).filter(Boolean);
@@ -409,9 +474,17 @@ function WorkspaceDraftsPageContent() {
     const [copilotExpanded, setCopilotExpanded] = useState(false);
     const [detailsOpen, setDetailsOpen] = useState(false);
     const [focusMode, setFocusMode] = useState(false);
+    const [smartHighlightEnabled, setSmartHighlightEnabled] = useState(true);
+    const smartHighlightRef = useRef(true);
     const [inlineAiOpen, setInlineAiOpen] = useState(false);
     const [inlineSourceOpen, setInlineSourceOpen] = useState(false);
     const [inlineAiError, setInlineAiError] = useState<string | null>(null);
+    const [paletteOpen, setPaletteOpen] = useState(false);
+    const [paletteQuery, setPaletteQuery] = useState('');
+    const [paletteIndex, setPaletteIndex] = useState(0);
+    const paletteInputRef = useRef<HTMLInputElement | null>(null);
+    const [diffOpen, setDiffOpen] = useState(false);
+    const [storyOpen, setStoryOpen] = useState(false);
     const lastSavedRef = useRef<{ title: string; body: string }>({ title: '', body: '' });
     const allowedTabs = useMemo(() => TABS.filter((tab) => (tab.id === 'msi' ? isDirector : true)), [isDirector]);
     const visibleTabs = useMemo(() => {
@@ -549,23 +622,31 @@ function WorkspaceDraftsPageContent() {
         onSuccess: () => queryClient.invalidateQueries({ queryKey: ['smart-editor-xray-latest'] }),
     });
 
+    const smartHighlightExtension = useMemo(() => createSmartHighlightExtension(smartHighlightRef), []);
+
     const editor = useEditor({
         extensions: [
             StarterKit.configure({ link: false }),
             Highlight,
             Link.configure({ openOnClick: false }),
             Placeholder.configure({ placeholder: 'ابدأ كتابة الخبر هنا...' }),
+            smartHighlightExtension,
         ],
         content: '',
         immediatelyRender: false,
         editorProps: {
-            attributes: { class: 'smart-editor-content min-h-[360px] md:min-h-[520px] p-4 md:p-6 text-[14px] md:text-[15px] leading-7 md:leading-8 text-white focus:outline-none', dir: 'rtl' },
+            attributes: { class: 'smart-editor-content min-h-[300px] md:min-h-[460px] p-4 md:p-6 text-[14px] md:text-[15px] leading-7 md:leading-8 text-white focus:outline-none', dir: 'rtl' },
         },
         onUpdate({ editor: ed }) {
             setBodyHtml(ed.getHTML());
             setSaveState('unsaved');
         },
     });
+
+    useEffect(() => {
+        smartHighlightRef.current = smartHighlightEnabled;
+        if (editor) editor.view.dispatch(editor.state.tr);
+    }, [smartHighlightEnabled, editor]);
 
     useEffect(() => {
         const draft = context?.draft;
@@ -1315,7 +1396,7 @@ function WorkspaceDraftsPageContent() {
     }, [articleNumericId, listLoading, workId, drafts.length, createDraftFromArticle]);
 
     const showSidePanels = detailsOpen && !focusMode;
-    const mainSpanClass = showSidePanels ? 'xl:col-span-10' : 'xl:col-span-12';
+    const mainSpanClass = showSidePanels ? 'xl:col-span-8' : 'xl:col-span-12';
 
     useEffect(() => {
         if (leftTab !== 'archive') return;
@@ -1328,6 +1409,187 @@ function WorkspaceDraftsPageContent() {
         if (archiveQuery.trim().length >= 2) return;
         if (archiveItems.length) setArchiveItems([]);
     }, [archiveQuery, archiveItems.length]);
+
+    const paletteItems = useMemo(() => {
+        const items = [
+            {
+                id: 'quick_check',
+                label: 'فحص سريع',
+                keywords: ['check', 'speed'],
+                run: () => runWithGuide('quick_check', () => runQuickCheck.mutate()),
+            },
+            {
+                id: 'verify',
+                label: 'تحقق الادعاءات',
+                keywords: ['claims', 'verify'],
+                run: () => runWithGuide('verify', () => runVerifier.mutate()),
+            },
+            {
+                id: 'quality',
+                label: 'تقييم الجودة',
+                keywords: ['quality', 'score'],
+                run: () => runWithGuide('quality', () => runQuality.mutate()),
+            },
+            {
+                id: 'proofread',
+                label: 'تدقيق لغوي',
+                keywords: ['language', 'proofread'],
+                run: () => runWithGuide('proofread', () => runProofread.mutate()),
+            },
+            {
+                id: 'headlines',
+                label: 'اقتراح عناوين',
+                keywords: ['headline'],
+                run: () => runWithGuide('headlines', () => runHeadlines.mutate()),
+            },
+            {
+                id: 'seo',
+                label: 'تحليل SEO',
+                keywords: ['seo'],
+                run: () => runWithGuide('seo', () => runSeo.mutate()),
+            },
+            {
+                id: 'links',
+                label: 'اقتراح روابط',
+                keywords: ['links'],
+                run: () => runWithGuide('links', () => runLinks.mutate()),
+            },
+            {
+                id: 'social',
+                label: 'نسخ السوشيال',
+                keywords: ['social'],
+                run: () => runWithGuide('social', () => runSocial.mutate()),
+            },
+            {
+                id: 'audience',
+                label: 'محاكي الجمهور',
+                keywords: ['audience', 'sim'],
+                run: () => runWithGuide('audience_test', () => runAudienceSimulation.mutate()),
+            },
+            {
+                id: 'toggle_details',
+                label: detailsOpen ? 'إخفاء التفاصيل' : 'عرض التفاصيل',
+                keywords: ['details'],
+                run: () => setDetailsOpen((prev) => !prev),
+            },
+            {
+                id: 'toggle_focus',
+                label: focusMode ? 'إلغاء وضع التركيز' : 'وضع التركيز',
+                keywords: ['focus'],
+                run: () => setFocusMode((prev) => !prev),
+            },
+            {
+                id: 'toggle_highlight',
+                label: smartHighlightEnabled ? 'إيقاف التظليل الذكي' : 'تشغيل التظليل الذكي',
+                keywords: ['highlight'],
+                run: () => setSmartHighlightEnabled((prev) => !prev),
+            },
+            {
+                id: 'open_archive',
+                label: 'فتح الأرشيف',
+                keywords: ['archive'],
+                run: () => { setDetailsOpen(true); setLeftTab('archive'); },
+            },
+            {
+                id: 'open_drafts',
+                label: 'عرض المسودات',
+                keywords: ['drafts'],
+                run: () => { setDetailsOpen(true); setLeftTab('drafts'); },
+            },
+            {
+                id: 'compare_versions',
+                label: 'مقارنة النسخ',
+                keywords: ['diff', 'versions'],
+                run: () => setDiffOpen(true),
+            },
+            {
+                id: 'story_mode',
+                label: 'Story Mode',
+                keywords: ['story', 'timeline'],
+                run: () => setStoryOpen(true),
+            },
+            {
+                id: 'new_draft',
+                label: 'مسودة جديدة',
+                keywords: ['new'],
+                run: () => setNewDraftOpen(true),
+            },
+        ];
+        return items;
+    }, [
+        detailsOpen,
+        focusMode,
+        smartHighlightEnabled,
+        runQuickCheck,
+        runVerifier,
+        runQuality,
+        runProofread,
+        runHeadlines,
+        runSeo,
+        runLinks,
+        runSocial,
+        runAudienceSimulation,
+        setDetailsOpen,
+    ]);
+
+    const filteredPaletteItems = useMemo(() => {
+        const q = cleanText(paletteQuery || '').toLowerCase();
+        if (!q) return paletteItems;
+        return paletteItems.filter((item) => {
+            if (item.label.toLowerCase().includes(q)) return true;
+            return (item.keywords || []).some((k) => k.toLowerCase().includes(q));
+        });
+    }, [paletteItems, paletteQuery]);
+
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+                e.preventDefault();
+                setPaletteOpen(true);
+                setPaletteQuery('');
+                setPaletteIndex(0);
+            }
+        };
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+    }, []);
+
+    useEffect(() => {
+        if (paletteIndex >= filteredPaletteItems.length) setPaletteIndex(0);
+    }, [filteredPaletteItems.length, paletteIndex]);
+
+    useEffect(() => {
+        if (!paletteOpen) return;
+        paletteInputRef.current?.focus();
+        const handler = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                setPaletteOpen(false);
+                return;
+            }
+            if (!filteredPaletteItems.length) return;
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setPaletteIndex((prev) => Math.min(prev + 1, filteredPaletteItems.length - 1));
+                return;
+            }
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setPaletteIndex((prev) => Math.max(prev - 1, 0));
+                return;
+            }
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const item = filteredPaletteItems[paletteIndex];
+                if (item) {
+                    item.run();
+                    setPaletteOpen(false);
+                }
+            }
+        };
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+    }, [paletteOpen, filteredPaletteItems, paletteIndex]);
 
     const decisionSections = viewMode === 'deep'
         ? [
@@ -1360,6 +1622,15 @@ function WorkspaceDraftsPageContent() {
         const urlLine = cleanText(item.url || '');
         const label = dateLabel ? `${titleLine} (${dateLabel})` : titleLine;
         const html = `<p>مصدر من الأرشيف: ${label}</p>${urlLine ? `<p>${urlLine}</p>` : ''}`;
+        editor.chain().focus().insertContent(html).run();
+        setSaveState('unsaved');
+    }
+
+    function insertStoryItem(item: { title?: string; url?: string }) {
+        if (!editor) return;
+        const titleLine = cleanText(item.title || 'عنصر سياقي');
+        const urlLine = cleanText(item.url || '');
+        const html = `<p>سياق مرتبط: ${titleLine}</p>${urlLine ? `<p>${urlLine}</p>` : ''}`;
         editor.chain().focus().insertContent(html).run();
         setSaveState('unsaved');
     }
@@ -1641,6 +1912,14 @@ function WorkspaceDraftsPageContent() {
                                 className="min-h-8 px-2 py-1 rounded-lg bg-white/5 border border-white/15 text-gray-300 text-[10px]"
                             >
                                 {focusMode ? 'إلغاء التركيز' : 'وضع التركيز'}
+                            </button>
+                        )}
+                        {detailsOpen && (
+                            <button
+                                onClick={() => setSmartHighlightEnabled((prev) => !prev)}
+                                className="min-h-8 px-2 py-1 rounded-lg bg-white/5 border border-white/15 text-gray-300 text-[10px]"
+                            >
+                                {smartHighlightEnabled ? 'إيقاف التظليل' : 'تفعيل التظليل'}
                             </button>
                         )}
                         {detailsOpen && (
@@ -2056,7 +2335,7 @@ function WorkspaceDraftsPageContent() {
                 </main>
 
                 {showSidePanels && (
-                <aside className="order-2 xl:order-1 xl:col-span-1 space-y-4">
+                <aside className="order-2 xl:order-1 xl:col-span-2 space-y-4 xl:sticky xl:top-24 self-start max-h-[calc(100vh-140px)] overflow-auto pr-1">
                     <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3">
                         <div className="flex flex-wrap items-center gap-2">
                             <button
@@ -2089,6 +2368,20 @@ function WorkspaceDraftsPageContent() {
                                             <div className="text-[10px] text-gray-500 mt-1">{formatRelativeTime(d.updated_at)}</div>
                                         </button>
                                     ))}
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                    <button
+                                        onClick={() => setDiffOpen(true)}
+                                        className="px-2 py-1 rounded-lg bg-white/10 text-[10px] text-gray-200 border border-white/10"
+                                    >
+                                        مقارنة النسخ
+                                    </button>
+                                    <button
+                                        onClick={() => setStoryOpen(true)}
+                                        className="px-2 py-1 rounded-lg bg-white/10 text-[10px] text-gray-200 border border-white/10"
+                                    >
+                                        Story Mode
+                                    </button>
                                 </div>
                             </div>
                         )}
@@ -2167,7 +2460,7 @@ function WorkspaceDraftsPageContent() {
                 )}
 
                 {showSidePanels && (
-                <aside className="order-3 xl:order-3 xl:col-span-1 space-y-4">
+                <aside className="order-3 xl:order-3 xl:col-span-2 space-y-4 xl:sticky xl:top-24 self-start max-h-[calc(100vh-140px)] overflow-auto pr-1">
                     <Panel title="مساعد التحرير (Copilot)">
                         <div className="space-y-3 text-xs text-gray-200">
                             <div className="rounded-lg border border-white/10 bg-black/20 p-2 space-y-2">
@@ -2756,6 +3049,151 @@ function WorkspaceDraftsPageContent() {
                 )}
             </div>
 
+            {paletteOpen && (
+                <div className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-sm flex items-start justify-center p-4">
+                    <div className="w-full max-w-xl rounded-2xl border border-white/10 bg-gray-950 p-4 space-y-3" dir="rtl">
+                        <input
+                            ref={paletteInputRef}
+                            value={paletteQuery}
+                            onChange={(e) => { setPaletteQuery(e.target.value); setPaletteIndex(0); }}
+                            placeholder="ابحث عن أمر... (Ctrl/Cmd + K)"
+                            className="w-full rounded-xl bg-white/5 border border-white/15 px-3 py-2 text-sm text-white"
+                        />
+                        <div className="max-h-64 overflow-auto space-y-1">
+                            {filteredPaletteItems.length === 0 && (
+                                <p className="text-xs text-gray-500">لا توجد أوامر مطابقة.</p>
+                            )}
+                            {filteredPaletteItems.map((item, idx) => (
+                                <button
+                                    key={item.id}
+                                    onClick={() => { item.run(); setPaletteOpen(false); }}
+                                    className={cn(
+                                        'w-full text-right rounded-lg px-3 py-2 text-xs border',
+                                        idx === paletteIndex ? 'bg-white/10 border-white/20 text-white' : 'bg-black/20 border-white/10 text-gray-200',
+                                    )}
+                                >
+                                    {item.label}
+                                </button>
+                            ))}
+                        </div>
+                        <div className="flex justify-end">
+                            <button onClick={() => setPaletteOpen(false)} className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-gray-200">
+                                إغلاق
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {diffOpen && (
+                <div className="fixed inset-0 z-[88] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="w-full max-w-3xl rounded-2xl border border-white/10 bg-gray-950 p-5 space-y-4" dir="rtl">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h2 className="text-lg text-white font-semibold">مقارنة النسخ</h2>
+                                <p className="text-[11px] text-gray-400">اختر نسختين لعرض الفروقات.</p>
+                            </div>
+                            <button onClick={() => setDiffOpen(false)} className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-gray-200">
+                                إغلاق
+                            </button>
+                        </div>
+                        {versions.length === 0 ? (
+                            <p className="text-xs text-gray-400">لا توجد نسخ محفوظة بعد.</p>
+                        ) : (
+                            <>
+                                <div className="flex flex-wrap gap-2">
+                                    <select value={cmpFrom || ''} onChange={(e) => setCmpFrom(Number(e.target.value))} className="flex-1 bg-white/10 rounded px-2 py-1 text-xs">
+                                        {versions.map((v) => <option key={`f-${v.id}`} value={v.version}>من v{v.version}</option>)}
+                                    </select>
+                                    <select value={cmpTo || ''} onChange={(e) => setCmpTo(Number(e.target.value))} className="flex-1 bg-white/10 rounded px-2 py-1 text-xs">
+                                        {versions.map((v) => <option key={`t-${v.id}`} value={v.version}>إلى v{v.version}</option>)}
+                                    </select>
+                                    <button onClick={() => runDiff.mutate()} className="px-3 py-1 rounded bg-white/10 text-xs text-gray-200">
+                                        {runDiff.isPending ? 'جاري...' : 'قارن'}
+                                    </button>
+                                    {cmpTo && (
+                                        <button onClick={() => restoreVersion.mutate(cmpTo)} className="px-3 py-1 rounded bg-emerald-500/20 text-xs text-emerald-100">
+                                            استرجاع v{cmpTo}
+                                        </button>
+                                    )}
+                                </div>
+                                <pre className="max-h-56 overflow-auto text-[11px] text-gray-200 whitespace-pre-wrap mt-2" dir="ltr">
+                                    {diffView || 'لا يوجد فرق معروض بعد.'}
+                                </pre>
+                                <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-xs text-gray-300">
+                                    <p className="text-gray-400 mb-1">النسخ الأخيرة</p>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-40 overflow-auto">
+                                        {versions.slice(0, 8).map((v) => (
+                                            <button key={`ver-${v.id}`} onClick={() => restoreVersion.mutate(v.version)} className="w-full text-right rounded bg-white/5 px-2 py-1 text-xs text-gray-200">
+                                                الإصدار v{v.version} • {v.change_origin || 'يدوي'}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {storyOpen && (
+                <div className="fixed inset-0 z-[88] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="w-full max-w-4xl rounded-2xl border border-white/10 bg-gray-950 p-5 space-y-4" dir="rtl">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h2 className="text-lg text-white font-semibold">Story Mode</h2>
+                                <p className="text-[11px] text-gray-400">السياق الكامل للقصة المرتبطة بهذا الخبر.</p>
+                            </div>
+                            <button onClick={() => setStoryOpen(false)} className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-gray-200">
+                                إغلاق
+                            </button>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-300">
+                            <p className="text-gray-400 mb-1">عنقود القصة</p>
+                            {context?.story_context?.cluster ? (
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                                    <p>التصنيف: {cleanText(context.story_context.cluster.category || '—')}</p>
+                                    <p>الوسم: {cleanText(context.story_context.cluster.label || '—')}</p>
+                                    <p>الجغرافيا: {cleanText(context.story_context.cluster.geography || '—')}</p>
+                                </div>
+                            ) : (
+                                <p>لا يوجد عنقود مرتبط بعد.</p>
+                            )}
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
+                                <p className="text-gray-400 text-xs">الخط الزمني</p>
+                                {(context?.story_context?.timeline || []).length === 0 && <p className="text-xs text-gray-500">لا توجد مواد زمنية مرتبطة.</p>}
+                                {(context?.story_context?.timeline || []).map((item: any) => (
+                                    <div key={`timeline-${item.id}`} className="rounded-lg border border-white/10 bg-white/5 p-2">
+                                        <p className="text-xs text-gray-200 line-clamp-2">{cleanText(item.title || 'بدون عنوان')}</p>
+                                        {item.created_at && <p className="text-[10px] text-gray-500 mt-1">{new Date(item.created_at).toLocaleDateString('ar-DZ')}</p>}
+                                        <div className="mt-2 flex items-center gap-2">
+                                            <button onClick={() => insertStoryItem(item)} className="px-2 py-1 rounded bg-white/10 text-[10px] text-gray-200">إدراج</button>
+                                            {item.url && <a href={item.url} target="_blank" rel="noreferrer" className="text-[10px] text-cyan-300 underline decoration-dotted">فتح</a>}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
+                                <p className="text-gray-400 text-xs">علاقات القصة</p>
+                                {(context?.story_context?.relations || []).length === 0 && <p className="text-xs text-gray-500">لا توجد علاقات معرفة بعد.</p>}
+                                {(context?.story_context?.relations || []).map((item: any, idx: number) => (
+                                    <div key={`relation-${idx}`} className="rounded-lg border border-white/10 bg-white/5 p-2">
+                                        <p className="text-xs text-gray-200 line-clamp-2">{cleanText(item.title || 'بدون عنوان')}</p>
+                                        <p className="text-[10px] text-gray-500 mt-1">نوع العلاقة: {cleanText(item.relation_type || '—')} • درجة {Number(item.score || 0).toFixed(1)}</p>
+                                        <div className="mt-2 flex items-center gap-2">
+                                            <button onClick={() => insertStoryItem(item)} className="px-2 py-1 rounded bg-white/10 text-[10px] text-gray-200">إدراج</button>
+                                            {item.url && <a href={item.url} target="_blank" rel="noreferrer" className="text-[10px] text-cyan-300 underline decoration-dotted">فتح</a>}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {newDraftOpen && (
                 <div className="fixed inset-0 z-[82] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
                     <div className="w-full max-w-3xl rounded-2xl border border-white/10 bg-gray-950 p-5 space-y-4" dir="rtl">
@@ -2821,7 +3259,12 @@ function WorkspaceDraftsPageContent() {
 }
 
 function Panel({ title, children }: { title: string; children: ReactNode }) {
-    return <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-3 sm:p-4 space-y-2"><h3 className="text-sm text-white">{title}</h3>{children}</div>;
+    return (
+        <div className="rounded-xl border border-white/10 bg-gray-950/50 p-3 space-y-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+            <h3 className="text-sm text-white">{title}</h3>
+            {children}
+        </div>
+    );
 }
 
 function Empty({ text }: { text: string }) {
