@@ -1799,16 +1799,20 @@ async def workspace_draft_context(
                 StoryClusterMember.cluster_id == member.cluster_id,
                 Article.id != article.id,
             )
-            .order_by(Article.crawled_at.desc(), Article.id.desc())
+            .order_by(func.coalesce(Article.published_at, Article.crawled_at).desc(), Article.id.desc())
             .limit(10)
         )
         related_cluster_articles = [
             {
                 "id": a.id,
                 "title": a.title_ar or a.original_title,
+                "summary": a.summary,
                 "url": a.original_url,
                 "source_name": a.source_name,
                 "created_at": a.created_at,
+                "published_at": a.published_at,
+                "category": a.category.value if a.category else None,
+                "status": a.status.value if a.status else None,
             }
             for a in cluster_articles_row.scalars().all()
         ]
@@ -1843,9 +1847,13 @@ async def workspace_draft_context(
             related_map[rel.id] = {
                 "id": rel.id,
                 "title": rel.title_ar or rel.original_title,
+                "summary": rel.summary,
                 "url": rel.original_url,
                 "source_name": rel.source_name,
                 "created_at": rel.created_at,
+                "published_at": rel.published_at,
+                "category": rel.category.value if rel.category else None,
+                "status": rel.status.value if rel.status else None,
             }
     relation_context = []
     for edge in relation_edges:

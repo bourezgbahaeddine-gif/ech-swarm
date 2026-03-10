@@ -487,16 +487,24 @@ export interface SmartEditorContext {
         timeline: Array<{
             id: number;
             title: string;
+            summary?: string | null;
             url: string | null;
             source_name: string | null;
             created_at: string;
+            published_at?: string | null;
+            category?: string | null;
+            status?: string | null;
         }>;
         relations: Array<{
             id: number;
             title: string;
+            summary?: string | null;
             url: string | null;
             source_name: string | null;
             created_at: string;
+            published_at?: string | null;
+            category?: string | null;
+            status?: string | null;
             relation_type: string;
             score: number;
         }>;

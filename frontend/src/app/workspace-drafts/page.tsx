@@ -82,6 +82,17 @@ type BlockerExplanation = {
     stage?: string;
     raw?: string;
 };
+type StoryContextItem = {
+    id?: number;
+    title?: string;
+    summary?: string | null;
+    url?: string | null;
+    source_name?: string | null;
+    created_at?: string | null;
+    published_at?: string | null;
+    category?: string | null;
+    status?: string | null;
+};
 
 const TABS: Array<{ id: RightTab; label: string }> = [
     { id: 'evidence', label: 'التحقق والأدلة' },
@@ -140,6 +151,14 @@ const STAGE_ACTIONS: Record<string, DecisionActionId | null> = {
     READABILITY: 'quality',
     QUALITY_SCORE: 'quality',
 };
+
+const STORY_TEMPLATE_SECTIONS = [
+    { title: 'المقدمة', hint: 'ملخص سريع يجيب عن ماذا/من/أين/متى.' },
+    { title: 'الخلفية', hint: 'سياق مختصر يشرح لماذا يهم الخبر.' },
+    { title: 'التفاصيل', hint: 'أبرز الوقائع والأرقام والتصريحات.' },
+    { title: 'ردود الفعل', hint: 'مواقف الجهات المعنية أو الجمهور.' },
+    { title: 'ما التالي؟', hint: 'الخطوات القادمة أو التطورات المنتظرة.' },
+];
 
 function explainBlockerReason(reason: string): BlockerExplanation {
     const msg = cleanText(reason || '');
@@ -1826,13 +1845,53 @@ function WorkspaceDraftsPageContent() {
         setSaveState('unsaved');
     }
 
-    function insertStoryItem(item: { title?: string; url?: string }) {
+    function insertStoryItem(item: StoryContextItem) {
         if (!editor) return;
         const titleLine = cleanText(item.title || 'عنصر سياقي');
         const urlLine = cleanText(item.url || '');
         const html = `<p>سياق مرتبط: ${titleLine}</p>${urlLine ? `<p>${urlLine}</p>` : ''}`;
         editor.chain().focus().insertContent(html).run();
         setSaveState('unsaved');
+    }
+
+    function insertStorySummary(item: StoryContextItem) {
+        if (!editor) return;
+        const titleLine = cleanText(item.title || 'عنصر مرتبط');
+        const summaryLine = cleanText(item.summary || '');
+        const sourceLine = cleanText(item.source_name || '');
+        const dateValue = item.published_at || item.created_at || '';
+        const dateLabel = dateValue ? new Date(dateValue).toLocaleDateString('ar-DZ') : '';
+        const meta = [sourceLine, dateLabel].filter(Boolean).join(' • ');
+        const html = `<p><strong>${titleLine}</strong></p>${summaryLine ? `<p>${summaryLine}</p>` : ''}${meta ? `<p>${meta}</p>` : ''}`;
+        editor.chain().focus().insertContent(html).run();
+        setSaveState('unsaved');
+    }
+
+    function insertStoryTemplate() {
+        if (!editor) return;
+        const html = STORY_TEMPLATE_SECTIONS
+            .map((section) => `<h2>${section.title}</h2><p>${section.hint}</p>`)
+            .join('');
+        editor.chain().focus().insertContent(html).run();
+        setSaveState('unsaved');
+    }
+
+    async function openStoryInEditor(item: StoryContextItem) {
+        if (!item?.id) return;
+        try {
+            const res = await editorialApi.handoff(item.id);
+            const workId = res?.data?.work_id;
+            const target = workId
+                ? `/workspace-drafts?article_id=${item.id}&work_id=${workId}`
+                : `/workspace-drafts?article_id=${item.id}`;
+            if (typeof window !== 'undefined') {
+                window.open(target, '_blank');
+            }
+            setOk('تم فتح خبر القصة في تبويب جديد.');
+            setErr(null);
+        } catch (e) {
+            setErr('تعذر فتح خبر القصة في المحرر.');
+        }
     }
 
     function handleInlineAiAction(action: 'rewrite' | 'shorten' | 'expand' | 'clarify') {
@@ -3387,6 +3446,22 @@ function WorkspaceDraftsPageContent() {
                                 <p>لا يوجد عنقود مرتبط بعد.</p>
                             )}
                         </div>
+                        <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-300 space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                                <p className="text-gray-400">قالب القصة المعتمد</p>
+                                <button onClick={insertStoryTemplate} className="px-2 py-1 rounded bg-emerald-500/20 text-[10px] text-emerald-100">
+                                    إدراج القالب في المسودة
+                                </button>
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                {STORY_TEMPLATE_SECTIONS.map((section) => (
+                                    <div key={section.title} className="rounded-lg border border-white/10 bg-white/5 px-2 py-1">
+                                        <p className="text-[10px] text-gray-200">{section.title}</p>
+                                        <p className="text-[10px] text-gray-500 line-clamp-1">{section.hint}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
                                 <p className="text-gray-400 text-xs">الخط الزمني</p>
@@ -3394,10 +3469,18 @@ function WorkspaceDraftsPageContent() {
                                 {(context?.story_context?.timeline || []).map((item: any) => (
                                     <div key={`timeline-${item.id}`} className="rounded-lg border border-white/10 bg-white/5 p-2">
                                         <p className="text-xs text-gray-200 line-clamp-2">{cleanText(item.title || 'بدون عنوان')}</p>
-                                        {item.created_at && <p className="text-[10px] text-gray-500 mt-1">{new Date(item.created_at).toLocaleDateString('ar-DZ')}</p>}
-                                        <div className="mt-2 flex items-center gap-2">
-                                            <button onClick={() => insertStoryItem(item)} className="px-2 py-1 rounded bg-white/10 text-[10px] text-gray-200">إدراج</button>
-                                            {item.url && <a href={item.url} target="_blank" rel="noreferrer" className="text-[10px] text-cyan-300 underline decoration-dotted">فتح</a>}
+                                        {item.summary && <p className="text-[10px] text-gray-400 mt-1 line-clamp-2">{cleanText(item.summary)}</p>}
+                                        {(item.published_at || item.created_at) && (
+                                            <p className="text-[10px] text-gray-500 mt-1">
+                                                {new Date(item.published_at || item.created_at).toLocaleDateString('ar-DZ')}
+                                                {item.source_name ? ` • ${cleanText(item.source_name)}` : ''}
+                                            </p>
+                                        )}
+                                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                                            <button onClick={() => insertStorySummary(item)} className="px-2 py-1 rounded bg-white/10 text-[10px] text-gray-200">إدراج ملخص</button>
+                                            <button onClick={() => insertStoryItem(item)} className="px-2 py-1 rounded bg-white/10 text-[10px] text-gray-200">إدراج رابط</button>
+                                            <button onClick={() => openStoryInEditor(item)} className="px-2 py-1 rounded bg-emerald-500/15 text-[10px] text-emerald-100">فتح في المحرر</button>
+                                            {item.url && <a href={item.url} target="_blank" rel="noreferrer" className="text-[10px] text-cyan-300 underline decoration-dotted">فتح المصدر</a>}
                                         </div>
                                     </div>
                                 ))}
@@ -3408,10 +3491,13 @@ function WorkspaceDraftsPageContent() {
                                 {(context?.story_context?.relations || []).map((item: any, idx: number) => (
                                     <div key={`relation-${idx}`} className="rounded-lg border border-white/10 bg-white/5 p-2">
                                         <p className="text-xs text-gray-200 line-clamp-2">{cleanText(item.title || 'بدون عنوان')}</p>
+                                        {item.summary && <p className="text-[10px] text-gray-400 mt-1 line-clamp-2">{cleanText(item.summary)}</p>}
                                         <p className="text-[10px] text-gray-500 mt-1">نوع العلاقة: {cleanText(item.relation_type || '—')} • درجة {Number(item.score || 0).toFixed(1)}</p>
-                                        <div className="mt-2 flex items-center gap-2">
-                                            <button onClick={() => insertStoryItem(item)} className="px-2 py-1 rounded bg-white/10 text-[10px] text-gray-200">إدراج</button>
-                                            {item.url && <a href={item.url} target="_blank" rel="noreferrer" className="text-[10px] text-cyan-300 underline decoration-dotted">فتح</a>}
+                                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                                            <button onClick={() => insertStorySummary(item)} className="px-2 py-1 rounded bg-white/10 text-[10px] text-gray-200">إدراج ملخص</button>
+                                            <button onClick={() => insertStoryItem(item)} className="px-2 py-1 rounded bg-white/10 text-[10px] text-gray-200">إدراج رابط</button>
+                                            <button onClick={() => openStoryInEditor(item)} className="px-2 py-1 rounded bg-emerald-500/15 text-[10px] text-emerald-100">فتح في المحرر</button>
+                                            {item.url && <a href={item.url} target="_blank" rel="noreferrer" className="text-[10px] text-cyan-300 underline decoration-dotted">فتح المصدر</a>}
                                         </div>
                                     </div>
                                 ))}
