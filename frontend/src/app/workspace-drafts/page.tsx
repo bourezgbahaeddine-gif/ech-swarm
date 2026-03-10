@@ -124,6 +124,13 @@ const STAGE_LABELS: Record<string, string> = {
     QUALITY_SCORE: 'جودة التحرير',
 };
 
+const STAGE_ACTIONS: Record<string, DecisionActionId | null> = {
+    FACT_CHECK: 'verify',
+    SEO_TECH: 'seo',
+    READABILITY: 'quality',
+    QUALITY_SCORE: 'quality',
+};
+
 const METRIC_LABELS: Record<string, string> = {
     clarity: 'الوضوح',
     structure: 'البنية',
@@ -397,6 +404,9 @@ function WorkspaceDraftsPageContent() {
     const [showUrgentAll, setShowUrgentAll] = useState(false);
     const [showImproveAll, setShowImproveAll] = useState(false);
     const [showExtraAll, setShowExtraAll] = useState(false);
+    const [blockersOpen, setBlockersOpen] = useState(false);
+    const [decisionDetailOpen, setDecisionDetailOpen] = useState(false);
+    const [copilotExpanded, setCopilotExpanded] = useState(false);
     const [detailsOpen, setDetailsOpen] = useState(false);
     const [focusMode, setFocusMode] = useState(false);
     const [inlineAiOpen, setInlineAiOpen] = useState(false);
@@ -1161,6 +1171,19 @@ function WorkspaceDraftsPageContent() {
         };
     }, [decisionModel, decisionActionHandlers]);
 
+    const blockerSummary = useMemo(() => {
+        const blockers = decisionModel.urgent.filter((item) => item.severity === 'critical' || item.severity === 'high');
+        return {
+            items: blockers,
+            count: blockers.length,
+            top: blockers[0] || null,
+        };
+    }, [decisionModel]);
+
+    const blockerActionHandler = blockerSummary.top?.action
+        ? decisionActionHandlers[blockerSummary.top.action]
+        : null;
+
     const compactStatus = useMemo(() => {
         const readinessLabel = readiness
             ? (readiness.ready_for_publish ? 'جاهز للنشر' : 'غير جاهز')
@@ -1292,7 +1315,7 @@ function WorkspaceDraftsPageContent() {
     }, [articleNumericId, listLoading, workId, drafts.length, createDraftFromArticle]);
 
     const showSidePanels = detailsOpen && !focusMode;
-    const mainSpanClass = showSidePanels ? 'xl:col-span-8' : 'xl:col-span-12';
+    const mainSpanClass = showSidePanels ? 'xl:col-span-10' : 'xl:col-span-12';
 
     useEffect(() => {
         if (leftTab !== 'archive') return;
@@ -1315,6 +1338,13 @@ function WorkspaceDraftsPageContent() {
         : [
             { key: 'urgent', title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد موانع حرجة حالياً.', showAll: showUrgentAll, toggle: () => setShowUrgentAll((v) => !v) },
         ];
+
+    const decisionSectionsForView = useMemo(() => {
+        if (blockerSummary.count > 0) {
+            return decisionSections.filter((section) => section.key !== 'urgent');
+        }
+        return decisionSections;
+    }, [decisionSections, blockerSummary.count]);
 
     const saveNode = useMemo(() => {
         if (saveState === 'saved') return <span className="text-emerald-300 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" />محفوظ</span>;
@@ -1529,84 +1559,78 @@ function WorkspaceDraftsPageContent() {
                     </div>
                 )}
 
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {workflowSteps.map((step) => (
-                        <div key={step.id} className="flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-3 py-1 text-[11px] text-gray-200">
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] text-gray-300">
+                    {workflowSteps.map((step, idx) => (
+                        <div key={step.id} className="flex items-center gap-1">
                             <span className={cn('h-2 w-2 rounded-full', workflowDot(step.status))} />
                             <span>{step.label}</span>
+                            {idx < workflowSteps.length - 1 && <span className="text-gray-600">—</span>}
                         </div>
                     ))}
                 </div>
 
-                <div className="mt-3 space-y-3">
-                    {detailsOpen && (
-                        <div className="flex flex-wrap items-center gap-2">
-                            <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10px] text-gray-200">
-                                <span className="text-[10px] text-gray-400">1</span>
-                                <span>فحص سريع</span>
-                                <button
-                                    onClick={() => runWithGuide('quick_check', () => runQuickCheck.mutate())}
-                                    disabled={runQuickCheck.isPending}
-                                    className="px-2 py-0.5 rounded bg-indigo-500/20 border border-indigo-500/30 text-indigo-100 text-[10px] disabled:opacity-60"
-                                >
-                                    {runQuickCheck.isPending ? 'جاري...' : 'ابدأ'}
-                                </button>
-                            </div>
-                            <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10px] text-gray-200">
-                                <span className="text-[10px] text-gray-400">2</span>
-                                <span>عالج الأهم</span>
-                                <button
-                                    onClick={() => nextAction.handler()}
-                                    className={cn('px-2 py-0.5 rounded border text-[10px]', severityStyles(nextAction.severity).badge, 'border-white/15')}
-                                >
-                                    نفّذ الآن
-                                </button>
-                            </div>
-                            <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10px] text-gray-200">
-                                <span className="text-[10px] text-gray-400">3</span>
-                                <span>إرسال</span>
-                                <button
-                                    disabled={applyToArticle.isPending}
-                                    onClick={() => runWithGuide('apply', () => applyToArticle.mutate())}
-                                    className="px-2 py-0.5 rounded bg-white/10 border border-white/15 text-gray-200 text-[10px] disabled:opacity-60"
-                                >
-                                    {applyToArticle.isPending ? 'جاري...' : 'إرسال'}
-                                </button>
-                            </div>
+                {blockerSummary.count > 0 ? (
+                    <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] text-red-100 flex flex-wrap items-center justify-between gap-2">
+                        <div className="space-y-0.5">
+                            <p className="font-semibold">موانع حرجة ({blockerSummary.count})</p>
+                            <p className="text-[10px] text-red-200 line-clamp-1">{blockerSummary.top?.title || 'موانع تحتاج معالجة قبل الإرسال.'}</p>
                         </div>
-                    )}
+                        <div className="flex items-center gap-2">
+                            {blockerActionHandler && (
+                                <button
+                                    onClick={() => blockerActionHandler()}
+                                    className="px-2 py-1 rounded bg-white/10 border border-white/15 text-[10px]"
+                                >
+                                    حل الآن
+                                </button>
+                            )}
+                            <button
+                                onClick={() => { setDetailsOpen(true); setShowUrgentAll(true); }}
+                                className="px-2 py-1 rounded bg-black/20 border border-white/15 text-[10px]"
+                            >
+                                التفاصيل
+                            </button>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="mt-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-[10px] text-emerald-200">
+                        لا توجد موانع حرجة حالياً.
+                    </div>
+                )}
+
+                <div className="mt-3 space-y-3">
                     <div className="flex flex-wrap items-center gap-2">
                         <button
                             onClick={() => runWithGuide('quick_check', () => runQuickCheck.mutate())}
                             disabled={runQuickCheck.isPending}
-                            className="min-h-9 px-3 py-2 rounded-lg bg-indigo-500/20 border border-indigo-500/30 text-indigo-100 text-[11px] flex items-center gap-2 disabled:opacity-60"
+                            className="min-h-8 px-2 py-1 rounded-lg bg-indigo-500/20 border border-indigo-500/30 text-indigo-100 text-[10px] flex items-center gap-2 disabled:opacity-60"
                         >
                             <ShieldCheck className="w-4 h-4" />
                             {runQuickCheck.isPending ? 'جاري الفحص...' : 'فحص سريع'}
                         </button>
                         <button
                             onClick={() => nextAction.handler()}
-                            className={cn('min-h-9 px-3 py-2 rounded-lg border text-[11px] flex items-center gap-2', severityStyles(nextAction.severity).badge, 'border-white/15')}
+                            className={cn('min-h-8 px-2 py-1 rounded-lg border text-[10px] flex items-center gap-2', severityStyles(nextAction.severity).badge, 'border-white/15')}
                         >
                             {nextAction.label}
                         </button>
                         <button
                             disabled={applyToArticle.isPending}
                             onClick={() => runWithGuide('apply', () => applyToArticle.mutate())}
-                            className="min-h-9 px-3 py-2 rounded-lg bg-white/10 border border-white/15 text-gray-200 text-[11px] disabled:opacity-60"
+                            className="min-h-8 px-2 py-1 rounded-lg bg-white/10 border border-white/15 text-gray-200 text-[10px] disabled:opacity-60"
                         >
                             {applyToArticle.isPending ? 'جاري الإرسال...' : 'إرسال لاعتماد رئيس التحرير'}
                         </button>
                         <button
                             onClick={() => setDetailsOpen((prev) => !prev)}
-                            className="min-h-9 px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-gray-300 text-[11px]"
+                            className="min-h-8 px-2 py-1 rounded-lg bg-white/5 border border-white/15 text-gray-300 text-[10px]"
                         >
                             {detailsOpen ? 'إخفاء التفاصيل' : 'عرض التفاصيل'}
                         </button>
                         {detailsOpen && (
                             <button
                                 onClick={() => setToolsExpanded((prev) => !prev)}
-                                className="min-h-9 px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-gray-300 text-[11px]"
+                                className="min-h-8 px-2 py-1 rounded-lg bg-white/5 border border-white/15 text-gray-300 text-[10px]"
                             >
                                 {toolsExpanded ? 'إخفاء الأدوات' : 'إظهار الأدوات'}
                             </button>
@@ -1614,7 +1638,7 @@ function WorkspaceDraftsPageContent() {
                         {detailsOpen && (
                             <button
                                 onClick={() => setFocusMode((prev) => !prev)}
-                                className="min-h-9 px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-gray-300 text-[11px]"
+                                className="min-h-8 px-2 py-1 rounded-lg bg-white/5 border border-white/15 text-gray-300 text-[10px]"
                             >
                                 {focusMode ? 'إلغاء التركيز' : 'وضع التركيز'}
                             </button>
@@ -1624,19 +1648,19 @@ function WorkspaceDraftsPageContent() {
                                 <button
                                     disabled={autosave.isPending}
                                     onClick={() => runWithGuide('save', () => { setSaveState('saving'); autosave.mutate(); })}
-                                    className="min-h-10 px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-xs flex items-center gap-2 disabled:opacity-60"
+                                    className="min-h-8 px-2 py-1 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-[10px] flex items-center gap-2 disabled:opacity-60"
                                 >
                                     <Save className="w-4 h-4" />حفظ
                                 </button>
                                 <button
                                     onClick={() => setViewMode('speed')}
-                                    className={cn('min-h-10 px-3 py-2 rounded-xl border text-xs', viewMode === 'speed' ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-100' : 'bg-white/5 border-white/15 text-gray-300')}
+                                    className={cn('min-h-8 px-2 py-1 rounded-xl border text-[10px]', viewMode === 'speed' ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-100' : 'bg-white/5 border-white/15 text-gray-300')}
                                 >
                                     وضع السرعة
                                 </button>
                                 <button
                                     onClick={() => setViewMode('deep')}
-                                    className={cn('min-h-10 px-3 py-2 rounded-xl border text-xs', viewMode === 'deep' ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-100' : 'bg-white/5 border-white/15 text-gray-300')}
+                                    className={cn('min-h-8 px-2 py-1 rounded-xl border text-[10px]', viewMode === 'deep' ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-100' : 'bg-white/5 border-white/15 text-gray-300')}
                                 >
                                     وضع العمق
                                 </button>
@@ -1700,36 +1724,104 @@ function WorkspaceDraftsPageContent() {
                         <h2 className="text-sm text-white font-semibold">مساعد المحرر</h2>
                         <p className="text-[11px] text-gray-400">مساعدة مركزة بدون تشتيت.</p>
                     </div>
-                    <button
-                        onClick={() => decisionActionHandlers.quick_check()}
-                        className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200"
-                    >
-                        تشغيل فحص السرعة
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setDecisionDetailOpen((prev) => !prev)}
+                            className="rounded-lg border border-white/15 bg-white/10 px-2 py-1 text-[10px] text-gray-200"
+                        >
+                            {decisionDetailOpen ? 'إخفاء التفاصيل' : 'عرض التفاصيل'}
+                        </button>
+                        <button
+                            onClick={() => decisionActionHandlers.quick_check()}
+                            className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[10px] text-emerald-200"
+                        >
+                            فحص سريع
+                        </button>
+                    </div>
                 </div>
 
-                <div className={cn('grid gap-2', viewMode === 'deep' ? 'grid-cols-1 lg:grid-cols-3' : 'grid-cols-1 lg:grid-cols-2')}>
-                    {decisionSections.map((section) => (
-                        <div key={section.title} className="rounded-lg border border-white/10 bg-black/20 p-2 space-y-1">
-                            <h3 className="text-xs text-gray-200 font-semibold">{section.title}</h3>
+                {blockerSummary.count > 0 && (
+                    <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-[11px] text-red-100 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                            <p className="font-semibold">موانع حرجة ({blockerSummary.count})</p>
+                            <div className="flex items-center gap-2">
+                                {blockerActionHandler && (
+                                    <button
+                                        onClick={() => blockerActionHandler()}
+                                        className="px-2 py-1 rounded bg-white/10 border border-white/15 text-[10px]"
+                                    >
+                                        حل الآن
+                                    </button>
+                                )}
+                                <button
+                                    onClick={() => setBlockersOpen((prev) => !prev)}
+                                    className="px-2 py-1 rounded bg-black/20 border border-white/15 text-[10px]"
+                                >
+                                    {blockersOpen ? 'عرض أقل' : 'عرض التفاصيل'}
+                                </button>
+                            </div>
+                        </div>
+                        <div className="space-y-1">
+                            {blockerSummary.items.slice(0, blockersOpen ? blockerSummary.items.length : 1).map((item) => {
+                                const styles = severityStyles(item.severity);
+                                const actionHandler = item.action ? decisionActionHandlers[item.action] : undefined;
+                                return (
+                                    <div key={`blocker-${item.id}`} className={cn('rounded-md border p-2', styles.border)}>
+                                        <div className="flex items-center justify-between gap-2">
+                                            <p className="text-[11px] text-white line-clamp-1">{item.title}</p>
+                                            {actionHandler && (
+                                                <button onClick={() => actionHandler()} className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-gray-100">
+                                                    معالجة
+                                                </button>
+                                            )}
+                                        </div>
+                                        {decisionDetailOpen && (
+                                            <p className="text-[10px] text-gray-200 mt-1">{item.reason}</p>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+
+                <div className="space-y-2">
+                    {decisionSectionsForView.map((section) => (
+                        <div key={section.title} className="rounded-lg border border-white/10 bg-black/20 p-2 space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                                <h3 className="text-[11px] text-gray-200 font-semibold">
+                                    {section.title} ({section.items.length})
+                                </h3>
+                                {section.items.length > 1 && (
+                                    <button
+                                        onClick={section.toggle}
+                                        className="text-[10px] text-gray-300 underline decoration-dotted"
+                                    >
+                                        {section.showAll ? 'عرض أقل' : 'عرض الكل'}
+                                    </button>
+                                )}
+                            </div>
                             {section.items.length === 0 ? (
-                                <p className="text-[11px] text-gray-500">{section.empty}</p>
+                                <p className="text-[10px] text-gray-500">{section.empty}</p>
                             ) : (
-                                section.items.slice(0, section.showAll ? section.items.length : 1).map((item) => {
+                                section.items.slice(0, section.showAll ? section.items.length : 2).map((item) => {
                                     const styles = severityStyles(item.severity);
-                                    const actionKey = item.action;
-                                    const actionHandler = actionKey ? decisionActionHandlers[actionKey] : undefined;
+                                    const actionHandler = item.action ? decisionActionHandlers[item.action] : undefined;
                                     return (
                                         <div key={item.id} className={cn('rounded-md border p-2 space-y-1', styles.border)}>
                                             <div className="flex items-center justify-between gap-2">
-                                                <p className="text-[11px] text-white">{item.title}</p>
+                                                <p className="text-[11px] text-white line-clamp-1">{item.title}</p>
                                                 <span className={cn('px-2 py-0.5 rounded text-[10px]', styles.badge)}>
                                                     {severityLabel(item.severity)}
                                                 </span>
                                             </div>
-                                            <p className="text-[11px] text-gray-200 line-clamp-2">{item.reason}</p>
-                                            <p className="text-[10px] text-gray-400">الأثر: {item.impact}</p>
-                                            <p className="text-[10px] text-gray-500">القاعدة: {item.rule}</p>
+                                            {decisionDetailOpen && (
+                                                <>
+                                                    <p className="text-[10px] text-gray-200 line-clamp-2">{item.reason}</p>
+                                                    <p className="text-[10px] text-gray-500">الأثر: {item.impact}</p>
+                                                    <p className="text-[10px] text-gray-500">القاعدة: {item.rule}</p>
+                                                </>
+                                            )}
                                             <div className="flex items-center justify-between">
                                                 <span className="text-[10px] text-gray-500">
                                                     الثقة: {item.confidence ? `${Math.round(item.confidence * 100)}%` : '—'}
@@ -1737,7 +1829,7 @@ function WorkspaceDraftsPageContent() {
                                                 {actionHandler && (
                                                     <button
                                                         onClick={() => actionHandler()}
-                                                        className="text-[10px] px-2 py-1 rounded bg-white/10 text-gray-200"
+                                                        className="text-[10px] px-2 py-0.5 rounded bg-white/10 text-gray-200"
                                                     >
                                                         إصلاح الآن
                                                     </button>
@@ -1747,27 +1839,19 @@ function WorkspaceDraftsPageContent() {
                                     );
                                 })
                             )}
-                            {section.items.length > 1 && (
-                                <button
-                                    onClick={section.toggle}
-                                    className="text-[11px] text-gray-300 underline decoration-dotted"
-                                >
-                                    {section.showAll ? 'عرض أقل' : 'عرض الكل'}
-                                </button>
-                            )}
                         </div>
                     ))}
                 </div>
 
                 {viewMode === 'deep' && (
-                    <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-100 space-y-1">
+                    <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-[11px] text-emerald-100 space-y-1">
                         <p className="font-semibold text-emerald-200">أفضل عنوان مقترح</p>
                         <p>{cleanText(decisionModel.bestHeadline.headline || 'لا يوجد عنوان مقترح حالياً.')}</p>
                         {!!decisionModel.bestHeadline.reasons?.length && (
-                            <p className="text-[11px] text-emerald-200/90">السبب: {decisionModel.bestHeadline.reasons.slice(0, 2).join(' • ')}</p>
+                            <p className="text-[10px] text-emerald-200/90">السبب: {decisionModel.bestHeadline.reasons.slice(0, 2).join(' • ')}</p>
                         )}
                         {!!decisionModel.bestHeadline.risks?.length && (
-                            <p className="text-[11px] text-amber-200">مخاطر محتملة: {decisionModel.bestHeadline.risks.slice(0, 2).join(' • ')}</p>
+                            <p className="text-[10px] text-amber-200">مخاطر محتملة: {decisionModel.bestHeadline.risks.slice(0, 2).join(' • ')}</p>
                         )}
                     </div>
                 )}
@@ -1972,7 +2056,7 @@ function WorkspaceDraftsPageContent() {
                 </main>
 
                 {showSidePanels && (
-                <aside className="order-2 xl:order-1 xl:col-span-2 space-y-4">
+                <aside className="order-2 xl:order-1 xl:col-span-1 space-y-4">
                     <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3">
                         <div className="flex flex-wrap items-center gap-2">
                             <button
@@ -2083,7 +2167,7 @@ function WorkspaceDraftsPageContent() {
                 )}
 
                 {showSidePanels && (
-                <aside className="order-3 xl:order-3 xl:col-span-2 space-y-4">
+                <aside className="order-3 xl:order-3 xl:col-span-1 space-y-4">
                     <Panel title="مساعد التحرير (Copilot)">
                         <div className="space-y-3 text-xs text-gray-200">
                             <div className="rounded-lg border border-white/10 bg-black/20 p-2 space-y-2">
@@ -2094,6 +2178,16 @@ function WorkspaceDraftsPageContent() {
                                     <button onClick={() => runVerifier.mutate()} className="px-2 py-1 rounded bg-cyan-500/20 border border-cyan-500/30 text-cyan-100 text-[10px]">تحقق</button>
                                     <button onClick={() => runHeadlines.mutate()} className="px-2 py-1 rounded bg-indigo-500/20 border border-indigo-500/30 text-indigo-100 text-[10px]">عناوين</button>
                                 </div>
+                            </div>
+                            <div className="rounded-lg border border-white/10 bg-black/20 p-2 space-y-2">
+                                <p className="text-gray-400">على النص المحدد</p>
+                                <div className="flex flex-wrap gap-2">
+                                    <button onClick={() => handleInlineAiAction('rewrite')} className="px-2 py-1 rounded bg-emerald-500/20 border border-emerald-500/30 text-emerald-100 text-[10px]">إعادة صياغة</button>
+                                    <button onClick={() => handleInlineAiAction('shorten')} className="px-2 py-1 rounded bg-white/10 border border-white/15 text-gray-200 text-[10px]">اختصار</button>
+                                    <button onClick={() => handleInlineAiAction('clarify')} className="px-2 py-1 rounded bg-white/10 border border-white/15 text-gray-200 text-[10px]">توضيح</button>
+                                </div>
+                                <p className="text-[10px] text-gray-500">حدد فقرة داخل النص ثم اختر الإجراء.</p>
+                                {inlineAiError && <p className="text-[10px] text-red-300">{inlineAiError}</p>}
                             </div>
                             <div className="rounded-lg border border-white/10 bg-black/20 p-2">
                                 <p className="text-gray-400 mb-1">الحالة الحالية</p>
@@ -2108,43 +2202,47 @@ function WorkspaceDraftsPageContent() {
                                 ))}
                                 {decisionModel.urgent.length === 0 && decisionModel.improve.length === 0 && <p className="text-gray-500">لا توجد ملاحظات حرجة الآن.</p>}
                             </div>
-                            <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-                                <p className="text-gray-400 mb-1">اقتراح عناوين</p>
-                                {headlineInsights.slice(0, 3).map((h, idx) => (
-                                    <div key={`headline-cp-${idx}`} className="flex items-center justify-between gap-2">
-                                        <span className="text-gray-200 line-clamp-1">{cleanText(h.headline || '')}</span>
-                                        <button
-                                            onClick={() => { setTitle(cleanText(h.headline || '')); setSaveState('unsaved'); }}
-                                            className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-gray-200"
-                                        >
-                                            استخدم
-                                        </button>
-                                    </div>
-                                ))}
-                                {!headlineInsights.length && <p className="text-gray-500">لم يتم توليد عناوين بعد.</p>}
-                            </div>
-                            <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-                                <p className="text-gray-400 mb-1">جودة الخبر</p>
-                                {quality ? (
-                                    <>
-                                        <p>الدرجة: {quality.score ?? '-'}/100</p>
-                                        {(quality.actionable_fixes || []).slice(0, 2).map((f: string, i: number) => (
-                                            <p key={`cp-fix-${i}`} className="text-gray-300">- {cleanText(f)}</p>
-                                        ))}
-                                    </>
-                                ) : <p className="text-gray-500">شغّل تقييم الجودة لرؤية التقرير.</p>}
-                            </div>
-                            <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-                                <p className="text-gray-400 mb-1">التحقق</p>
-                                <p>الادعاءات: {claims.length}</p>
-                                <p>الحرجة: {claims.filter((c: any) => c?.blocking).length}</p>
-                            </div>
                             <button
-                                onClick={() => setDetailsOpen(true)}
+                                onClick={() => setCopilotExpanded((prev) => !prev)}
                                 className="w-full rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-[11px] text-gray-200"
                             >
-                                فتح الأدوات المتقدمة
+                                {copilotExpanded ? 'إخفاء التفاصيل' : 'تفاصيل أكثر'}
                             </button>
+                            {copilotExpanded && (
+                                <>
+                                    <div className="rounded-lg border border-white/10 bg-black/20 p-2">
+                                        <p className="text-gray-400 mb-1">اقتراح عناوين</p>
+                                        {headlineInsights.slice(0, 3).map((h, idx) => (
+                                            <div key={`headline-cp-${idx}`} className="flex items-center justify-between gap-2">
+                                                <span className="text-gray-200 line-clamp-1">{cleanText(h.headline || '')}</span>
+                                                <button
+                                                    onClick={() => { setTitle(cleanText(h.headline || '')); setSaveState('unsaved'); }}
+                                                    className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-gray-200"
+                                                >
+                                                    استخدم
+                                                </button>
+                                            </div>
+                                        ))}
+                                        {!headlineInsights.length && <p className="text-gray-500">لم يتم توليد عناوين بعد.</p>}
+                                    </div>
+                                    <div className="rounded-lg border border-white/10 bg-black/20 p-2">
+                                        <p className="text-gray-400 mb-1">جودة الخبر</p>
+                                        {quality ? (
+                                            <>
+                                                <p>الدرجة: {quality.score ?? '-'}/100</p>
+                                                {(quality.actionable_fixes || []).slice(0, 2).map((f: string, i: number) => (
+                                                    <p key={`cp-fix-${i}`} className="text-gray-300">- {cleanText(f)}</p>
+                                                ))}
+                                            </>
+                                        ) : <p className="text-gray-500">شغّل تقييم الجودة لرؤية التقرير.</p>}
+                                    </div>
+                                    <div className="rounded-lg border border-white/10 bg-black/20 p-2">
+                                        <p className="text-gray-400 mb-1">التحقق</p>
+                                        <p>الادعاءات: {claims.length}</p>
+                                        <p>الحرجة: {claims.filter((c: any) => c?.blocking).length}</p>
+                                    </div>
+                                </>
+                            )}
                         </div>
                     </Panel>
 
@@ -2332,7 +2430,20 @@ function WorkspaceDraftsPageContent() {
                                     {!readiness.ready_for_publish && <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-2 text-red-100">{(readiness.blocking_reasons || []).map((r: string, i: number) => <p key={`${r}-${i}`}>- {cleanText(r)}</p>)}</div>}
                                     <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-gray-300 space-y-1">
                                         {Object.entries(readiness.reports || {}).map(([stage, report]) => (
-                                            <div key={stage} className="flex items-center justify-between"><span>{STAGE_LABELS[stage] || stage}</span><span className={report?.passed ? 'text-emerald-300' : 'text-red-300'}>{report?.passed ? 'ناجح' : 'فشل'}</span></div>
+                                            <div key={stage} className="flex items-center justify-between gap-2">
+                                                <span>{STAGE_LABELS[stage] || stage}</span>
+                                                <div className="flex items-center gap-2">
+                                                    <span className={report?.passed ? 'text-emerald-300' : 'text-red-300'}>{report?.passed ? 'ناجح' : 'فشل'}</span>
+                                                    {!report?.passed && STAGE_ACTIONS[stage] && (
+                                                        <button
+                                                            onClick={() => decisionActionHandlers[STAGE_ACTIONS[stage] as DecisionActionId]()}
+                                                            className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-gray-200"
+                                                        >
+                                                            فتح
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
                                         ))}
                                     </div>
                                     {!!readiness.gates && (
