@@ -119,6 +119,328 @@ def _story_to_dict(story: Story) -> dict:
     }
 
 
+def _normalize_story_text(*parts: str | None) -> str:
+    return " ".join((part or "").strip().lower() for part in parts if part)
+
+
+def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
+    return any(keyword in text for keyword in keywords)
+
+
+def _detect_story_angles(article: Article) -> set[str]:
+    title = (getattr(article, "title_ar", None) or getattr(article, "original_title", None) or "").strip()
+    summary = (getattr(article, "summary", None) or "").strip()
+    content = (getattr(article, "original_content", None) or "").strip()
+    merged = _normalize_story_text(title, summary, content)
+
+    detected: set[str] = set()
+    urgency_value = str(getattr(getattr(article, "urgency", None), "value", "") or "").lower()
+    is_breaking = bool(getattr(article, "is_breaking", False))
+    if is_breaking or urgency_value in {"high", "critical"}:
+        detected.add("breaking")
+
+    follow_up_keywords = (
+        "متابعة",
+        "تطور",
+        "تحديث",
+        "حصيلة",
+        "مستجد",
+        "latest",
+        "update",
+        "follow-up",
+    )
+    if _contains_any(merged, follow_up_keywords):
+        detected.add("follow_up")
+
+    background_keywords = (
+        "خلفية",
+        "ملف",
+        "سياق",
+        "لماذا",
+        "كيف",
+        "شرح",
+        "background",
+        "context",
+        "explainer",
+    )
+    if _contains_any(merged, background_keywords):
+        detected.add("background")
+
+    analysis_keywords = (
+        "تحليل",
+        "قراءة",
+        "تداعيات",
+        "سيناريو",
+        "analysis",
+        "insight",
+        "outlook",
+    )
+    if _contains_any(merged, analysis_keywords):
+        detected.add("analysis")
+
+    reaction_keywords = (
+        "رد",
+        "تصريح",
+        "قال",
+        "أكد",
+        "انتقد",
+        "رحب",
+        "comment",
+        "reaction",
+        "statement",
+    )
+    if _contains_any(merged, reaction_keywords):
+        detected.add("reaction")
+
+    has_numbers = bool(re.search(r"\d", merged))
+    data_keywords = (
+        "إحصاء",
+        "نسبة",
+        "مليون",
+        "مليار",
+        "percent",
+        "statistics",
+        "data",
+    )
+    if has_numbers or _contains_any(merged, data_keywords):
+        detected.add("data")
+
+    if not detected:
+        detected.add("general")
+    return detected
+
+
+def _build_story_coverage_map(articles: list[Article]) -> dict:
+    angle_specs = [
+        ("breaking", "خبر عاجل", "تغطية الحدث الأساسي السريع"),
+        ("follow_up", "متابعة", "متابعة التطورات والنتائج"),
+        ("background", "خلفية", "سياق يشرح أصل القضية"),
+        ("analysis", "تحليل", "قراءة أعمق للأثر والمعنى"),
+        ("reaction", "ردود فعل", "تصريحات الأطراف المعنية"),
+        ("data", "بيانات", "أرقام أو مؤشرات داعمة"),
+    ]
+    counts: Counter[str] = Counter()
+    for article in articles:
+        counts.update(_detect_story_angles(article))
+
+    items: list[dict] = []
+    available: list[str] = []
+    missing: list[str] = []
+    for key, label_ar, description in angle_specs:
+        covered_count = int(counts.get(key, 0))
+        status_value = "covered" if covered_count > 0 else "missing"
+        items.append(
+            {
+                "key": key,
+                "label": label_ar,
+                "status": status_value,
+                "count": covered_count,
+                "description": description,
+            }
+        )
+        if covered_count > 0:
+            available.append(key)
+        else:
+            missing.append(key)
+
+    coverage_score = round((len(available) / len(angle_specs)) * 100) if angle_specs else 100
+    return {
+        "score": coverage_score,
+        "available": available,
+        "missing": missing,
+        "items": items,
+    }
+
+
+def _build_story_gaps(coverage_map: dict, sources_count: int, last_activity_at: str | None) -> list[dict]:
+    gap_messages = {
+        "breaking": ("لا يوجد خبر عاجل داخل القصة", "أنشئ نسخة خبر عاجل قصيرة لتثبيت الحدث الرئيسي."),
+        "follow_up": ("لا توجد متابعة واضحة", "أضف خبر متابعة يشرح ما تغير بعد الخبر الأول."),
+        "background": ("لا توجد خلفية كافية", "أضف فقرة/خبر خلفية لشرح السياق للقارئ."),
+        "analysis": ("لا يوجد تحليل معمق", "أضف تحليل يربط المعطيات بالأثر المتوقع."),
+        "reaction": ("لا توجد ردود فعل كافية", "أضف تصريحات الأطراف الأساسية أو ردود المؤسسات."),
+        "data": ("لا توجد بيانات داعمة", "أضف أرقامًا موثقة أو مؤشرات رسمية تدعم السرد."),
+    }
+    severity_map = {
+        "breaking": "high",
+        "follow_up": "high",
+        "background": "medium",
+        "analysis": "medium",
+        "reaction": "medium",
+        "data": "medium",
+    }
+    gaps: list[dict] = []
+    for angle in coverage_map.get("missing", []):
+        title, recommendation = gap_messages.get(angle, ("فجوة تحريرية", "أضف مادة تغطي هذه الزاوية."))
+        gaps.append(
+            {
+                "code": f"missing_{angle}",
+                "severity": severity_map.get(angle, "medium"),
+                "title": title,
+                "recommendation": recommendation,
+            }
+        )
+
+    if sources_count < 2:
+        gaps.append(
+            {
+                "code": "low_source_diversity",
+                "severity": "medium",
+                "title": "تنوع المصادر منخفض",
+                "recommendation": "عزز القصة بمصدر إضافي موثوق لتقليل الانحياز.",
+            }
+        )
+
+    if last_activity_at:
+        try:
+            last_dt = datetime.fromisoformat(last_activity_at)
+            age_hours = max(0.0, (datetime.utcnow() - last_dt).total_seconds() / 3600.0)
+            if age_hours >= 24:
+                gaps.append(
+                    {
+                        "code": "stale_story",
+                        "severity": "low",
+                        "title": "القصة بحاجة تحديث",
+                        "recommendation": "مرّ أكثر من 24 ساعة دون تحديث؛ أضف متابعة جديدة.",
+                    }
+                )
+        except ValueError:
+            pass
+
+    return gaps
+
+
+def _story_templates() -> list[dict]:
+    return [
+        {
+            "key": "breaking_story",
+            "label": "قالب عاجل",
+            "sections": ["المعلومة الأساسية", "التفاصيل الأولية", "ماذا بعد؟"],
+        },
+        {
+            "key": "followup_story",
+            "label": "قالب متابعة",
+            "sections": ["ما الجديد", "ما تغير منذ الخبر السابق", "الأثر على الجمهور"],
+        },
+        {
+            "key": "analysis_story",
+            "label": "قالب تحليل",
+            "sections": ["السياق", "المعطيات", "التحليل", "السيناريوهات"],
+        },
+    ]
+
+
+async def _build_story_dossier_payload(
+    db: AsyncSession,
+    story: Story,
+    timeline_limit: int,
+) -> tuple[dict, list[Article]]:
+    sorted_items = sorted(story.items or [], key=lambda item: item.created_at or datetime.min, reverse=True)
+    limited_items = sorted_items[:timeline_limit]
+
+    article_ids = [item.article_id for item in limited_items if item.article_id]
+    draft_ids = [item.draft_id for item in limited_items if item.draft_id]
+
+    article_map: dict[int, Article] = {}
+    draft_map: dict[int, EditorialDraft] = {}
+
+    if article_ids:
+        article_rows = await db.execute(select(Article).where(Article.id.in_(article_ids)))
+        article_map = {article.id: article for article in article_rows.scalars().all()}
+    if draft_ids:
+        draft_rows = await db.execute(select(EditorialDraft).where(EditorialDraft.id.in_(draft_ids)))
+        draft_map = {draft.id: draft for draft in draft_rows.scalars().all()}
+
+    timeline: list[dict] = []
+    sources_counter: Counter[str] = Counter()
+    activity_timestamps: list[datetime] = [value for value in [story.updated_at, story.created_at] if isinstance(value, datetime)]
+    linked_articles: list[Article] = []
+
+    for item in limited_items:
+        if item.article_id:
+            article = article_map.get(item.article_id)
+            if not article:
+                continue
+            linked_articles.append(article)
+            title_value = (article.title_ar or article.original_title or "").strip()
+            timeline.append(
+                {
+                    "type": "article",
+                    "id": article.id,
+                    "title": title_value,
+                    "source_name": article.source_name,
+                    "url": article.original_url,
+                    "status": article.status.value if article.status else None,
+                    "created_at": article.created_at.isoformat() if article.created_at else None,
+                }
+            )
+            if article.source_name:
+                sources_counter[str(article.source_name)] += 1
+            if article.updated_at:
+                activity_timestamps.append(article.updated_at)
+            if article.created_at:
+                activity_timestamps.append(article.created_at)
+            continue
+
+        if item.draft_id:
+            draft = draft_map.get(item.draft_id)
+            if not draft:
+                continue
+            timeline.append(
+                {
+                    "type": "draft",
+                    "id": draft.id,
+                    "title": draft.title or "Untitled Draft",
+                    "work_id": draft.work_id,
+                    "version": draft.version,
+                    "status": draft.status,
+                    "created_at": draft.created_at.isoformat() if draft.created_at else None,
+                }
+            )
+            if draft.updated_at:
+                activity_timestamps.append(draft.updated_at)
+            if draft.created_at:
+                activity_timestamps.append(draft.created_at)
+
+    item_total = len(story.items or [])
+    article_count, draft_count = _story_linked_item_counts(story)
+    latest_titles: list[str] = []
+    for entry in timeline:
+        title = str(entry.get("title") or "").strip()
+        if title and title not in latest_titles:
+            latest_titles.append(title)
+        if len(latest_titles) >= 5:
+            break
+
+    last_activity_at = max(activity_timestamps).isoformat() if activity_timestamps else None
+    dossier = {
+        "story": {
+            "id": story.id,
+            "story_key": story.story_key,
+            "title": story.title,
+            "status": _story_status_value(story),
+            "category": story.category,
+            "geography": story.geography,
+            "priority": story.priority,
+            "created_at": story.created_at.isoformat() if story.created_at else None,
+            "updated_at": story.updated_at.isoformat() if story.updated_at else None,
+        },
+        "stats": {
+            "items_total": item_total,
+            "articles_count": article_count,
+            "drafts_count": draft_count,
+            "last_activity_at": last_activity_at,
+        },
+        "timeline": timeline,
+        "highlights": {
+            "latest_titles": latest_titles,
+            "sources": [{"name": name, "count": count} for name, count in sources_counter.most_common(5)],
+            "notes_count": sum(1 for item in (story.items or []) if item.note and item.note.strip()),
+        },
+    }
+    return dossier, linked_articles
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_story(
     payload: StoryCreateRequest,
@@ -572,109 +894,44 @@ async def get_story_dossier(
     story = await story_repository.get_story_by_id(db, story_id)
     if not story:
         raise HTTPException(status_code=404, detail="Story not found")
-
-    sorted_items = sorted(story.items or [], key=lambda item: item.created_at or datetime.min, reverse=True)
-    limited_items = sorted_items[:timeline_limit]
-
-    article_ids = [item.article_id for item in limited_items if item.article_id]
-    draft_ids = [item.draft_id for item in limited_items if item.draft_id]
-
-    article_map: dict[int, Article] = {}
-    draft_map: dict[int, EditorialDraft] = {}
-
-    if article_ids:
-        article_rows = await db.execute(select(Article).where(Article.id.in_(article_ids)))
-        article_map = {article.id: article for article in article_rows.scalars().all()}
-    if draft_ids:
-        draft_rows = await db.execute(select(EditorialDraft).where(EditorialDraft.id.in_(draft_ids)))
-        draft_map = {draft.id: draft for draft in draft_rows.scalars().all()}
-
-    timeline: list[dict] = []
-    sources_counter: Counter[str] = Counter()
-    activity_timestamps: list[datetime] = [value for value in [story.updated_at, story.created_at] if isinstance(value, datetime)]
-
-    for item in limited_items:
-        if item.article_id:
-            article = article_map.get(item.article_id)
-            if not article:
-                continue
-            title_value = (article.title_ar or article.original_title or "").strip()
-            timeline.append(
-                {
-                    "type": "article",
-                    "id": article.id,
-                    "title": title_value,
-                    "source_name": article.source_name,
-                    "url": article.original_url,
-                    "status": article.status.value if article.status else None,
-                    "created_at": article.created_at.isoformat() if article.created_at else None,
-                }
-            )
-            if article.source_name:
-                sources_counter[str(article.source_name)] += 1
-            if article.updated_at:
-                activity_timestamps.append(article.updated_at)
-            if article.created_at:
-                activity_timestamps.append(article.created_at)
-            continue
-
-        if item.draft_id:
-            draft = draft_map.get(item.draft_id)
-            if not draft:
-                continue
-            timeline.append(
-                {
-                    "type": "draft",
-                    "id": draft.id,
-                    "title": draft.title or "Untitled Draft",
-                    "work_id": draft.work_id,
-                    "version": draft.version,
-                    "status": draft.status,
-                    "created_at": draft.created_at.isoformat() if draft.created_at else None,
-                }
-            )
-            if draft.updated_at:
-                activity_timestamps.append(draft.updated_at)
-            if draft.created_at:
-                activity_timestamps.append(draft.created_at)
-
-    item_total = len(story.items or [])
-    article_count, draft_count = _story_linked_item_counts(story)
-    latest_titles: list[str] = []
-    for entry in timeline:
-        title = str(entry.get("title") or "").strip()
-        if title and title not in latest_titles:
-            latest_titles.append(title)
-        if len(latest_titles) >= 5:
-            break
-
-    last_activity_at = max(activity_timestamps).isoformat() if activity_timestamps else None
-    dossier = {
-        "story": {
-            "id": story.id,
-            "story_key": story.story_key,
-            "title": story.title,
-            "status": _story_status_value(story),
-            "category": story.category,
-            "geography": story.geography,
-            "priority": story.priority,
-            "created_at": story.created_at.isoformat() if story.created_at else None,
-            "updated_at": story.updated_at.isoformat() if story.updated_at else None,
-        },
-        "stats": {
-            "items_total": item_total,
-            "articles_count": article_count,
-            "drafts_count": draft_count,
-            "last_activity_at": last_activity_at,
-        },
-        "timeline": timeline,
-        "highlights": {
-            "latest_titles": latest_titles,
-            "sources": [{"name": name, "count": count} for name, count in sources_counter.most_common(5)],
-            "notes_count": sum(1 for item in (story.items or []) if item.note and item.note.strip()),
-        },
-    }
+    dossier, _ = await _build_story_dossier_payload(db, story, timeline_limit=timeline_limit)
     return success_envelope(dossier)
+
+
+@router.get("/{story_id}/control-center")
+async def get_story_control_center(
+    story_id: int,
+    timeline_limit: int = Query(30, ge=10, le=120),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(UserRole.director, UserRole.editor_chief, UserRole.journalist, UserRole.social_media, UserRole.print_editor)),
+):
+    story = await story_repository.get_story_by_id(db, story_id)
+    if not story:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    dossier, linked_articles = await _build_story_dossier_payload(db, story, timeline_limit=timeline_limit)
+    coverage_map = _build_story_coverage_map(linked_articles)
+    source_count = len(dossier.get("highlights", {}).get("sources", []))
+    last_activity_at = dossier.get("stats", {}).get("last_activity_at")
+    gaps = _build_story_gaps(coverage_map=coverage_map, sources_count=source_count, last_activity_at=last_activity_at)
+
+    control_center = {
+        "story": dossier["story"],
+        "overview": {
+            "items_total": dossier["stats"]["items_total"],
+            "articles_count": dossier["stats"]["articles_count"],
+            "drafts_count": dossier["stats"]["drafts_count"],
+            "last_activity_at": dossier["stats"]["last_activity_at"],
+            "coverage_score": coverage_map["score"],
+            "gaps_count": len(gaps),
+        },
+        "coverage_map": coverage_map,
+        "gaps": gaps,
+        "timeline": dossier["timeline"],
+        "highlights": dossier["highlights"],
+        "templates": _story_templates(),
+    }
+    return success_envelope(control_center)
 
 
 @router.post("/{story_id}/link/article/{article_id}")

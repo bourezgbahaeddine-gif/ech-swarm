@@ -1,10 +1,23 @@
-'use client';
+﻿'use client';
 
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { AlertCircle, BookOpenText, RefreshCw, FolderPlus, ChevronDown, ChevronUp } from 'lucide-react';
+import {
+    AlertCircle,
+    BookOpenText,
+    ChevronDown,
+    ChevronUp,
+    FolderPlus,
+    Loader2,
+    RefreshCw,
+} from 'lucide-react';
 
-import { storiesApi, type StoryClusterRecord, type StoryDossierResponse } from '@/lib/api';
+import {
+    storiesApi,
+    type StoryClusterRecord,
+    type StoryControlCenterResponse,
+    type StoryGapItem,
+} from '@/lib/api';
 import { cn, formatRelativeTime } from '@/lib/utils';
 
 export default function StoriesPage() {
@@ -17,27 +30,37 @@ export default function StoriesPage() {
     const [actionMsg, setActionMsg] = useState<string | null>(null);
     const [actionErr, setActionErr] = useState<string | null>(null);
 
-    const { data, isLoading, refetch, isRefetching, error } = useQuery({
+    const {
+        data: storiesData,
+        isLoading: storiesLoading,
+        refetch: refetchStories,
+        isRefetching: storiesRefetching,
+        error: storiesError,
+    } = useQuery({
         queryKey: ['stories-page-list'],
         queryFn: () => storiesApi.list({ limit: 120 }),
     });
+
     const {
         data: clustersData,
         isLoading: clustersLoading,
         error: clustersError,
         refetch: refetchClusters,
-        isRefetching: isClustersRefetching,
+        isRefetching: clustersRefetching,
     } = useQuery({
         queryKey: ['stories-page-clusters', clusterHours, clusterMinSize],
-        queryFn: () => storiesApi.clusters({ hours: clusterHours, ?????_size: clusterMinSize, limit: 20 }),
+        queryFn: () => storiesApi.clusters({ hours: clusterHours, min_size: clusterMinSize, limit: 20 }),
     });
 
-    const stories = useMemo(() => data?.data || [], [data?.data]);
+    const stories = useMemo(() => storiesData?.data || [], [storiesData?.data]);
     const clusterReport = clustersData?.data;
     const clusterItems = clusterReport?.items || [];
+
     const filteredClusters = useMemo(() => {
         const query = clusterQuery.trim().toLowerCase();
-        if (!query) return clusterItems;
+        if (!query) {
+            return clusterItems;
+        }
         return clusterItems.filter((cluster) => {
             const haystack = [
                 cluster.label,
@@ -56,7 +79,7 @@ export default function StoriesPage() {
     }, [clusterItems, clusterQuery]);
 
     const createStoryFromCluster = useMutation({
-        mutationFn: async (payload: { clusterId: number; articleId: number }) => {
+        mutationFn: async (payload: { articleId: number }) => {
             setActionErr(null);
             setActionMsg(null);
             return storiesApi.createFromArticle(payload.articleId, { reuse: true });
@@ -65,7 +88,8 @@ export default function StoriesPage() {
             const story = res.data?.story;
             if (story?.id) {
                 setSelectedStoryId(story.id);
-                setActionMsg(`تم الربط مع القصة ${story.story_key}.`);
+                setActionMsg(`تم ربط العنصر بالقصة ${story.story_key}.`);
+                refetchStories();
             } else {
                 setActionMsg('تم إنشاء القصة وربطها.');
             }
@@ -81,32 +105,27 @@ export default function StoriesPage() {
                         <BookOpenText className="w-6 h-6 text-cyan-300" />
                         القصص التحريرية
                     </h1>
-                    <p className="text-xs text-slate-400 mt-1">متابعة القصص ومجموعات الأحداث في مكان واحد.</p>
+                    <p className="text-xs text-slate-400 mt-1">لوحة قيادة القصة: تغطية، فجوات، خط زمني، وإجراءات سريعة.</p>
                 </div>
                 <button
                     type="button"
                     onClick={() => {
-                        refetch();
+                        refetchStories();
                         refetchClusters();
                     }}
                     className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 hover:text-white"
                 >
-                    <RefreshCw className={cn('w-4 h-4', (isRefetching || isClustersRefetching) && 'animate-spin')} />
+                    <RefreshCw className={cn('w-4 h-4', (storiesRefetching || clustersRefetching) && 'animate-spin')} />
                     تحديث
                 </button>
             </div>
 
-            {error && (
-                <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-                    فشل جلب القصص التحريرية.
+            {(storiesError || clustersError) && (
+                <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200 inline-flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4" />
+                    تعذر تحميل بيانات القصص. حاول التحديث مرة أخرى.
                 </div>
             )}
-            {clustersError && (
-                <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-                    فشل جلب مجموعات القصص.
-                </div>
-            )}
-
 
             {actionMsg && (
                 <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs text-emerald-100">
@@ -130,7 +149,7 @@ export default function StoriesPage() {
                             : 'border-white/10 bg-white/5 text-slate-300',
                     )}
                 >
-                    القصص المنشأة
+                    مركز القصص
                 </button>
                 <button
                     type="button"
@@ -145,13 +164,14 @@ export default function StoriesPage() {
                     مجموعات مقترحة
                 </button>
             </div>
+
             {view === 'clusters' && (
                 <StoryClustersSection
                     loading={clustersLoading}
                     report={clusterReport}
                     items={filteredClusters}
                     hours={clusterHours}
-                    ?????Size={clusterMinSize}
+                    minSize={clusterMinSize}
                     query={clusterQuery}
                     onQueryChange={setClusterQuery}
                     onChangeHours={setClusterHours}
@@ -168,17 +188,18 @@ export default function StoriesPage() {
                             return next;
                         });
                     }}
-                    onCreateStory={(clusterId, articleId) => createStoryFromCluster.mutate({ clusterId, articleId })}
+                    onCreateStory={(articleId) => createStoryFromCluster.mutate({ articleId })}
                     isCreatingStory={createStoryFromCluster.isPending}
                 />
             )}
+
             {view === 'stories' && (
-                isLoading ? (
-                    <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-6 text-slate-400">جاري التحميل...</div>
+                storiesLoading ? (
+                    <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-6 text-slate-400">جاري تحميل مركز القصص...</div>
                 ) : (
                     <div className="grid grid-cols-1 gap-3">
                         {stories.length === 0 && (
-                            <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-6 text-slate-400">لا توجد قصص بعد. أنشئ قصة من صفحة الخبر.</div>
+                            <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-6 text-slate-400">لا توجد قصص بعد. ابدأ بقصة من خبر واحد أو من مجموعة مقترحة.</div>
                         )}
                         {stories.map((story) => (
                             <button
@@ -195,7 +216,9 @@ export default function StoriesPage() {
                                     </div>
                                     <div className="text-left shrink-0">
                                         <p className="text-xs text-slate-300">{story.status}</p>
-                                        <p className="text-[11px] text-slate-500 mt-1">{formatRelativeTime(story.updated_at || story.created_at || '')}</p>
+                                        <p className="text-[11px] text-slate-500 mt-1">
+                                            {formatRelativeTime(story.updated_at || story.created_at || '')}
+                                        </p>
                                     </div>
                                 </div>
                             </button>
@@ -204,9 +227,8 @@ export default function StoriesPage() {
                 )
             )}
 
-            {selectedStoryId &&
- (
-                <StoryDossierDrawer storyId={selectedStoryId} onClose={() => setSelectedStoryId(null)} />
+            {selectedStoryId && (
+                <StoryControlCenterDrawer storyId={selectedStoryId} onClose={() => setSelectedStoryId(null)} />
             )}
         </div>
     );
@@ -217,7 +239,7 @@ function StoryClustersSection({
     report,
     items,
     hours,
-    ?????Size,
+    minSize,
     query,
     onQueryChange,
     onChangeHours,
@@ -237,28 +259,28 @@ function StoryClustersSection({
     };
     items: StoryClusterRecord[];
     hours: number;
-    ?????Size: number;
+    minSize: number;
     query: string;
     onQueryChange: (value: string) => void;
     onChangeHours: (value: number) => void;
     onChangeMinSize: (value: number) => void;
     expandedClusters: Set<number>;
     onToggleCluster: (clusterId: number) => void;
-    onCreateStory: (clusterId: number, articleId: number) => void;
+    onCreateStory: (articleId: number) => void;
     isCreatingStory: boolean;
 }) {
     return (
         <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-4 space-y-4">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div>
-                    <h2 className="text-sm font-semibold text-white">مجموعات القصص</h2>
-                    <p className="text-[11px] text-slate-400">اختر مجموعة، راجع العناصر، ثم أنشئ قصة.</p>
+                    <h2 className="text-sm font-semibold text-white">مجموعات القصص المقترحة</h2>
+                    <p className="text-[11px] text-slate-400">راجع المجموعة ثم أنشئ قصة بنقرة واحدة.</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                     <input
                         value={query}
                         onChange={(e) => onQueryChange(e.target.value)}
-                        placeholder="بحث سريع داخل المجموعات..."
+                        placeholder="بحث داخل المجموعات..."
                         className="rounded-lg border border-white/15 bg-black/20 px-2 py-1 text-xs text-white placeholder:text-slate-500"
                     />
                     <label className="text-xs text-slate-300 inline-flex items-center gap-1">
@@ -275,7 +297,7 @@ function StoryClustersSection({
                         </select>
                     </label>
                     <label className="text-xs text-slate-300 inline-flex items-center gap-1">
-                        حد الحجم
+                        الحد الأدنى
                         <select
                             value={minSize}
                             onChange={(e) => onChangeMinSize(Number(e.target.value) || 2)}
@@ -290,15 +312,14 @@ function StoryClustersSection({
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
-
                 <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-slate-200">
-                    ????????? ???????: <span className="text-white font-semibold">{report?.metrics?.clusters_created ?? 0}</span>
+                    مجموعات جديدة: <span className="text-white font-semibold">{report?.metrics?.clusters_created ?? 0}</span>
                 </div>
                 <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-slate-200">
-                    ????? ??? ????????: <span className="text-white font-semibold">{report?.metrics?.average_cluster_size ?? 0}</span>
+                    متوسط حجم المجموعة: <span className="text-white font-semibold">{report?.metrics?.average_cluster_size ?? 0}</span>
                 </div>
                 <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-slate-200">
-                    ????? ??? ???????: <span className="text-white font-semibold">{report?.metrics?.time_to_cluster_minutes ?? '??? ????'} ?????</span>
+                    متوسط وقت التجميع: <span className="text-white font-semibold">{report?.metrics?.time_to_cluster_minutes ?? 'غير متاح'}</span> دقيقة
                 </div>
             </div>
 
@@ -308,13 +329,13 @@ function StoryClustersSection({
                 <div className="space-y-2">
                     {items.map((cluster) => (
                         <ClusterCard
-                        key={cluster.cluster_id}
-                        cluster={cluster}
-                        expanded={expandedClusters.has(cluster.cluster_id)}
-                        onToggle={() => onToggleCluster(cluster.cluster_id)}
-                        onCreateStory={(articleId) => onCreateStory(cluster.cluster_id, articleId)}
-                        isCreatingStory={isCreatingStory}
-                    />
+                            key={cluster.cluster_id}
+                            cluster={cluster}
+                            expanded={expandedClusters.has(cluster.cluster_id)}
+                            onToggle={() => onToggleCluster(cluster.cluster_id)}
+                            onCreateStory={(articleId) => onCreateStory(articleId)}
+                            isCreatingStory={isCreatingStory}
+                        />
                     ))}
                     {items.length === 0 && (
                         <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-4 text-xs text-slate-400">
@@ -326,8 +347,6 @@ function StoryClustersSection({
         </section>
     );
 }
-
-
 
 function ClusterCard({
     cluster,
@@ -344,6 +363,7 @@ function ClusterCard({
 }) {
     const topMember = cluster.members[0];
     const canCreate = Boolean(topMember?.article_id);
+
     return (
         <div className="rounded-xl border border-white/10 bg-white/5 p-3 space-y-3">
             <div className="flex items-start justify-between gap-3">
@@ -355,7 +375,9 @@ function ClusterCard({
                     </p>
                 </div>
                 <div className="flex flex-col items-end gap-2">
-                    <p className="text-[11px] text-slate-500">{cluster.latest_article_at ? formatRelativeTime(cluster.latest_article_at) : 'لا توجد نشاطات'}</p>
+                    <p className="text-[11px] text-slate-500">
+                        {cluster.latest_article_at ? formatRelativeTime(cluster.latest_article_at) : 'بدون نشاط'}
+                    </p>
                     <div className="flex items-center gap-2">
                         <button
                             type="button"
@@ -363,7 +385,7 @@ function ClusterCard({
                             onClick={() => canCreate && onCreateStory(topMember.article_id)}
                             className="inline-flex items-center gap-1 rounded-lg border border-emerald-400/40 bg-emerald-500/15 px-2 py-1 text-[11px] text-emerald-100 disabled:opacity-50"
                         >
-                            <FolderPlus className="w-3 h-3" />
+                            {isCreatingStory ? <Loader2 className="w-3 h-3 animate-spin" /> : <FolderPlus className="w-3 h-3" />}
                             إنشاء قصة
                         </button>
                         <button
@@ -410,7 +432,7 @@ function ClusterCard({
                                     target="_blank"
                                     rel="noreferrer"
                                 >
-                                    فتح
+                                    فتح الخبر
                                 </a>
                             </div>
                         ))}
@@ -422,82 +444,170 @@ function ClusterCard({
     );
 }
 
-function StoryDossierDrawer({ storyId, onClose }: { storyId: number; onClose: () => void }) {
+function StoryControlCenterDrawer({ storyId, onClose }: { storyId: number; onClose: () => void }) {
     const { data, isLoading, error } = useQuery({
-        queryKey: ['stories-dossier', storyId],
-        queryFn: () => storiesApi.dossier(storyId, { timeline_limit: 20 }),
+        queryKey: ['stories-control-center', storyId],
+        queryFn: () => storiesApi.controlCenter(storyId, { timeline_limit: 40 }),
     });
 
-    const dossier: StoryDossierResponse | undefined = data?.data;
+    const center: StoryControlCenterResponse | undefined = data?.data;
+    const timeline = useMemo(() => {
+        if (!center?.timeline) {
+            return [];
+        }
+        return [...center.timeline].sort((a, b) => {
+            const aValue = a.created_at ? new Date(a.created_at).getTime() : 0;
+            const bValue = b.created_at ? new Date(b.created_at).getTime() : 0;
+            return bValue - aValue;
+        });
+    }, [center?.timeline]);
 
     return (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex justify-end" dir="rtl">
-            <div className="w-full max-w-2xl h-full overflow-y-auto border-l border-white/10 bg-slate-950 p-5">
+            <div className="w-full max-w-3xl h-full overflow-y-auto border-l border-white/10 bg-slate-950 p-5">
                 <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-white">ملف القصة</h3>
+                    <h3 className="text-lg font-semibold text-white">Story Control Center</h3>
                     <button onClick={onClose} className="rounded-lg border border-white/15 px-3 py-1.5 text-xs text-slate-300">إغلاق</button>
                 </div>
 
-                {isLoading && <p className="text-slate-400 text-sm">جاري تحميل ملف القصة...</p>}
+                {isLoading && <p className="text-slate-400 text-sm">جاري تحميل لوحة القصة...</p>}
                 {error && (
                     <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200 inline-flex items-center gap-2">
                         <AlertCircle className="w-4 h-4" />
-                        تعذّر تحميل ملف القصة.
+                        تعذر تحميل لوحة القصة.
                     </div>
                 )}
 
-                {dossier && (
+                {center && (
                     <div className="space-y-5">
                         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                            <p className="text-xs text-cyan-300">{dossier.story.story_key}</p>
-                            <h4 className="text-xl font-semibold text-white mt-1">{dossier.story.title}</h4>
+                            <p className="text-xs text-cyan-300">{center.story.story_key}</p>
+                            <h4 className="text-xl font-semibold text-white mt-1">{center.story.title}</h4>
                             <p className="text-xs text-slate-300 mt-2">
-                                الحالة: {dossier.story.status} • الأولوية: {dossier.story.priority}
+                                الحالة: {center.story.status} • الأولوية: {center.story.priority}
                             </p>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-2 text-xs">
-                            <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-slate-200">إجمالي العناصر: {dossier.stats.items_total}</div>
-                            <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-slate-200">الأخبار: {dossier.stats.articles_count}</div>
-                            <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-slate-200">المسودات: {dossier.stats.drafts_count}</div>
-                            <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-slate-200">
-                                آخر نشاط: {dossier.stats.last_activity_at ? formatRelativeTime(dossier.stats.last_activity_at) : 'غير متاح'}
-                            </div>
-                        </div>
-
                         <section className="space-y-2">
-                            <h5 className="text-sm font-semibold text-white">أحدث العناوين</h5>
-                            <div className="space-y-2">
-                                {dossier.highlights.latest_titles.map((title, index) => (
-                                    <div key={`${title}-${index}`} className="rounded-lg border border-white/10 bg-white/5 p-2 text-sm text-slate-100">{title}</div>
-                                ))}
-                                {dossier.highlights.latest_titles.length === 0 && (
-                                    <p className="text-xs text-slate-400">لا توجد عناوين بعد.</p>
-                                )}
+                            <h5 className="text-sm font-semibold text-white">Overview</h5>
+                            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+                                <MetricCard label="العناصر" value={center.overview.items_total} />
+                                <MetricCard label="الأخبار" value={center.overview.articles_count} />
+                                <MetricCard label="المسودات" value={center.overview.drafts_count} />
+                                <MetricCard label="التغطية" value={`${center.overview.coverage_score}%`} />
+                                <MetricCard label="الفجوات" value={center.overview.gaps_count} />
                             </div>
                         </section>
 
                         <section className="space-y-2">
+                            <h5 className="text-sm font-semibold text-white">Coverage Map</h5>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                {center.coverage_map.items.map((item) => (
+                                    <div
+                                        key={item.key}
+                                        className={cn(
+                                            'rounded-xl border p-3 text-xs',
+                                            item.status === 'covered'
+                                                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100'
+                                                : 'border-amber-500/30 bg-amber-500/10 text-amber-100',
+                                        )}
+                                    >
+                                        <div className="flex items-center justify-between gap-2">
+                                            <p className="font-semibold">{item.label}</p>
+                                            <span className="text-[11px]">{item.count}</span>
+                                        </div>
+                                        <p className="text-[11px] mt-1 opacity-90">{item.description}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </section>
+
+                        <section className="space-y-2">
+                            <h5 className="text-sm font-semibold text-white">Story Gaps</h5>
+                            {center.gaps.length > 0 ? (
+                                <div className="space-y-2">
+                                    {center.gaps.map((gap) => (
+                                        <GapRow key={gap.code} gap={gap} />
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-100">
+                                    لا توجد فجوات حرجة الآن. التغطية متوازنة.
+                                </div>
+                            )}
+                        </section>
+
+                        <section className="space-y-2">
                             <h5 className="text-sm font-semibold text-white">الخط الزمني</h5>
-                            <div className="space-y-2">
-                                {dossier.timeline.map((item) => (
+                            <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                                {timeline.map((item) => (
                                     <div key={`${item.type}-${item.id}`} className="rounded-xl border border-white/10 bg-slate-900/60 p-3">
-                                        <p className="text-[11px] text-cyan-300">{item.type === 'article' ? 'خبر' : 'مسودة'} #{item.id}</p>
+                                        <div className="flex items-center justify-between gap-3">
+                                            <p className="text-[11px] text-cyan-300">
+                                                {item.type === 'article' ? 'خبر' : 'مسودة'} #{item.id}
+                                            </p>
+                                            <p className="text-[11px] text-slate-500">
+                                                {item.created_at ? formatRelativeTime(item.created_at) : 'بدون تاريخ'}
+                                            </p>
+                                        </div>
                                         <p className="text-sm text-white mt-1">{item.title}</p>
                                         <p className="text-[11px] text-slate-400 mt-1">
                                             {item.source_name ? `${item.source_name} • ` : ''}
-                                            {item.status || 'بدون حالة'} • {item.created_at ? formatRelativeTime(item.created_at) : 'بدون تاريخ'}
+                                            {item.status || 'بدون حالة'}
                                         </p>
                                     </div>
                                 ))}
-                                {dossier.timeline.length === 0 && (
-                                    <p className="text-xs text-slate-400">لا يوجد خط زمني متاح.</p>
-                                )}
+                                {timeline.length === 0 && <p className="text-xs text-slate-400">لا يوجد خط زمني متاح.</p>}
+                            </div>
+                        </section>
+
+                        <section className="space-y-2">
+                            <h5 className="text-sm font-semibold text-white">قوالب القصة</h5>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                                {center.templates.map((tpl) => (
+                                    <div key={tpl.key} className="rounded-xl border border-white/10 bg-white/5 p-3">
+                                        <p className="text-xs text-cyan-300">{tpl.label}</p>
+                                        <p className="text-[11px] text-slate-400 mt-2 line-clamp-3">{tpl.sections.join(' • ')}</p>
+                                    </div>
+                                ))}
                             </div>
                         </section>
                     </div>
                 )}
             </div>
+        </div>
+    );
+}
+
+function MetricCard({ label, value }: { label: string; value: string | number }) {
+    return (
+        <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-slate-200">
+            <p className="text-[11px] text-slate-400">{label}</p>
+            <p className="text-sm font-semibold text-white mt-1">{value}</p>
+        </div>
+    );
+}
+
+function GapRow({ gap }: { gap: StoryGapItem }) {
+    const severityClass = {
+        high: 'border-red-500/30 bg-red-500/10 text-red-100',
+        medium: 'border-amber-500/30 bg-amber-500/10 text-amber-100',
+        low: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-100',
+    }[gap.severity] || 'border-white/15 bg-white/5 text-slate-100';
+
+    const severityLabel = {
+        high: 'مرتفع',
+        medium: 'متوسط',
+        low: 'منخفض',
+    }[gap.severity] || gap.severity;
+
+    return (
+        <div className={cn('rounded-xl border p-3 text-xs', severityClass)}>
+            <div className="flex items-center justify-between gap-2">
+                <p className="font-semibold">{gap.title}</p>
+                <span className="text-[11px]">{severityLabel}</span>
+            </div>
+            <p className="mt-1 opacity-95">{gap.recommendation}</p>
         </div>
     );
 }

@@ -766,6 +766,49 @@ export interface StoryClustersResponse {
     items: StoryClusterRecord[];
 }
 
+export interface StoryCoverageMapItem {
+    key: string;
+    label: string;
+    status: 'covered' | 'missing' | string;
+    count: number;
+    description: string;
+}
+
+export interface StoryCoverageMap {
+    score: number;
+    available: string[];
+    missing: string[];
+    items: StoryCoverageMapItem[];
+}
+
+export interface StoryGapItem {
+    code: string;
+    severity: 'high' | 'medium' | 'low' | string;
+    title: string;
+    recommendation: string;
+}
+
+export interface StoryControlCenterResponse {
+    story: StoryDossierResponse['story'];
+    overview: {
+        items_total: number;
+        articles_count: number;
+        drafts_count: number;
+        last_activity_at?: string | null;
+        coverage_score: number;
+        gaps_count: number;
+    };
+    coverage_map: StoryCoverageMap;
+    gaps: StoryGapItem[];
+    timeline: StoryDossierTimelineItem[];
+    highlights: StoryDossierResponse['highlights'];
+    templates: Array<{
+        key: string;
+        label: string;
+        sections: string[];
+    }>;
+}
+
 export interface ScriptOutputRecord {
     id: number;
     script_id: number;
@@ -997,6 +1040,8 @@ export const storiesApi = {
         api.post<{ story_id: number; article_id: number; story_item_id: number }>(`/stories/${storyId}/link/article/${articleId}`, payload || {}),
     dossier: (storyId: number, params?: { timeline_limit?: number }) =>
         api.get<StoryDossierResponse>(`/stories/${storyId}/dossier`, { params }),
+    controlCenter: (storyId: number, params?: { timeline_limit?: number }) =>
+        api.get<StoryControlCenterResponse>(`/stories/${storyId}/control-center`, { params }),
 };
 
 export const scriptsApi = {
