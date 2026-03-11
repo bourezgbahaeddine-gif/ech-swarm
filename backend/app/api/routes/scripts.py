@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import difflib
+import json
 from datetime import datetime, timedelta
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.rbac import require_roles
 from app.api.envelope import success_envelope
 from app.core.database import get_db
+from app.models.job_queue import JobRun
 from app.models.news import Article
 from app.models.script import ScriptOutput, ScriptProjectStatus, ScriptProjectType
 from app.models.story import Story
@@ -67,6 +70,20 @@ class ScriptDecisionRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=2000)
 
 
+class ScriptRegenerateRequest(BaseModel):
+    tone: str | None = Field(default=None, max_length=50)
+    length_seconds: int | None = Field(default=None, ge=20, le=1200)
+    language: str | None = Field(default=None, max_length=8)
+    style_constraints: list[str] | None = None
+    max_items: int | None = Field(default=None, ge=1, le=30)
+    duration_minutes: int | None = Field(default=None, ge=1, le=60)
+    desks: list[str] | None = None
+
+
+class ScriptDuplicateVersionRequest(BaseModel):
+    source_version: int | None = Field(default=None, ge=1)
+
+
 def _serialize_output(output: ScriptOutput) -> dict:
     return {
         "id": output.id,
@@ -83,6 +100,22 @@ def _serialize_output(output: ScriptOutput) -> dict:
 def _serialize_project(project, *, include_outputs: bool = True) -> dict:
     outputs = list(project.outputs or [])
     outputs.sort(key=lambda row: row.version, reverse=True)
+    latest_output = outputs[0] if outputs else None
+    latest_quality_issues = (
+        latest_output.quality_issues_json
+        if latest_output and isinstance(latest_output.quality_issues_json, list)
+        else []
+    )
+    latest_blockers = sum(
+        1
+        for issue in latest_quality_issues
+        if isinstance(issue, dict) and str(issue.get("severity", "")).lower() == "blocker"
+    )
+    latest_warnings = sum(
+        1
+        for issue in latest_quality_issues
+        if isinstance(issue, dict) and str(issue.get("severity", "")).lower() in {"warn", "warning"}
+    )
     return {
         "id": project.id,
         "type": project.type.value if project.type else None,
@@ -95,6 +128,11 @@ def _serialize_project(project, *, include_outputs: bool = True) -> dict:
         "updated_by": project.updated_by,
         "created_at": project.created_at.isoformat() if project.created_at else None,
         "updated_at": project.updated_at.isoformat() if project.updated_at else None,
+        "output_count": len(outputs),
+        "latest_version": latest_output.version if latest_output else None,
+        "latest_output_at": latest_output.created_at.isoformat() if latest_output and latest_output.created_at else None,
+        "latest_quality_blockers": latest_blockers,
+        "latest_quality_warnings": latest_warnings,
         "outputs": [_serialize_output(output) for output in outputs] if include_outputs else [],
     }
 
@@ -120,6 +158,79 @@ def _parse_project_status(value: str | None) -> ScriptProjectStatus | None:
 def _assert_chief_permission(user: User) -> None:
     if user.role not in CHIEF_ROLES:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to review scripts")
+
+
+def _to_diff_text(output: ScriptOutput) -> str:
+    if output.content_text:
+        return output.content_text
+    if isinstance(output.content_json, dict):
+        return json.dumps(output.content_json, ensure_ascii=False, sort_keys=True, indent=2)
+    return ""
+
+
+def _build_recovery_hints(error_text: str) -> list[dict]:
+    raw = (error_text or "").strip()
+    lowered = raw.lower()
+    hints: list[dict] = []
+
+    if not raw:
+        return [
+            {
+                "code": "generic_retry",
+                "severity": "warn",
+                "title": "تعذر تشخيص سبب الفشل",
+                "action": "أعد التوليد الآن. إذا تكرر الفشل، غيّر النبرة إلى `neutral` وقلّل المدة.",
+            }
+        ]
+
+    if any(token in lowered for token in ("429", "rate", "quota", "resource_exhausted")):
+        hints.append(
+            {
+                "code": "provider_rate_limit",
+                "severity": "warn",
+                "title": "تم بلوغ حد مزود الذكاء الاصطناعي",
+                "action": "أعد المحاولة بعد دقائق، أو خفّض طول السكربت قبل إعادة التوليد.",
+            }
+        )
+    if any(token in lowered for token in ("timeout", "timed out", "deadline")):
+        hints.append(
+            {
+                "code": "timeout",
+                "severity": "warn",
+                "title": "انتهت مهلة التنفيذ",
+                "action": "أعد التوليد. إذا استمر، قلّل `max_items` أو `length_seconds`.",
+            }
+        )
+    if any(token in lowered for token in ("json", "parse", "validation", "schema")):
+        hints.append(
+            {
+                "code": "output_schema",
+                "severity": "info",
+                "title": "مخرجات غير مطابقة للبنية المتوقعة",
+                "action": "أعد التوليد بنبرة `neutral` وقيود أسلوب أقل.",
+            }
+        )
+    if any(token in lowered for token in ("not_found", "source", "article", "story")):
+        hints.append(
+            {
+                "code": "missing_source",
+                "severity": "blocker",
+                "title": "مصدر السكربت غير متاح",
+                "action": "تحقق أن الخبر/القصة ما زالت موجودة ثم أعد المحاولة.",
+            }
+        )
+
+    if not hints:
+        hints.append(
+            {
+                "code": "generic_retry",
+                "severity": "warn",
+                "title": "فشل غير مصنف",
+                "action": "أعد التوليد مباشرة. إذا تكرر، أنشئ نسخة جديدة ثم قارن النتائج.",
+            }
+        )
+
+    return hints
 
 
 async def _queue_script_generation(
@@ -418,6 +529,210 @@ async def list_script_outputs(
         raise HTTPException(status_code=404, detail="Script project not found")
     outputs = await script_repository.list_outputs(db, script_id)
     return success_envelope([_serialize_output(output) for output in outputs])
+
+
+@router.post("/{script_id}/regenerate", status_code=status.HTTP_202_ACCEPTED)
+async def regenerate_script_project(
+    script_id: int,
+    payload: ScriptRegenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(*VIEW_ROLES)),
+):
+    project = await script_repository.get_project_by_id(db, script_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Script project not found")
+
+    incoming = payload.model_dump(exclude_none=True)
+    params_json = dict(project.params_json or {})
+    params_json.update(incoming)
+    project.params_json = params_json
+    project.updated_by = current_user.username
+    await audit_service.log_action(
+        db,
+        action="script_project_regenerate_requested",
+        entity_type="script_project",
+        entity_id=project.id,
+        actor=current_user,
+        details={"params_override": incoming},
+    )
+    await db.commit()
+
+    queue_meta = await _queue_script_generation(db=db, script_id=script_id, actor=current_user)
+    reloaded = await script_repository.get_project_by_id(db, script_id)
+    if not reloaded:
+        raise HTTPException(status_code=500, detail="Failed to load script project")
+    return success_envelope(
+        {"script": _serialize_project(reloaded), "job": queue_meta},
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+
+
+@router.post("/{script_id}/duplicate-version")
+async def duplicate_script_output_version(
+    script_id: int,
+    payload: ScriptDuplicateVersionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(*VIEW_ROLES)),
+):
+    project = await script_repository.get_project_by_id(db, script_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Script project not found")
+
+    outputs = await script_repository.list_outputs(db, script_id)
+    if not outputs:
+        raise HTTPException(status_code=409, detail="No output available to duplicate")
+
+    by_version = {row.version: row for row in outputs}
+    source_output = outputs[0]
+    if payload.source_version:
+        selected_output = by_version.get(payload.source_version)
+        if not selected_output:
+            raise HTTPException(status_code=404, detail="Source version not found")
+        source_output = selected_output
+
+    target_version = await script_repository.get_next_output_version(db, script_id)
+    created = await script_repository.create_output(
+        db,
+        script_id=script_id,
+        version=target_version,
+        content_json=source_output.content_json if isinstance(source_output.content_json, dict) else source_output.content_json,
+        content_text=source_output.content_text,
+        output_format=source_output.format,
+        quality_issues_json=source_output.quality_issues_json if isinstance(source_output.quality_issues_json, list) else [],
+    )
+    project.status = ScriptProjectStatus.ready_for_review
+    project.updated_by = current_user.username
+    await audit_service.log_action(
+        db,
+        action="script_output_duplicate_version",
+        entity_type="script_project",
+        entity_id=project.id,
+        actor=current_user,
+        details={
+            "source_version": source_output.version,
+            "target_version": target_version,
+        },
+    )
+    await db.commit()
+
+    reloaded = await script_repository.get_project_by_id(db, script_id)
+    return success_envelope(
+        {
+            "script": _serialize_project(reloaded) if reloaded else None,
+            "output": _serialize_output(created),
+        }
+    )
+
+
+@router.get("/{script_id}/versions/diff")
+async def script_versions_diff(
+    script_id: int,
+    from_version: int = Query(..., ge=1),
+    to_version: int = Query(..., ge=1),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(*VIEW_ROLES)),
+):
+    project = await script_repository.get_project_by_id(db, script_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Script project not found")
+
+    outputs = await script_repository.list_outputs(db, script_id)
+    by_version = {row.version: row for row in outputs}
+    base = by_version.get(from_version)
+    target = by_version.get(to_version)
+    if not base or not target:
+        raise HTTPException(status_code=404, detail="Requested versions not found")
+
+    base_text = _to_diff_text(base)
+    target_text = _to_diff_text(target)
+    diff_lines = list(
+        difflib.unified_diff(
+            base_text.splitlines(),
+            target_text.splitlines(),
+            fromfile=f"v{from_version}",
+            tofile=f"v{to_version}",
+            lineterm="",
+        )
+    )
+    added = sum(1 for line in diff_lines if line.startswith("+") and not line.startswith("+++"))
+    removed = sum(1 for line in diff_lines if line.startswith("-") and not line.startswith("---"))
+
+    return success_envelope(
+        {
+            "script_id": script_id,
+            "from_version": from_version,
+            "to_version": to_version,
+            "from_chars": len(base_text),
+            "to_chars": len(target_text),
+            "added_lines": added,
+            "removed_lines": removed,
+            "diff_lines": diff_lines,
+        }
+    )
+
+
+@router.get("/{script_id}/recovery-hints")
+async def script_recovery_hints(
+    script_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(*VIEW_ROLES)),
+):
+    project = await script_repository.get_project_by_id(db, script_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Script project not found")
+
+    latest_job_row = await db.execute(
+        select(JobRun)
+        .where(
+            JobRun.job_type == SCRIPT_JOB_TYPE,
+            JobRun.entity_id == str(script_id),
+        )
+        .order_by(desc(JobRun.updated_at), desc(JobRun.created_at))
+        .limit(1)
+    )
+    latest_job = latest_job_row.scalar_one_or_none()
+
+    latest_failed_row = await db.execute(
+        select(JobRun)
+        .where(
+            JobRun.job_type == SCRIPT_JOB_TYPE,
+            JobRun.entity_id == str(script_id),
+            JobRun.status.in_(("failed", "dead_lettered")),
+        )
+        .order_by(desc(JobRun.updated_at), desc(JobRun.created_at))
+        .limit(1)
+    )
+    latest_failed = latest_failed_row.scalar_one_or_none()
+    error_text = (latest_failed.error if latest_failed else "") or ""
+
+    return success_envelope(
+        {
+            "script_id": script_id,
+            "project_status": project.status.value if project.status else None,
+            "can_retry_now": True,
+            "latest_job": (
+                {
+                    "id": str(latest_job.id),
+                    "status": latest_job.status,
+                    "error": latest_job.error,
+                    "updated_at": latest_job.updated_at.isoformat() if latest_job.updated_at else None,
+                }
+                if latest_job
+                else None
+            ),
+            "latest_failed_job": (
+                {
+                    "id": str(latest_failed.id),
+                    "status": latest_failed.status,
+                    "error": latest_failed.error,
+                    "updated_at": latest_failed.updated_at.isoformat() if latest_failed.updated_at else None,
+                }
+                if latest_failed
+                else None
+            ),
+            "hints": _build_recovery_hints(error_text),
+        }
+    )
 
 
 @router.post("/{script_id}/approve")

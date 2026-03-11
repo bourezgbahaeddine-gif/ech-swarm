@@ -828,7 +828,7 @@ export interface ScriptOutputRecord {
 export interface ScriptProjectRecord {
     id: number;
     type: 'story_script' | 'video_script' | 'bulletin_daily' | 'bulletin_weekly' | string;
-    status: 'new' | 'generating' | 'ready_for_review' | 'approved' | 'rejected' | 'archived' | string;
+    status: 'new' | 'generating' | 'failed' | 'ready_for_review' | 'approved' | 'rejected' | 'archived' | string;
     story_id: number | null;
     article_id: number | null;
     title: string;
@@ -837,6 +837,11 @@ export interface ScriptProjectRecord {
     updated_by: string | null;
     created_at: string | null;
     updated_at: string | null;
+    output_count?: number;
+    latest_version?: number | null;
+    latest_output_at?: string | null;
+    latest_quality_blockers?: number;
+    latest_quality_warnings?: number;
     outputs: ScriptOutputRecord[];
 }
 
@@ -847,6 +852,46 @@ export interface ScriptProjectQueuedResponse {
         status: string;
         target_version: number;
     };
+}
+
+export interface ScriptDuplicateVersionResponse {
+    script: ScriptProjectRecord | null;
+    output: ScriptOutputRecord;
+}
+
+export interface ScriptVersionDiffResponse {
+    script_id: number;
+    from_version: number;
+    to_version: number;
+    from_chars: number;
+    to_chars: number;
+    added_lines: number;
+    removed_lines: number;
+    diff_lines: string[];
+}
+
+export interface ScriptRecoveryHintsResponse {
+    script_id: number;
+    project_status: string | null;
+    can_retry_now: boolean;
+    latest_job: {
+        id: string;
+        status: string;
+        error: string | null;
+        updated_at: string | null;
+    } | null;
+    latest_failed_job: {
+        id: string;
+        status: string;
+        error: string | null;
+        updated_at: string | null;
+    } | null;
+    hints: Array<{
+        code: string;
+        severity: 'info' | 'warn' | 'blocker' | string;
+        title: string;
+        action: string;
+    }>;
 }
 
 export interface SocialApprovedItem {
@@ -1095,6 +1140,26 @@ export const scriptsApi = {
         api.post<ScriptProjectRecord>(`/scripts/${scriptId}/approve`, payload || {}),
     reject: (scriptId: number, payload: { reason: string }) =>
         api.post<ScriptProjectRecord>(`/scripts/${scriptId}/reject`, payload),
+    regenerate: (
+        scriptId: number,
+        payload?: {
+            tone?: string;
+            length_seconds?: number;
+            language?: string;
+            style_constraints?: string[];
+            max_items?: number;
+            duration_minutes?: number;
+            desks?: string[];
+        },
+    ) => api.post<ScriptProjectQueuedResponse>(`/scripts/${scriptId}/regenerate`, payload || {}),
+    duplicateVersion: (scriptId: number, payload?: { source_version?: number }) =>
+        api.post<ScriptDuplicateVersionResponse>(`/scripts/${scriptId}/duplicate-version`, payload || {}),
+    versionsDiff: (scriptId: number, fromVersion: number, toVersion: number) =>
+        api.get<ScriptVersionDiffResponse>(`/scripts/${scriptId}/versions/diff`, {
+            params: { from_version: fromVersion, to_version: toVersion },
+        }),
+    recoveryHints: (scriptId: number) =>
+        api.get<ScriptRecoveryHintsResponse>(`/scripts/${scriptId}/recovery-hints`),
 };
 
 export const dashboardApi = {

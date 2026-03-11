@@ -2,7 +2,7 @@
 
 import { Suspense, type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, RefreshCw, ScrollText, CheckCircle2, XCircle } from 'lucide-react';
+import { Loader2, RefreshCw, ScrollText, CheckCircle2, XCircle, AlertTriangle, GitCompare, RotateCw, CopyPlus } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 
 import { scriptsApi, type ScriptOutputRecord, type ScriptProjectRecord } from '@/lib/api';
@@ -10,7 +10,7 @@ import { useAuth } from '@/lib/auth';
 import { cn, formatRelativeTime } from '@/lib/utils';
 
 type ScriptTypeFilter = 'all' | 'story_script' | 'video_script' | 'bulletin_daily' | 'bulletin_weekly';
-type ScriptStatusFilter = 'all' | 'new' | 'generating' | 'ready_for_review' | 'approved' | 'rejected' | 'archived';
+type ScriptStatusFilter = 'all' | 'new' | 'generating' | 'failed' | 'ready_for_review' | 'approved' | 'rejected' | 'archived';
 
 export default function ScriptsPage() {
     return (
@@ -32,6 +32,7 @@ function ScriptsPageClient() {
     const { user } = useAuth();
     const [typeFilter, setTypeFilter] = useState<ScriptTypeFilter>('all');
     const [statusFilter, setStatusFilter] = useState<ScriptStatusFilter>('all');
+    const [inboxFocus, setInboxFocus] = useState<'all' | 'regenerated'>('all');
     const [selectedScriptId, setSelectedScriptId] = useState<number | null>(null);
     const [message, setMessage] = useState<string>('');
 
@@ -103,6 +104,26 @@ function ScriptsPageClient() {
     });
 
     const projects = useMemo(() => listQuery.data?.data || [], [listQuery.data?.data]);
+    const displayedProjects = useMemo(() => {
+        if (inboxFocus === 'regenerated') {
+            return projects.filter((item) => (item.output_count || 0) > 1);
+        }
+        return projects;
+    }, [inboxFocus, projects]);
+    const inboxSections = useMemo(() => {
+        const needsReview = projects.filter((item) => item.status === 'ready_for_review');
+        const failed = projects.filter((item) => item.status === 'failed');
+        const regenerated = projects.filter((item) => (item.output_count || 0) > 1);
+        const approved = projects.filter((item) => item.status === 'approved');
+        const rejected = projects.filter((item) => item.status === 'rejected');
+        return [
+            { key: 'ready_for_review', label: 'يحتاج مراجعة', tone: 'cyan', count: needsReview.length },
+            { key: 'failed', label: 'فشل', tone: 'red', count: failed.length },
+            { key: 'regenerated', label: 'معاد توليده', tone: 'amber', count: regenerated.length },
+            { key: 'approved', label: 'معتمد', tone: 'emerald', count: approved.length },
+            { key: 'rejected', label: 'مرفوض', tone: 'violet', count: rejected.length },
+        ] as const;
+    }, [projects]);
     const canReview = user?.role === 'editor_chief' || user?.role === 'director';
 
     return (
@@ -131,6 +152,35 @@ function ScriptsPageClient() {
                 </div>
             )}
 
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                {inboxSections.map((section) => (
+                    <button
+                        key={section.key}
+                        type="button"
+                        onClick={() => {
+                            if (section.key === 'regenerated') {
+                                setInboxFocus('regenerated');
+                                setStatusFilter('all');
+                                return;
+                            }
+                            setInboxFocus('all');
+                            setStatusFilter(section.key as ScriptStatusFilter);
+                        }}
+                        className={cn(
+                            'rounded-xl border px-3 py-2 text-right transition-colors',
+                            section.tone === 'red' && 'border-red-500/30 bg-red-500/10 hover:bg-red-500/15',
+                            section.tone === 'cyan' && 'border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/15',
+                            section.tone === 'amber' && 'border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/15',
+                            section.tone === 'emerald' && 'border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/15',
+                            section.tone === 'violet' && 'border-violet-500/30 bg-violet-500/10 hover:bg-violet-500/15',
+                        )}
+                    >
+                        <p className="text-[11px] text-slate-300">{section.label}</p>
+                        <p className="text-xl font-semibold text-white">{section.count}</p>
+                    </button>
+                ))}
+            </div>
+
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
                 <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-4 space-y-3 xl:col-span-2">
                     <h2 className="text-sm font-semibold text-white">مشاريع السكربت</h2>
@@ -148,19 +198,23 @@ function ScriptsPageClient() {
                         </select>
                         <select
                             value={statusFilter}
-                            onChange={(e) => setStatusFilter(e.target.value as ScriptStatusFilter)}
+                            onChange={(e) => {
+                                setInboxFocus('all');
+                                setStatusFilter(e.target.value as ScriptStatusFilter);
+                            }}
                             className="h-10 rounded-xl border border-white/10 bg-black/20 px-3 text-sm text-slate-200"
                         >
                             <option value="all">كل الحالات</option>
                             <option value="new">new</option>
                             <option value="generating">generating</option>
+                            <option value="failed">failed</option>
                             <option value="ready_for_review">ready_for_review</option>
                             <option value="approved">approved</option>
                             <option value="rejected">rejected</option>
                             <option value="archived">archived</option>
                         </select>
                         <div className="h-10 rounded-xl border border-white/10 bg-black/20 px-3 text-sm text-slate-300 flex items-center">
-                            العدد: {projects.length}
+                            العدد: {displayedProjects.length}
                         </div>
                     </div>
 
@@ -168,12 +222,12 @@ function ScriptsPageClient() {
                         {listQuery.isLoading && (
                             <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-slate-400">جاري التحميل...</div>
                         )}
-                        {!listQuery.isLoading && projects.length === 0 && (
+                        {!listQuery.isLoading && displayedProjects.length === 0 && (
                             <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-slate-400">
                                 لا توجد مشاريع سكربت ضمن هذا الفلتر.
                             </div>
                         )}
-                        {projects.map((project) => (
+                        {displayedProjects.map((project) => (
                             <button
                                 key={project.id}
                                 type="button"
@@ -192,6 +246,17 @@ function ScriptsPageClient() {
                                 <p className="text-[11px] text-slate-400 mt-2">
                                     آخر تحديث: {project.updated_at ? formatRelativeTime(project.updated_at) : '-'}
                                 </p>
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                    <span className="text-[10px] rounded-md border border-white/15 bg-white/5 px-2 py-0.5 text-slate-300">
+                                        versions: {project.output_count || 0}
+                                    </span>
+                                    <span className="text-[10px] rounded-md border border-white/15 bg-white/5 px-2 py-0.5 text-slate-300">
+                                        blockers: {project.latest_quality_blockers || 0}
+                                    </span>
+                                    <span className="text-[10px] rounded-md border border-white/15 bg-white/5 px-2 py-0.5 text-slate-300">
+                                        warnings: {project.latest_quality_warnings || 0}
+                                    </span>
+                                </div>
                             </button>
                         ))}
                     </div>
@@ -312,6 +377,10 @@ function ScriptViewerDrawer({
 }) {
     const queryClient = useQueryClient();
     const [rejectReason, setRejectReason] = useState('');
+    const [actionMessage, setActionMessage] = useState('');
+    const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
+    const [fromVersion, setFromVersion] = useState<number | null>(null);
+    const [toVersion, setToVersion] = useState<number | null>(null);
 
     const scriptQuery = useQuery({
         queryKey: ['script-project', scriptId],
@@ -323,25 +392,75 @@ function ScriptViewerDrawer({
         queryFn: () => scriptsApi.outputs(scriptId),
         refetchInterval: 10000,
     });
+    const recoveryHintsQuery = useQuery({
+        queryKey: ['script-recovery-hints', scriptId],
+        queryFn: () => scriptsApi.recoveryHints(scriptId),
+        refetchInterval: 10000,
+    });
+
+    const outputs = outputsQuery.data?.data || [];
+
+    useEffect(() => {
+        if (!outputs.length) return;
+        if (selectedVersion === null) {
+            setSelectedVersion(outputs[0].version);
+        }
+        if (fromVersion === null) {
+            setFromVersion(outputs[0].version);
+        }
+        if (toVersion === null) {
+            setToVersion((outputs[1] || outputs[0]).version);
+        }
+    }, [outputs, selectedVersion, fromVersion, toVersion]);
+
+    const diffQuery = useQuery({
+        queryKey: ['script-version-diff', scriptId, fromVersion, toVersion],
+        queryFn: () => scriptsApi.versionsDiff(scriptId, fromVersion as number, toVersion as number),
+        enabled: Boolean(fromVersion && toVersion && fromVersion !== toVersion),
+    });
+
+    const refreshDrawerData = () => {
+        queryClient.invalidateQueries({ queryKey: ['script-project', scriptId] });
+        queryClient.invalidateQueries({ queryKey: ['script-outputs', scriptId] });
+        queryClient.invalidateQueries({ queryKey: ['script-recovery-hints', scriptId] });
+        queryClient.invalidateQueries({ queryKey: ['scripts-list'] });
+    };
 
     const approveMutation = useMutation({
         mutationFn: () => scriptsApi.approve(scriptId),
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['script-project', scriptId] });
-            queryClient.invalidateQueries({ queryKey: ['scripts-list'] });
+            setActionMessage('تم اعتماد السكربت.');
+            refreshDrawerData();
         },
     });
     const rejectMutation = useMutation({
         mutationFn: () => scriptsApi.reject(scriptId, { reason: rejectReason }),
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['script-project', scriptId] });
-            queryClient.invalidateQueries({ queryKey: ['scripts-list'] });
+            setActionMessage('تم رفض السكربت.');
+            refreshDrawerData();
         },
+    });
+    const regenerateMutation = useMutation({
+        mutationFn: () => scriptsApi.regenerate(scriptId),
+        onSuccess: (res) => {
+            setActionMessage(`تمت إعادة التوليد (v${res.data.job?.target_version ?? '-'})`);
+            refreshDrawerData();
+        },
+        onError: () => setActionMessage('تعذر إعادة التوليد حالياً.'),
+    });
+    const duplicateMutation = useMutation({
+        mutationFn: (sourceVersion?: number) => scriptsApi.duplicateVersion(scriptId, sourceVersion ? { source_version: sourceVersion } : {}),
+        onSuccess: (res) => {
+            setActionMessage(`تم إنشاء نسخة جديدة v${res.data.output.version}`);
+            setSelectedVersion(res.data.output.version);
+            refreshDrawerData();
+        },
+        onError: () => setActionMessage('تعذر نسخ الإصدار.'),
     });
 
     const project: ScriptProjectRecord | undefined = scriptQuery.data?.data;
-    const outputs = outputsQuery.data?.data || [];
-    const latestOutput = outputs[0];
+    const recoveryData = recoveryHintsQuery.data?.data;
+    const selectedOutput = outputs.find((row) => row.version === selectedVersion) || outputs[0];
 
     return (
         <div className="fixed inset-0 z-[85] bg-black/70 backdrop-blur-sm flex justify-end" dir="rtl">
@@ -353,6 +472,11 @@ function ScriptViewerDrawer({
 
                 {(scriptQuery.isLoading || outputsQuery.isLoading) && <p className="text-sm text-slate-400">جاري التحميل...</p>}
                 {(scriptQuery.error || outputsQuery.error) && <p className="text-sm text-red-300">تعذر تحميل بيانات السكربت.</p>}
+                {actionMessage && (
+                    <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3 text-xs text-cyan-100">
+                        {actionMessage}
+                    </div>
+                )}
 
                 {project && (
                     <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
@@ -361,6 +485,44 @@ function ScriptViewerDrawer({
                         <p className="text-xs text-slate-300">
                             الحالة: {project.status} • آخر تحديث: {project.updated_at ? formatRelativeTime(project.updated_at) : '-'}
                         </p>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-2">
+                            <button
+                                type="button"
+                                onClick={() => regenerateMutation.mutate()}
+                                disabled={regenerateMutation.isPending}
+                                className="h-9 rounded-lg border border-cyan-500/30 bg-cyan-500/15 text-xs text-cyan-200 inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
+                            >
+                                <RotateCw className={cn('w-3.5 h-3.5', regenerateMutation.isPending && 'animate-spin')} />
+                                إعادة التوليد
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => duplicateMutation.mutate(selectedOutput?.version)}
+                                disabled={!selectedOutput || duplicateMutation.isPending}
+                                className="h-9 rounded-lg border border-violet-500/30 bg-violet-500/15 text-xs text-violet-200 inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
+                            >
+                                <CopyPlus className="w-3.5 h-3.5" />
+                                نسخ كإصدار جديد
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => recoveryHintsQuery.refetch()}
+                                disabled={recoveryHintsQuery.isFetching}
+                                className="h-9 rounded-lg border border-amber-500/30 bg-amber-500/15 text-xs text-amber-200 inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
+                            >
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                                استرجاع الفشل
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => diffQuery.refetch()}
+                                disabled={!fromVersion || !toVersion || fromVersion === toVersion || diffQuery.isFetching}
+                                className="h-9 rounded-lg border border-white/15 bg-white/5 text-xs text-slate-200 inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
+                            >
+                                <GitCompare className="w-3.5 h-3.5" />
+                                مقارنة النسخ
+                            </button>
+                        </div>
 
                         {canReview && project.status === 'ready_for_review' && (
                             <div className="border-t border-white/10 pt-3 mt-3 space-y-2">
@@ -395,16 +557,85 @@ function ScriptViewerDrawer({
                     </div>
                 )}
 
-                {latestOutput && (
+                {recoveryData?.hints?.length ? (
+                    <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
+                        <p className="text-xs text-amber-200">
+                            {recoveryData.latest_failed_job ? 'إرشادات معالجة آخر فشل' : 'إرشادات تشغيل سريعة'}
+                        </p>
+                        {recoveryData.hints.map((hint) => (
+                            <div key={hint.code} className="rounded-lg border border-amber-500/30 bg-black/20 p-2">
+                                <p className="text-xs text-amber-100">{hint.title}</p>
+                                <p className="text-[11px] text-slate-300 mt-1">{hint.action}</p>
+                            </div>
+                        ))}
+                        {recoveryData.latest_failed_job?.error ? (
+                            <details className="rounded-lg border border-white/10 bg-black/20 p-2">
+                                <summary className="cursor-pointer text-[11px] text-slate-300">عرض الخطأ الخام</summary>
+                                <pre className="mt-2 whitespace-pre-wrap text-[11px] text-slate-200 overflow-x-auto">
+                                    {recoveryData.latest_failed_job.error}
+                                </pre>
+                            </details>
+                        ) : null}
+                    </div>
+                ) : null}
+
+                {selectedOutput && (
                     <div className="space-y-3">
+                        {outputs.length > 0 && (
+                            <div className="rounded-xl border border-white/10 bg-white/5 p-3 space-y-2">
+                                <p className="text-xs text-slate-300">الإصدارات المتاحة ({outputs.length})</p>
+                                <div className="flex flex-wrap gap-2">
+                                    {outputs.map((output) => (
+                                        <button
+                                            key={output.id}
+                                            type="button"
+                                            onClick={() => setSelectedVersion(output.version)}
+                                            className={cn(
+                                                'h-7 px-2 rounded-md border text-xs',
+                                                selectedOutput.version === output.version
+                                                    ? 'border-cyan-400/60 bg-cyan-500/15 text-cyan-100'
+                                                    : 'border-white/15 bg-white/5 text-slate-300',
+                                            )}
+                                        >
+                                            v{output.version}
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1">
+                                    <select
+                                        value={fromVersion ?? ''}
+                                        onChange={(e) => setFromVersion(Number(e.target.value))}
+                                        className="h-9 rounded-lg border border-white/10 bg-black/20 px-3 text-xs text-slate-200"
+                                    >
+                                        {outputs.map((output) => (
+                                            <option key={`from-${output.id}`} value={output.version}>
+                                                من v{output.version}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <select
+                                        value={toVersion ?? ''}
+                                        onChange={(e) => setToVersion(Number(e.target.value))}
+                                        className="h-9 rounded-lg border border-white/10 bg-black/20 px-3 text-xs text-slate-200"
+                                    >
+                                        {outputs.map((output) => (
+                                            <option key={`to-${output.id}`} value={output.version}>
+                                                إلى v{output.version}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+                        )}
+
                         <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                            <p className="text-xs text-slate-300">النسخة: v{latestOutput.version} • {latestOutput.format}</p>
+                            <p className="text-xs text-slate-300">النسخة: v{selectedOutput.version} • {selectedOutput.format}</p>
                         </div>
 
-                        {latestOutput.quality_issues?.length > 0 && (
+                        {selectedOutput.quality_issues?.length > 0 && (
                             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-1">
                                 <p className="text-xs text-amber-200">ملاحظات الجودة</p>
-                                {latestOutput.quality_issues.map((issue, idx) => (
+                                {selectedOutput.quality_issues.map((issue, idx) => (
                                     <p key={`${issue.code}-${idx}`} className="text-xs text-amber-100">
                                         [{issue.severity}] {issue.message}
                                     </p>
@@ -412,7 +643,18 @@ function ScriptViewerDrawer({
                             </div>
                         )}
 
-                        <StructuredScriptOutput projectType={project?.type} output={latestOutput} />
+                        {diffQuery.data?.data?.diff_lines?.length ? (
+                            <details className="rounded-xl border border-white/10 bg-black/20 p-3">
+                                <summary className="cursor-pointer text-xs text-slate-300">
+                                    مقارنة v{fromVersion} → v{toVersion} ( +{diffQuery.data.data.added_lines} / -{diffQuery.data.data.removed_lines} )
+                                </summary>
+                                <pre className="mt-2 whitespace-pre-wrap text-[11px] text-slate-200 overflow-x-auto max-h-64 overflow-y-auto">
+                                    {diffQuery.data.data.diff_lines.join('\n')}
+                                </pre>
+                            </details>
+                        ) : null}
+
+                        <StructuredScriptOutput projectType={project?.type} output={selectedOutput} />
                     </div>
                 )}
             </div>
