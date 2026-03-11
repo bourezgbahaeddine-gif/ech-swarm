@@ -33,6 +33,8 @@ class EventMemoItem(Base):
     tags = Column(JSON, default=list)
     checklist = Column(JSON, default=list)
     preparation_started_at = Column(DateTime, nullable=True)
+    playbook_key = Column(String(32), nullable=False, default="general")
+    story_id = Column(Integer, ForeignKey("stories.id", ondelete="SET NULL"), nullable=True, index=True)
 
     owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     owner_username = Column(String(64), nullable=True)
@@ -48,4 +50,5 @@ class EventMemoItem(Base):
         Index("ix_event_memo_scope_status_start", "scope", "status", "starts_at"),
         Index("ix_event_memo_status_start", "status", "starts_at"),
         Index("ix_event_memo_owner_status_start", "owner_user_id", "status", "starts_at"),
+        Index("ix_event_memo_story_status_start", "story_id", "status", "starts_at"),
     )

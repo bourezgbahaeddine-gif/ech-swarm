@@ -1308,9 +1308,15 @@ export interface EventMemoItem {
     source_url: string | null;
     tags: string[];
     checklist: string[];
+    playbook_key: string;
+    story_id: number | null;
+    story_key: string | null;
+    story_title: string | null;
     prep_starts_at: string;
     is_due_soon: boolean;
     is_overdue: boolean;
+    readiness_score: number;
+    readiness_breakdown: Record<string, number>;
     preparation_started_at: string | null;
     owner_user_id: number | null;
     owner_username: string | null;
@@ -1356,6 +1362,59 @@ export interface EventMemoImportResult {
     skipped: number;
     errors_count: number;
     errors: Array<{ index: number; error: string }>;
+}
+
+export interface EventActionItem {
+    code: string;
+    severity: 'high' | 'medium' | 'low' | string;
+    title: string;
+    recommendation: string;
+    action: string;
+    event: EventMemoItem;
+}
+
+export interface EventActionItemsResponse {
+    total: number;
+    high: number;
+    medium: number;
+    low: number;
+    items: EventActionItem[];
+}
+
+export interface EventCoverageResponse {
+    event_id: number;
+    story_id: number | null;
+    story_key: string | null;
+    story_title: string | null;
+    coverage_score: number;
+    readiness_score: number;
+    readiness_breakdown: Record<string, number>;
+    metrics: Record<string, number>;
+    timeline: Array<{
+        code: string;
+        label: string;
+        due_at: string | null;
+        is_due: boolean;
+        done: boolean;
+        action: string;
+    }>;
+    next_action: string | null;
+}
+
+export interface EventPlaybookTemplate {
+    key: string;
+    label: string;
+    checklist: string[];
+    timeline: string[];
+}
+
+export interface EventAutomationRunResponse {
+    event_id: number;
+    story_created: boolean;
+    story_linked: boolean;
+    status_updated: boolean;
+    readiness_updated: boolean;
+    actions: string[];
 }
 
 export type DigitalChannel = 'news' | 'tv';
@@ -1896,6 +1955,9 @@ export const memoryApi = {
 export const eventsApi = {
     overview: (params?: { window_days?: number }) =>
         api.get<EventMemoOverview>('/events/overview', { params }),
+    actionItems: (params?: { limit?: number }) =>
+        api.get<EventActionItemsResponse>('/events/action-items', { params }),
+    playbooks: () => api.get<EventPlaybookTemplate[]>('/events/playbooks'),
     reminders: (params?: { limit?: number }) =>
         api.get<EventMemoRemindersResponse>('/events/reminders', { params }),
     list: (params?: {
@@ -1905,11 +1967,14 @@ export const eventsApi = {
         only_active?: boolean;
         from_at?: string;
         to_at?: string;
+        story_id?: number;
         page?: number;
         per_page?: number;
     }) => api.get<EventMemoListResponse>('/events/', { params }),
     upcoming: (params?: { hours?: number; limit?: number }) =>
         api.get<EventMemoItem[]>('/events/upcoming', { params }),
+    coverage: (eventId: number) =>
+        api.get<EventCoverageResponse>(`/events/${eventId}/coverage`),
     create: (payload: {
         scope: EventMemoScope;
         title: string;
@@ -1928,6 +1993,8 @@ export const eventsApi = {
         tags?: string[];
         checklist?: string[];
         owner_user_id?: number | null;
+        playbook_key?: string;
+        story_id?: number | null;
     }) => api.post<EventMemoItem>('/events/', payload),
     update: (eventId: number, payload: Partial<{
         scope: EventMemoScope;
@@ -1948,7 +2015,22 @@ export const eventsApi = {
         checklist: string[];
         owner_user_id: number | null;
         preparation_started_at: string | null;
+        playbook_key: string;
+        story_id: number | null;
     }>) => api.patch<EventMemoItem>(`/events/${eventId}`, payload),
+    linkStory: (
+        eventId: number,
+        payload: {
+            story_id?: number | null;
+            create_if_missing?: boolean;
+            title?: string;
+            summary?: string | null;
+            category?: string | null;
+            geography?: string | null;
+        },
+    ) => api.post<EventMemoItem>(`/events/${eventId}/story`, payload),
+    runAutomation: (eventId: number) =>
+        api.post<EventAutomationRunResponse>(`/events/${eventId}/automation/run`, {}),
     remove: (eventId: number) => api.delete<{ message: string }>(`/events/${eventId}`),
     importDb: (params?: { overwrite?: boolean }) =>
         api.post<EventMemoImportResult>('/events/import-db', null, { params }),
