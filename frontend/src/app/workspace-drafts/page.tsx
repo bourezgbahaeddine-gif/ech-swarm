@@ -732,6 +732,7 @@ function WorkspaceDraftsPageContent() {
     const paletteInputRef = useRef<HTMLInputElement | null>(null);
     const [diffOpen, setDiffOpen] = useState(false);
     const [storyOpen, setStoryOpen] = useState(false);
+    const [storyAdvancedOpen, setStoryAdvancedOpen] = useState(false);
     const [selectedStoryId, setSelectedStoryId] = useState<number | null>(null);
     const [overrideOpen, setOverrideOpen] = useState(false);
     const [overrideNote, setOverrideNote] = useState('');
@@ -1661,6 +1662,35 @@ function WorkspaceDraftsPageContent() {
         }
         return localStoryGaps;
     }, [storyCenter?.gaps, localStoryGaps]);
+    const storyTopSources = useMemo(() => storyTimelineSorted.slice(0, 5), [storyTimelineSorted]);
+    const storyQuickActions = useMemo(() => {
+        return storyGaps.slice(0, 3).map((gap) => {
+            let actionLabel = 'معالجة';
+            let handler: () => void = () => setDetailsOpen(true);
+            if (gap.action && decisionActionHandlers[gap.action]) {
+                const runner = decisionActionHandlers[gap.action];
+                actionLabel = ACTION_SOURCE_LABELS[gap.action] || 'تشغيل';
+                handler = () => {
+                    runner();
+                    setStoryOpen(false);
+                };
+            } else if (gap.id.includes('timeline')) {
+                actionLabel = 'إدراج تسلسل';
+                handler = () => {
+                    insertAutoTimeline();
+                    setStoryOpen(false);
+                };
+            } else if (gap.id.includes('sources')) {
+                actionLabel = 'فتح الأرشيف';
+                handler = () => {
+                    setDetailsOpen(true);
+                    setLeftTab('archive');
+                    setStoryOpen(false);
+                };
+            }
+            return { ...gap, actionLabel, handler };
+        });
+    }, [storyGaps, decisionActionHandlers, setStoryOpen, setDetailsOpen, setLeftTab, insertAutoTimeline]);
     const autoTimelineLines = useMemo(() => {
         const lines = storyTimelineChrono.slice(-8).map((item) => {
             const dateLabel = storyItemDateLabel(item);
@@ -2076,6 +2106,16 @@ function WorkspaceDraftsPageContent() {
             .join('');
         editor.chain().focus().insertContent(html).run();
         setSaveState('unsaved');
+    }
+
+    function insertStoryStarterPack() {
+        if (!editor) return;
+        insertStoryTemplate();
+        storyTopSources.slice(0, 2).forEach((item) => insertStorySummary(item));
+        if (autoTimelineLines.length > 0) {
+            insertAutoTimeline();
+        }
+        setOk('تم إدراج باقة القصة (قالب + أهم المصادر + تسلسل زمني).');
     }
 
     function insertAutoTimeline() {
@@ -3645,23 +3685,30 @@ function WorkspaceDraftsPageContent() {
 
             {storyOpen && (
                 <div className="fixed inset-0 z-[88] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-                    <div className="w-full max-w-3xl max-h-[80vh] overflow-auto rounded-2xl border border-white/10 bg-gray-950 p-4 space-y-4" dir="rtl">
+                    <div className="w-full max-w-2xl max-h-[78vh] overflow-auto rounded-2xl border border-white/10 bg-gray-950 p-4 space-y-3" dir="rtl">
                         <div className="flex items-center justify-between">
                             <div>
                                 <h2 className="text-lg text-white font-semibold">Story Mode</h2>
-                                <p className="text-[11px] text-gray-400">سياق القصة + التسلسل الزمني + فجوات التغطية.</p>
+                                <p className="text-[11px] text-gray-400">أدوات عملية لبناء قصة صحفية بسرعة وبدون تعقيد.</p>
                             </div>
-                            <button onClick={() => setStoryOpen(false)} className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-gray-200">
+                            <button
+                                onClick={() => {
+                                    setStoryAdvancedOpen(false);
+                                    setStoryOpen(false);
+                                }}
+                                className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-gray-200"
+                            >
                                 إغلاق
                             </button>
                         </div>
+
                         <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-300">
-                            <div className="flex flex-wrap items-center gap-2">
-                                <p className="text-gray-400">القصة المختارة</p>
+                            <div className="flex flex-col md:flex-row md:items-center gap-2">
+                                <label className="text-gray-400">القصة:</label>
                                 <select
                                     value={selectedStoryId || ''}
                                     onChange={(e) => setSelectedStoryId(Number(e.target.value) || null)}
-                                    className="min-w-[240px] rounded-lg border border-white/15 bg-white/10 px-2 py-1 text-[11px] text-white"
+                                    className="flex-1 min-w-[220px] rounded-lg border border-white/15 bg-white/10 px-2 py-1 text-[11px] text-white"
                                     disabled={storySuggestionsLoading || storySuggestions.length === 0}
                                 >
                                     {storySuggestions.length === 0 && <option value="">لا توجد قصة مقترحة</option>}
@@ -3671,147 +3718,114 @@ function WorkspaceDraftsPageContent() {
                                         </option>
                                     ))}
                                 </select>
-                                {storyCenterLoading && <span className="text-[11px] text-sky-300">جاري تحميل مركز القصة...</span>}
+                                {storyCenterLoading && <span className="text-[11px] text-sky-300">تحميل...</span>}
                             </div>
-                            {storyCenter?.story ? (
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-2">
-                                    <p>الحالة: {cleanText(storyCenter.story.status || '—')}</p>
-                                    <p>التصنيف: {cleanText(storyCenter.story.category || context?.story_context?.cluster?.category || '—')}</p>
-                                    <p>الجغرافيا: {cleanText(storyCenter.story.geography || context?.story_context?.cluster?.geography || '—')}</p>
+
+                            <div className="grid grid-cols-3 gap-2 mt-2 text-[11px]">
+                                <div className="rounded-lg border border-white/10 bg-white/5 px-2 py-1">
+                                    <p className="text-gray-400">التغطية</p>
+                                    <p className="text-white">{storyHub.coverageScore !== null ? `${storyHub.coverageScore}%` : '—'}</p>
                                 </div>
-                            ) : (
-                                <p className="mt-2">لا توجد قصة مربوطة بعد. اعتمد على سياق العنقود مؤقتاً.</p>
-                            )}
-                        </div>
-                        <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-300 space-y-2">
-                            <div className="flex items-center justify-between gap-2">
-                                <p className="text-gray-400">قالب القصة المعتمد</p>
-                                <button onClick={insertStoryTemplate} className="px-2 py-1 rounded bg-emerald-500/20 text-[10px] text-emerald-100">
-                                    إدراج القالب في المسودة
+                                <div className="rounded-lg border border-white/10 bg-white/5 px-2 py-1">
+                                    <p className="text-gray-400">الفجوات</p>
+                                    <p className="text-white">{storyHub.gapsCount !== null ? storyHub.gapsCount : storyGaps.length}</p>
+                                </div>
+                                <div className="rounded-lg border border-white/10 bg-white/5 px-2 py-1">
+                                    <p className="text-gray-400">المواد</p>
+                                    <p className="text-white">{storyHub.timelineCount}</p>
+                                </div>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2 mt-2">
+                                <button onClick={insertStoryStarterPack} className="px-2 py-1 rounded bg-emerald-500/20 text-[10px] text-emerald-100">
+                                    إدراج باقة القصة
+                                </button>
+                                <button
+                                    onClick={insertAutoTimeline}
+                                    disabled={autoTimelineLines.length === 0}
+                                    className="px-2 py-1 rounded bg-white/10 text-[10px] text-gray-200 disabled:opacity-40"
+                                >
+                                    إدراج التسلسل الزمني
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setDetailsOpen(true);
+                                        setLeftTab('archive');
+                                        setStoryOpen(false);
+                                    }}
+                                    className="px-2 py-1 rounded bg-white/10 text-[10px] text-gray-200"
+                                >
+                                    فتح الأرشيف
                                 </button>
                             </div>
-                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                                {STORY_TEMPLATE_SECTIONS.map((section) => (
-                                    <div key={section.title} className="rounded-lg border border-white/10 bg-white/5 px-2 py-1">
-                                        <p className="text-[10px] text-gray-200">{section.title}</p>
-                                        <p className="text-[10px] text-gray-500 line-clamp-1">{section.hint}</p>
-                                    </div>
-                                ))}
-                            </div>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-300 space-y-2">
-                                <p className="text-gray-400">لوحة القصة</p>
-                                <div className="grid grid-cols-2 gap-2 text-[11px] text-gray-200">
-                                    <div className="rounded-lg border border-white/10 bg-white/5 px-2 py-1">
-                                        <p className="text-[10px] text-gray-400">العناصر المرتبطة</p>
-                                        <p>{storyHub.total}</p>
-                                    </div>
-                                    <div className="rounded-lg border border-white/10 bg-white/5 px-2 py-1">
-                                        <p className="text-[10px] text-gray-400">مصادر متنوعة</p>
-                                        <p>{storyHub.sourcesCount}</p>
-                                    </div>
-                                    <div className="rounded-lg border border-white/10 bg-white/5 px-2 py-1">
-                                        <p className="text-[10px] text-gray-400">الخط الزمني</p>
-                                        <p>{storyHub.timelineCount}</p>
-                                    </div>
-                                    <div className="rounded-lg border border-white/10 bg-white/5 px-2 py-1">
-                                        <p className="text-[10px] text-gray-400">العلاقات</p>
-                                        <p>{storyHub.relationsCount}</p>
-                                    </div>
-                                    <div className="rounded-lg border border-white/10 bg-white/5 px-2 py-1">
-                                        <p className="text-[10px] text-gray-400">تغطية القصة</p>
-                                        <p>{storyHub.coverageScore !== null ? `${storyHub.coverageScore}%` : '—'}</p>
-                                    </div>
-                                    <div className="rounded-lg border border-white/10 bg-white/5 px-2 py-1">
-                                        <p className="text-[10px] text-gray-400">فجوات</p>
-                                        <p>{storyHub.gapsCount !== null ? storyHub.gapsCount : storyGaps.length}</p>
-                                    </div>
-                                </div>
-                                <p className="text-[10px] text-gray-500">آخر تحديث: {storyHub.latestLabel}</p>
-                                {!!storyHub.categories.length && (
-                                    <div className="flex flex-wrap gap-1 text-[10px] text-gray-300">
-                                        {storyHub.categories.map((cat) => (
-                                            <span key={`story-cat-${cat}`} className="rounded bg-white/10 px-2 py-0.5">
-                                                {cat}
-                                            </span>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                            <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-300 space-y-2">
-                                <p className="text-gray-400">الفجوات المحتملة في القصة</p>
-                                {storyGaps.length === 0 ? (
-                                    <p className="text-[11px] text-emerald-200">لا توجد فجوات حرجة ظاهرة الآن.</p>
-                                ) : (
-                                    storyGaps.map((gap) => (
-                                        <div key={gap.id} className={cn('rounded-lg border px-2 py-1 text-[11px] space-y-1', severityStyles(gap.severity).border)}>
+
+                        <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
+                            <p className="text-xs text-gray-400">ماذا ينقص القصة الآن؟</p>
+                            {storyQuickActions.length === 0 ? (
+                                <p className="text-[11px] text-emerald-200">لا توجد فجوات حرجة. القصة متوازنة.</p>
+                            ) : (
+                                storyQuickActions.map((gap) => (
+                                    <div key={gap.id} className={cn('rounded-lg border p-2 text-[11px] space-y-1', severityStyles(gap.severity).border)}>
+                                        <div className="flex items-center justify-between gap-2">
                                             <p className="text-gray-100">{gap.title}</p>
-                                            <p className="text-[10px] text-gray-400">{gap.hint}</p>
+                                            <button
+                                                onClick={gap.handler}
+                                                className="px-2 py-1 rounded bg-white/10 text-[10px] text-gray-200"
+                                            >
+                                                {gap.actionLabel}
+                                            </button>
                                         </div>
-                                    ))
-                                )}
-                            </div>
+                                        <p className="text-[10px] text-gray-400">{gap.hint}</p>
+                                    </div>
+                                ))
+                            )}
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
-                                <div className="flex items-center justify-between gap-2">
-                                    <p className="text-gray-400 text-xs">الخط الزمني</p>
-                                    <button
-                                        onClick={insertAutoTimeline}
-                                        disabled={autoTimelineLines.length === 0}
-                                        className="px-2 py-1 rounded bg-emerald-500/20 text-[10px] text-emerald-100 disabled:opacity-40"
-                                    >
-                                        إدراج تسلسل زمني
-                                    </button>
+
+                        <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
+                            <p className="text-xs text-gray-400">مواد جاهزة للإدراج</p>
+                            {storyTopSources.length === 0 && <p className="text-xs text-gray-500">لا توجد مواد مرتبطة كافية بعد.</p>}
+                            {storyTopSources.map((item: any) => (
+                                <div key={`timeline-${item.id}`} className="rounded-lg border border-white/10 bg-white/5 p-2">
+                                    <p className="text-xs text-gray-200 line-clamp-2">{cleanText(item.title || 'بدون عنوان')}</p>
+                                    <p className="text-[10px] text-gray-500 mt-1">
+                                        {storyItemDateLabel(item)}
+                                        {item.source_name ? ` • ${cleanText(item.source_name)}` : ''}
+                                    </p>
+                                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                                        <button onClick={() => insertStorySummary(item)} className="px-2 py-1 rounded bg-white/10 text-[10px] text-gray-200">إدراج</button>
+                                        <button onClick={() => openStoryInEditor(item)} className="px-2 py-1 rounded bg-emerald-500/15 text-[10px] text-emerald-100">فتح كخبر متابعة</button>
+                                        {item.url && <a href={item.url} target="_blank" rel="noreferrer" className="text-[10px] text-cyan-300 underline decoration-dotted">المصدر</a>}
+                                    </div>
                                 </div>
-                                {autoTimelineLines.length > 0 && (
-                                    <div className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-gray-300">
-                                        {autoTimelineLines.slice(0, 4).map((line, idx) => (
-                                            <p key={`tl-preview-${idx}`} className="line-clamp-1">
-                                                {line}
-                                            </p>
-                                        ))}
-                                    </div>
-                                )}
-                                {storyTimelineSorted.length === 0 && <p className="text-xs text-gray-500">لا توجد مواد زمنية مرتبطة.</p>}
-                                {storyTimelineSorted.map((item: any) => (
-                                    <div key={`timeline-${item.id}`} className="rounded-lg border border-white/10 bg-white/5 p-2">
-                                        <p className="text-xs text-gray-200 line-clamp-2">{cleanText(item.title || 'بدون عنوان')}</p>
-                                        {item.summary && <p className="text-[10px] text-gray-400 mt-1 line-clamp-2">{cleanText(item.summary)}</p>}
-                                        {(item.published_at || item.created_at) && (
-                                            <p className="text-[10px] text-gray-500 mt-1">
-                                                {storyItemDateLabel(item)}
-                                                {item.source_name ? ` • ${cleanText(item.source_name)}` : ''}
-                                            </p>
-                                        )}
-                                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                                            <button onClick={() => insertStorySummary(item)} className="px-2 py-1 rounded bg-white/10 text-[10px] text-gray-200">إدراج ملخص</button>
-                                            <button onClick={() => insertStoryItem(item)} className="px-2 py-1 rounded bg-white/10 text-[10px] text-gray-200">إدراج رابط</button>
-                                            <button onClick={() => openStoryInEditor(item)} className="px-2 py-1 rounded bg-emerald-500/15 text-[10px] text-emerald-100">فتح في المحرر</button>
-                                            {item.url && <a href={item.url} target="_blank" rel="noreferrer" className="text-[10px] text-cyan-300 underline decoration-dotted">فتح المصدر</a>}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                            <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
-                                <p className="text-gray-400 text-xs">علاقات القصة</p>
-                                {(context?.story_context?.relations || []).length === 0 && <p className="text-xs text-gray-500">لا توجد علاقات معرفة بعد.</p>}
-                                {(context?.story_context?.relations || []).map((item: any, idx: number) => (
-                                    <div key={`relation-${idx}`} className="rounded-lg border border-white/10 bg-white/5 p-2">
-                                        <p className="text-xs text-gray-200 line-clamp-2">{cleanText(item.title || 'بدون عنوان')}</p>
-                                        {item.summary && <p className="text-[10px] text-gray-400 mt-1 line-clamp-2">{cleanText(item.summary)}</p>}
-                                        <p className="text-[10px] text-gray-500 mt-1">نوع العلاقة: {cleanText(item.relation_type || '—')} • درجة {Number(item.score || 0).toFixed(1)}</p>
-                                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                                            <button onClick={() => insertStorySummary(item)} className="px-2 py-1 rounded bg-white/10 text-[10px] text-gray-200">إدراج ملخص</button>
-                                            <button onClick={() => insertStoryItem(item)} className="px-2 py-1 rounded bg-white/10 text-[10px] text-gray-200">إدراج رابط</button>
-                                            <button onClick={() => openStoryInEditor(item)} className="px-2 py-1 rounded bg-emerald-500/15 text-[10px] text-emerald-100">فتح في المحرر</button>
-                                            {item.url && <a href={item.url} target="_blank" rel="noreferrer" className="text-[10px] text-cyan-300 underline decoration-dotted">فتح المصدر</a>}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
+                            ))}
                         </div>
+
+                        <div className="pt-1">
+                            <button
+                                onClick={() => setStoryAdvancedOpen((v) => !v)}
+                                className="w-full rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-[11px] text-gray-300"
+                            >
+                                {storyAdvancedOpen ? 'إخفاء التفاصيل المتقدمة' : 'عرض التفاصيل المتقدمة'}
+                            </button>
+                        </div>
+
+                        {storyAdvancedOpen && (
+                            <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
+                                <p className="text-xs text-gray-400">تفاصيل متقدمة</p>
+                                <p className="text-[11px] text-gray-300">العلاقات: {storyHub.relationsCount} • مصادر متنوعة: {storyHub.sourcesCount} • آخر تحديث: {storyHub.latestLabel}</p>
+                                <div className="max-h-44 overflow-auto space-y-1">
+                                    {(context?.story_context?.relations || []).slice(0, 6).map((item: any, idx: number) => (
+                                        <div key={`relation-${idx}`} className="rounded border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-gray-300">
+                                            {cleanText(item.title || 'بدون عنوان')}
+                                        </div>
+                                    ))}
+                                    {(context?.story_context?.relations || []).length === 0 && (
+                                        <p className="text-[10px] text-gray-500">لا توجد علاقات معرفة بعد.</p>
+                                    )}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
