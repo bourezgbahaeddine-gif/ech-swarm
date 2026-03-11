@@ -89,6 +89,7 @@ export default function StoriesPage() {
             .sort((a, b) => storyActionScore(b) - storyActionScore(a))
             .slice(0, 14);
     }, [stories]);
+    const topPriorityStory = storyDeskRows[0] || null;
 
     const storiesNeedingAction = useMemo(
         () => storyDeskRows.filter((story) => storyActionScore(story) >= 45),
@@ -99,6 +100,17 @@ export default function StoriesPage() {
         () => storyDeskRows.filter((story) => storyHoursSinceLastUpdate(story) <= 12),
         [storyDeskRows],
     );
+
+    const {
+        data: topStoryCenterData,
+        isLoading: topStoryCenterLoading,
+    } = useQuery({
+        queryKey: ['stories-top-control-center', topPriorityStory?.id],
+        queryFn: () => storiesApi.controlCenter(topPriorityStory!.id, { timeline_limit: 20 }),
+        enabled: view === 'stories' && Boolean(topPriorityStory?.id),
+        staleTime: 60_000,
+    });
+    const topStoryCenter = topStoryCenterData?.data;
 
     const createStoryFromCluster = useMutation({
         mutationFn: async (payload: { articleId: number }) => {
@@ -224,6 +236,10 @@ export default function StoriesPage() {
                         totalStories={stories.length}
                         needsActionCount={storiesNeedingAction.length}
                         recentlyUpdatedCount={storiesUpdatedRecently.length}
+                        topStory={topPriorityStory}
+                        topStoryGaps={topStoryCenter?.gaps || []}
+                        topStoryCoverage={topStoryCenter?.overview.coverage_score ?? null}
+                        topStoryGapsLoading={topStoryCenterLoading}
                         onOpenStory={(storyId) => setSelectedStoryId(storyId)}
                     />
                 )
@@ -241,22 +257,23 @@ function StoryDeskSection({
     totalStories,
     needsActionCount,
     recentlyUpdatedCount,
+    topStory,
+    topStoryGaps,
+    topStoryCoverage,
+    topStoryGapsLoading,
     onOpenStory,
 }: {
     stories: StoryRecord[];
     totalStories: number;
     needsActionCount: number;
     recentlyUpdatedCount: number;
+    topStory: StoryRecord | null;
+    topStoryGaps: StoryGapItem[];
+    topStoryCoverage: number | null;
+    topStoryGapsLoading: boolean;
     onOpenStory: (storyId: number) => void;
 }) {
     const urgentStories = useMemo(() => stories.filter((story) => storyActionScore(story) >= 45).slice(0, 5), [stories]);
-    const latestStories = useMemo(
-        () =>
-            [...stories]
-                .sort((a, b) => storyTimestamp(b.updated_at || b.created_at) - storyTimestamp(a.updated_at || a.created_at))
-                .slice(0, 5),
-        [stories],
-    );
 
     return (
         <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-4 space-y-4">
@@ -280,47 +297,62 @@ function StoryDeskSection({
                 </div>
             ) : (
                 <>
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
-                            <p className="text-xs font-semibold text-amber-100">تحتاج إجراء الآن</p>
-                            {urgentStories.length === 0 ? (
-                                <p className="text-[11px] text-emerald-100">لا توجد قصص حرجة حاليًا.</p>
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                        <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3 space-y-2">
+                            <p className="text-xs font-semibold text-cyan-100">Overview</p>
+                            {topStory ? (
+                                <>
+                                    <p className="text-sm text-white line-clamp-2">{topStory.title}</p>
+                                    <p className="text-[11px] text-cyan-100/90">{storyNeedsNowReason(topStory)}</p>
+                                    <p className="text-[10px] text-slate-300">
+                                        التغطية: {topStoryCoverage ?? '-'}% • آخر تحديث: {formatRelativeTime(topStory.updated_at || topStory.created_at || '')}
+                                    </p>
+                                </>
                             ) : (
-                                urgentStories.map((story) => (
-                                    <button
-                                        key={`urgent-${story.id}`}
-                                        onClick={() => onOpenStory(story.id)}
-                                        className="w-full text-right rounded-lg border border-white/10 bg-black/20 p-2 hover:border-amber-300/40"
-                                    >
-                                        <p className="text-xs text-white line-clamp-1">{story.title}</p>
-                                        <p className="text-[10px] text-amber-100/90 mt-1">{storyNeedsNowReason(story)}</p>
-                                        <p className="text-[10px] text-slate-400 mt-1">الإجراء المقترح: {storyNextActionLabel(story)}</p>
-                                    </button>
-                                ))
+                                <p className="text-[11px] text-slate-300">لا توجد قصة نشطة الآن.</p>
                             )}
                         </div>
 
-                        <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3 space-y-2">
-                            <p className="text-xs font-semibold text-cyan-100">ما الجديد منذ آخر تحديث</p>
-                            {latestStories.map((story) => (
-                                <button
-                                    key={`latest-${story.id}`}
-                                    onClick={() => onOpenStory(story.id)}
-                                    className="w-full text-right rounded-lg border border-white/10 bg-black/20 p-2 hover:border-cyan-300/40"
-                                >
-                                    <p className="text-xs text-white line-clamp-1">{story.title}</p>
-                                    <p className="text-[10px] text-slate-400 mt-1">
-                                        آخر نشاط: {formatRelativeTime(story.updated_at || story.created_at || '')}
-                                    </p>
-                                </button>
-                            ))}
+                        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
+                            <p className="text-xs font-semibold text-amber-100">What&apos;s Missing</p>
+                            {topStoryGapsLoading ? (
+                                <p className="text-[11px] text-slate-300">جاري تحليل الفجوات...</p>
+                            ) : topStoryGaps.length > 0 ? (
+                                topStoryGaps.slice(0, 3).map((gap) => (
+                                    <div key={`desk-gap-${gap.code}`} className="rounded-lg border border-white/10 bg-black/20 p-2">
+                                        <p className="text-[11px] text-white">{gap.title}</p>
+                                        <p className="text-[10px] text-slate-400 mt-1">{mapGapTaskLabel(gap)}</p>
+                                    </div>
+                                ))
+                            ) : (
+                                <p className="text-[11px] text-emerald-100">لا توجد فجوات حرجة في القصة الأولى.</p>
+                            )}
+                        </div>
+
+                        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 space-y-2">
+                            <p className="text-xs font-semibold text-emerald-100">Next Actions</p>
+                            {topStory ? (
+                                <>
+                                    <p className="text-[11px] text-emerald-100/90">الإجراء التالي: {storyNextActionLabel(topStory)}</p>
+                                    <button
+                                        type="button"
+                                        onClick={() => onOpenStory(topStory.id)}
+                                        className="inline-flex items-center gap-1 rounded-lg border border-emerald-300/40 bg-emerald-500/20 px-2.5 py-1.5 text-[11px] text-emerald-100"
+                                    >
+                                        فتح لوحة القرار
+                                        <ArrowLeftCircle className="w-3 h-3" />
+                                    </button>
+                                </>
+                            ) : (
+                                <p className="text-[11px] text-slate-300">لا توجد إجراءات حالية.</p>
+                            )}
                         </div>
                     </div>
 
                     <div className="rounded-xl border border-white/10 bg-black/20 p-2">
-                        <p className="text-xs text-slate-300 mb-2">قائمة العمل (أعلى القصص أولوية)</p>
+                        <p className="text-xs text-slate-300 mb-2">قصص تحتاج إجراء الآن (حتى 5)</p>
                         <div className="space-y-2">
-                            {stories.slice(0, 8).map((story) => (
+                            {urgentStories.length > 0 ? urgentStories.map((story) => (
                                 <div
                                     key={`desk-row-${story.id}`}
                                     className="rounded-lg border border-white/10 bg-white/5 p-2 flex items-center justify-between gap-3"
@@ -330,19 +362,18 @@ function StoryDeskSection({
                                         <p className="text-sm text-white line-clamp-1">{story.title}</p>
                                         <p className="text-[10px] text-slate-400 line-clamp-1">{story.summary || storyNeedsNowReason(story)}</p>
                                     </div>
-                                    <div className="shrink-0 text-left">
-                                        <p className="text-[10px] text-slate-400">{storyNextActionLabel(story)}</p>
-                                        <button
-                                            type="button"
-                                            onClick={() => onOpenStory(story.id)}
-                                            className="mt-1 inline-flex items-center gap-1 rounded-lg border border-cyan-400/40 bg-cyan-500/15 px-2 py-1 text-[10px] text-cyan-100"
-                                        >
-                                            فتح لوحة القرار
-                                            <ArrowLeftCircle className="w-3 h-3" />
-                                        </button>
-                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => onOpenStory(story.id)}
+                                        className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-cyan-400/40 bg-cyan-500/15 px-2 py-1 text-[10px] text-cyan-100"
+                                    >
+                                        فتح
+                                        <ArrowLeftCircle className="w-3 h-3" />
+                                    </button>
                                 </div>
-                            ))}
+                            )) : (
+                                <p className="text-[11px] text-emerald-100">لا توجد قصص حرجة حاليًا.</p>
+                            )}
                         </div>
                     </div>
                 </>
@@ -600,6 +631,7 @@ function StoryControlCenterDrawer({ storyId, onClose }: { storyId: number; onClo
     const topMaterials = useMemo(() => timeline.slice(0, 5), [timeline]);
     const taskGaps = useMemo(() => (center?.gaps || []).slice(0, 3), [center?.gaps]);
     const nextBestTask = useMemo(() => (taskGaps.length > 0 ? taskGaps[0] : null), [taskGaps]);
+    const storyMode = useMemo(() => (center ? classifyStoryType(center) : null), [center]);
 
     const createStoryDraft = useMutation({
         mutationFn: async (mode: 'followup' | 'analysis' | 'background') => {
@@ -699,6 +731,9 @@ function StoryControlCenterDrawer({ storyId, onClose }: { storyId: number; onClo
                             <p className="text-[11px] text-slate-400 mt-2">
                                 الحالة: {center.story.status} • الأولوية: {center.story.priority} • آخر نشاط:{' '}
                                 {center.overview.last_activity_at ? formatRelativeTime(center.overview.last_activity_at) : 'غير متاح'}
+                            </p>
+                            <p className="text-[11px] text-slate-400 mt-1">
+                                نوع القصة: {storyMode?.label || 'غير محدد'} • لماذا مهمة الآن: {storyMode?.whyNow || 'نشاط تحريري مستمر'}
                             </p>
                         </section>
 
@@ -878,6 +913,39 @@ function storyTimestamp(value?: string | null) {
     if (!value) return 0;
     const ts = new Date(value).getTime();
     return Number.isFinite(ts) ? ts : 0;
+}
+
+function classifyStoryType(center: StoryControlCenterResponse): { key: string; label: string; whyNow: string } {
+    const hoursSinceActivity = center.overview.last_activity_at
+        ? Math.max(0, (Date.now() - storyTimestamp(center.overview.last_activity_at)) / 3_600_000)
+        : 999;
+
+    if (hoursSinceActivity <= 2 && center.overview.items_total <= 6) {
+        return {
+            key: 'breaking_expansion',
+            label: 'Breaking Expansion',
+            whyNow: 'تحديثات سريعة خلال الساعات الأخيرة',
+        };
+    }
+    if (center.overview.items_total >= 10 && center.overview.coverage_score < 70) {
+        return {
+            key: 'running_story',
+            label: 'Running Story',
+            whyNow: 'القصة ممتدة وتحتاج سد فجوات التغطية',
+        };
+    }
+    if (center.overview.coverage_score >= 75 && center.overview.gaps_count <= 1) {
+        return {
+            key: 'background_file',
+            label: 'Background File',
+            whyNow: 'التغطية مكتملة نسبيًا وتصلح كمرجع',
+        };
+    }
+    return {
+        key: 'issue_tracking',
+        label: 'Issue Tracking',
+        whyNow: 'قضية مستمرة تحتاج متابعة دورية',
+    };
 }
 
 function storyHoursSinceLastUpdate(story: StoryRecord) {
