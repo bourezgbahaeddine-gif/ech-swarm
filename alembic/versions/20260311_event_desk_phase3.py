@@ -1,7 +1,7 @@
 """event desk phase 1-3 schema
 
 Revision ID: 20260311_event_desk_phase3
-Revises: 20260308_merge_archive_and_digital_heads
+Revises: 20260308_merge_archive_heads
 Create Date: 2026-03-11 11:30:00
 """
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 revision = "20260311_event_desk_phase3"
-down_revision = "20260308_merge_archive_and_digital_heads"
+down_revision = "20260308_merge_archive_heads"
 branch_labels = None
 depends_on = None
 
