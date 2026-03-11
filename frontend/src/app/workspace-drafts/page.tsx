@@ -33,11 +33,14 @@ import {
     jobsApi,
     msiApi,
     simApi,
+    storiesApi,
     sourcesApi,
     type ClaimOverrideInput,
     type ArchiveSearchItem,
     type FactCheckClaim,
     type Source,
+    type StoryControlCenterResponse,
+    type StorySuggestion,
     type WorkspacePublishReadiness,
 } from '@/lib/api';
 import { constitutionApi } from '@/lib/constitution-api';
@@ -89,6 +92,7 @@ type StoryGap = {
     severity: DecisionSeverity;
     action?: DecisionActionId;
 };
+type StoryCenterTimelineItem = StoryControlCenterResponse['timeline'][number];
 type StoryContextItem = {
     id?: number;
     title?: string;
@@ -478,6 +482,13 @@ function severityLabel(sev: DecisionSeverity): string {
     return sev === 'critical' ? 'حرج' : sev === 'high' ? 'عاجل' : sev === 'medium' ? 'متوسط' : 'خفيف';
 }
 
+function mapStoryGapSeverity(severity?: string | null): DecisionSeverity {
+    const value = String(severity || '').toLowerCase();
+    if (value === 'high' || value === 'critical') return 'high';
+    if (value === 'medium' || value === 'warn') return 'medium';
+    return 'low';
+}
+
 function impactBySeverity(sev: DecisionSeverity): string {
     switch (sev) {
         case 'critical':
@@ -721,6 +732,7 @@ function WorkspaceDraftsPageContent() {
     const paletteInputRef = useRef<HTMLInputElement | null>(null);
     const [diffOpen, setDiffOpen] = useState(false);
     const [storyOpen, setStoryOpen] = useState(false);
+    const [selectedStoryId, setSelectedStoryId] = useState<number | null>(null);
     const [overrideOpen, setOverrideOpen] = useState(false);
     const [overrideNote, setOverrideNote] = useState('');
     const lastSavedRef = useRef<{ title: string; body: string }>({ title: '', body: '' });
@@ -821,6 +833,31 @@ function WorkspaceDraftsPageContent() {
     const context = contextData?.data;
     const versions = versionsData?.data || [];
     const constitutionTips = constitutionTipsData?.data?.tips || [];
+    const articleContextId = context?.article?.id || null;
+    const { data: storySuggestionsData, isLoading: storySuggestionsLoading } = useQuery({
+        queryKey: ['smart-editor-story-suggest', articleContextId],
+        queryFn: () => storiesApi.suggest(articleContextId!, { limit: 8 }),
+        enabled: Boolean(articleContextId),
+        staleTime: 1000 * 60 * 2,
+    });
+    const storySuggestions = (storySuggestionsData?.data || []) as StorySuggestion[];
+    useEffect(() => {
+        if (!storySuggestions.length) {
+            setSelectedStoryId(null);
+            return;
+        }
+        if (!selectedStoryId || !storySuggestions.some((item) => item.story_id === selectedStoryId)) {
+            setSelectedStoryId(storySuggestions[0].story_id);
+        }
+    }, [storySuggestions, selectedStoryId]);
+
+    const { data: storyCenterData, isLoading: storyCenterLoading } = useQuery({
+        queryKey: ['smart-editor-story-center', selectedStoryId],
+        queryFn: () => storiesApi.controlCenter(selectedStoryId!, { timeline_limit: 40 }),
+        enabled: Boolean(selectedStoryId),
+    });
+    const storyCenter = storyCenterData?.data as StoryControlCenterResponse | undefined;
+
     const { data: msiTopDailyData } = useQuery({
         queryKey: ['smart-editor-msi-top-daily'],
         queryFn: () => msiApi.top({ mode: 'daily', limit: 10 }),
@@ -1496,7 +1533,28 @@ function WorkspaceDraftsPageContent() {
     }, [readiness, claims, quality]);
 
     const bodyText = useMemo(() => htmlToReadableText(bodyHtml || ''), [bodyHtml]);
-    const storyTimeline = useMemo(() => (context?.story_context?.timeline || []) as StoryContextItem[], [context?.story_context?.timeline]);
+    const storyTimelineFromContext = useMemo(
+        () => (context?.story_context?.timeline || []) as StoryContextItem[],
+        [context?.story_context?.timeline]
+    );
+    const storyTimelineFromCenter = useMemo(() => {
+        const centerTimeline = (storyCenter?.timeline || []) as StoryCenterTimelineItem[];
+        return centerTimeline.map((item) => ({
+            id: item.id,
+            title: item.title,
+            summary: null,
+            url: item.url || null,
+            source_name: item.source_name || null,
+            created_at: item.created_at || null,
+            published_at: item.created_at || null,
+            category: null,
+            status: item.status || null,
+        })) as StoryContextItem[];
+    }, [storyCenter?.timeline]);
+    const storyTimeline = useMemo(
+        () => (storyTimelineFromCenter.length ? storyTimelineFromCenter : storyTimelineFromContext),
+        [storyTimelineFromCenter, storyTimelineFromContext]
+    );
     const storyRelations = useMemo(() => (context?.story_context?.relations || []) as StoryContextItem[], [context?.story_context?.relations]);
     const storyItems = useMemo(() => [...storyTimeline, ...storyRelations], [storyTimeline, storyRelations]);
     const storyTimelineSorted = useMemo(() => {
@@ -1528,9 +1586,11 @@ function WorkspaceDraftsPageContent() {
             sourcesCount: sources.size,
             categories: Array.from(categories).slice(0, 4),
             latestLabel,
+            coverageScore: storyCenter?.overview?.coverage_score ?? null,
+            gapsCount: storyCenter?.overview?.gaps_count ?? null,
         };
-    }, [storyItems, storyTimeline.length, storyRelations.length]);
-    const storyGaps = useMemo<StoryGap[]>(() => {
+    }, [storyItems, storyTimeline.length, storyRelations.length, storyCenter?.overview?.coverage_score, storyCenter?.overview?.gaps_count]);
+    const localStoryGaps = useMemo<StoryGap[]>(() => {
         const gaps: StoryGap[] = [];
         const text = `${bodyText} ${cleanText(context?.article?.summary || '')} ${cleanText(context?.article?.original_content || '')}`.trim();
         const hasNumbers = /\d/.test(text);
@@ -1589,6 +1649,18 @@ function WorkspaceDraftsPageContent() {
         }
         return gaps.slice(0, 5);
     }, [bodyText, context?.article?.summary, context?.article?.original_content, storyItems, storyTimeline.length, claims]);
+    const storyGaps = useMemo<StoryGap[]>(() => {
+        const centerGaps = storyCenter?.gaps || [];
+        if (centerGaps.length > 0) {
+            return centerGaps.slice(0, 6).map((gap, idx) => ({
+                id: `${gap.code || 'story_gap'}_${idx}`,
+                title: cleanText(gap.title || 'فجوة تغطية'),
+                hint: cleanText(gap.recommendation || 'أضف مادة تغطي هذه الفجوة.'),
+                severity: mapStoryGapSeverity(gap.severity),
+            }));
+        }
+        return localStoryGaps;
+    }, [storyCenter?.gaps, localStoryGaps]);
     const autoTimelineLines = useMemo(() => {
         const lines = storyTimelineChrono.slice(-8).map((item) => {
             const dateLabel = storyItemDateLabel(item);
@@ -3466,7 +3538,12 @@ function WorkspaceDraftsPageContent() {
                                 <button onClick={() => runDiff.mutate()} className="px-2 py-1 rounded bg-white/10 text-xs">فرق</button>
                             </div>
                             <pre className="max-h-36 overflow-auto text-[11px] text-gray-200 whitespace-pre-wrap mt-2" dir="ltr">{diffView || 'لا يوجد فرق معروض بعد.'}</pre>
-                            <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-xs text-gray-300"><p className="text-gray-400 mb-1">الخط الزمني المرتبط</p>{(context?.story_context?.timeline || []).slice(0, 5).map((item: any) => <p key={item.id}>- {cleanText(item.title || 'بدون عنوان')}</p>)}</div>
+                            <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-xs text-gray-300">
+                                <p className="text-gray-400 mb-1">الخط الزمني المرتبط</p>
+                                {storyTimelineSorted.slice(0, 5).map((item: any) => (
+                                    <p key={item.id}>- {cleanText(item.title || 'بدون عنوان')}</p>
+                                ))}
+                            </div>
                             <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-2 text-xs text-cyan-100 space-y-1">
                                 <p className="text-cyan-200">تلميحات الدستور أثناء التحرير</p>
                                 {(constitutionTips || []).slice(0, 4).map((tip: string, idx: number) => (
@@ -3572,22 +3649,38 @@ function WorkspaceDraftsPageContent() {
                         <div className="flex items-center justify-between">
                             <div>
                                 <h2 className="text-lg text-white font-semibold">Story Mode</h2>
-                                <p className="text-[11px] text-gray-400">السياق الكامل للقصة المرتبطة بهذا الخبر.</p>
+                                <p className="text-[11px] text-gray-400">سياق القصة + التسلسل الزمني + فجوات التغطية.</p>
                             </div>
                             <button onClick={() => setStoryOpen(false)} className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-gray-200">
                                 إغلاق
                             </button>
                         </div>
                         <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-300">
-                            <p className="text-gray-400 mb-1">عنقود القصة</p>
-                            {context?.story_context?.cluster ? (
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                                    <p>التصنيف: {cleanText(context.story_context.cluster.category || '—')}</p>
-                                    <p>الوسم: {cleanText(context.story_context.cluster.label || '—')}</p>
-                                    <p>الجغرافيا: {cleanText(context.story_context.cluster.geography || '—')}</p>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-gray-400">القصة المختارة</p>
+                                <select
+                                    value={selectedStoryId || ''}
+                                    onChange={(e) => setSelectedStoryId(Number(e.target.value) || null)}
+                                    className="min-w-[240px] rounded-lg border border-white/15 bg-white/10 px-2 py-1 text-[11px] text-white"
+                                    disabled={storySuggestionsLoading || storySuggestions.length === 0}
+                                >
+                                    {storySuggestions.length === 0 && <option value="">لا توجد قصة مقترحة</option>}
+                                    {storySuggestions.map((item) => (
+                                        <option key={`story-suggest-${item.story_id}`} value={item.story_id}>
+                                            {item.story_key} — {cleanText(item.title)}
+                                        </option>
+                                    ))}
+                                </select>
+                                {storyCenterLoading && <span className="text-[11px] text-sky-300">جاري تحميل مركز القصة...</span>}
+                            </div>
+                            {storyCenter?.story ? (
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-2">
+                                    <p>الحالة: {cleanText(storyCenter.story.status || '—')}</p>
+                                    <p>التصنيف: {cleanText(storyCenter.story.category || context?.story_context?.cluster?.category || '—')}</p>
+                                    <p>الجغرافيا: {cleanText(storyCenter.story.geography || context?.story_context?.cluster?.geography || '—')}</p>
                                 </div>
                             ) : (
-                                <p>لا يوجد عنقود مرتبط بعد.</p>
+                                <p className="mt-2">لا توجد قصة مربوطة بعد. اعتمد على سياق العنقود مؤقتاً.</p>
                             )}
                         </div>
                         <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-300 space-y-2">
@@ -3625,6 +3718,14 @@ function WorkspaceDraftsPageContent() {
                                     <div className="rounded-lg border border-white/10 bg-white/5 px-2 py-1">
                                         <p className="text-[10px] text-gray-400">العلاقات</p>
                                         <p>{storyHub.relationsCount}</p>
+                                    </div>
+                                    <div className="rounded-lg border border-white/10 bg-white/5 px-2 py-1">
+                                        <p className="text-[10px] text-gray-400">تغطية القصة</p>
+                                        <p>{storyHub.coverageScore !== null ? `${storyHub.coverageScore}%` : '—'}</p>
+                                    </div>
+                                    <div className="rounded-lg border border-white/10 bg-white/5 px-2 py-1">
+                                        <p className="text-[10px] text-gray-400">فجوات</p>
+                                        <p>{storyHub.gapsCount !== null ? storyHub.gapsCount : storyGaps.length}</p>
                                     </div>
                                 </div>
                                 <p className="text-[10px] text-gray-500">آخر تحديث: {storyHub.latestLabel}</p>
