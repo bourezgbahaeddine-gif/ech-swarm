@@ -27,6 +27,7 @@ import {
 import { cn, formatRelativeTime } from '@/lib/utils';
 
 export default function StoriesPage() {
+    const router = useRouter();
     const [selectedStoryId, setSelectedStoryId] = useState<number | null>(null);
     const [clusterHours, setClusterHours] = useState<number>(24);
     const [clusterMinSize, setClusterMinSize] = useState<number>(2);
@@ -111,6 +112,12 @@ export default function StoriesPage() {
         staleTime: 60_000,
     });
     const topStoryCenter = topStoryCenterData?.data;
+    const topStoryNextGap = useMemo(() => (topStoryCenter?.gaps || [])[0] || null, [topStoryCenter?.gaps]);
+    const topStoryNextMode = useMemo<'followup' | 'analysis' | 'background'>(() => {
+        if (!topStoryNextGap) return 'followup';
+        const mapped = mapGapToTask(topStoryNextGap);
+        return mapped === 'source' ? 'followup' : mapped;
+    }, [topStoryNextGap]);
 
     const createStoryFromCluster = useMutation({
         mutationFn: async (payload: { articleId: number }) => {
@@ -129,6 +136,31 @@ export default function StoriesPage() {
             }
         },
         onError: () => setActionErr('تعذر إنشاء قصة من هذه المجموعة.'),
+    });
+
+    const runTopStoryNextAction = useMutation({
+        mutationFn: async () => {
+            if (!topStoryCenter) throw new Error('top_story_not_ready');
+            return editorialApi.createManualWorkspaceDraft({
+                title: buildStoryDraftTitle(topStoryCenter.story.title, topStoryNextMode),
+                body: buildStoryDraftBody(topStoryCenter, topStoryNextMode),
+                summary: `مسودة ${storyDraftModeLabel(topStoryNextMode)} مرتبطة بالقصة ${topStoryCenter.story.story_key}`,
+                category: topStoryCenter.story.category || undefined,
+                urgency: 'medium',
+                source_action: `story_next_${topStoryNextMode}`,
+            });
+        },
+        onSuccess: (res) => {
+            const workId = res.data?.work_id;
+            if (!workId) {
+                setActionErr('تم إنشاء المسودة لكن بدون Work ID.');
+                return;
+            }
+            setActionErr(null);
+            setActionMsg(`تم تنفيذ الإجراء التالي: ${storyDraftModeLabel(topStoryNextMode)} وفتح المسودة.`);
+            router.push(`/workspace-drafts?work_id=${encodeURIComponent(workId)}`);
+        },
+        onError: () => setActionErr('تعذر تنفيذ الإجراء التالي للقصة الآن.'),
     });
 
     return (
@@ -240,6 +272,9 @@ export default function StoriesPage() {
                         topStoryGaps={topStoryCenter?.gaps || []}
                         topStoryCoverage={topStoryCenter?.overview.coverage_score ?? null}
                         topStoryGapsLoading={topStoryCenterLoading}
+                        topStoryNextActionLabel={storyDraftModeLabel(topStoryNextMode)}
+                        nextActionPending={runTopStoryNextAction.isPending}
+                        onRunNextAction={() => runTopStoryNextAction.mutate()}
                         onOpenStory={(storyId) => setSelectedStoryId(storyId)}
                     />
                 )
@@ -261,6 +296,9 @@ function StoryDeskSection({
     topStoryGaps,
     topStoryCoverage,
     topStoryGapsLoading,
+    topStoryNextActionLabel,
+    nextActionPending,
+    onRunNextAction,
     onOpenStory,
 }: {
     stories: StoryRecord[];
@@ -271,6 +309,9 @@ function StoryDeskSection({
     topStoryGaps: StoryGapItem[];
     topStoryCoverage: number | null;
     topStoryGapsLoading: boolean;
+    topStoryNextActionLabel: string;
+    nextActionPending: boolean;
+    onRunNextAction: () => void;
     onOpenStory: (storyId: number) => void;
 }) {
     const urgentStories = useMemo(() => stories.filter((story) => storyActionScore(story) >= 45).slice(0, 5), [stories]);
@@ -333,15 +374,26 @@ function StoryDeskSection({
                             <p className="text-xs font-semibold text-emerald-100">Next Actions</p>
                             {topStory ? (
                                 <>
-                                    <p className="text-[11px] text-emerald-100/90">الإجراء التالي: {storyNextActionLabel(topStory)}</p>
-                                    <button
-                                        type="button"
-                                        onClick={() => onOpenStory(topStory.id)}
-                                        className="inline-flex items-center gap-1 rounded-lg border border-emerald-300/40 bg-emerald-500/20 px-2.5 py-1.5 text-[11px] text-emerald-100"
-                                    >
-                                        فتح لوحة القرار
-                                        <ArrowLeftCircle className="w-3 h-3" />
-                                    </button>
+                                    <p className="text-[11px] text-emerald-100/90">الإجراء المقترح: {topStoryNextActionLabel}</p>
+                                    <div className="flex flex-wrap gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={onRunNextAction}
+                                            disabled={nextActionPending}
+                                            className="inline-flex items-center gap-1 rounded-lg border border-emerald-300/40 bg-emerald-500/25 px-2.5 py-1.5 text-[11px] text-emerald-100 disabled:opacity-50"
+                                        >
+                                            {nextActionPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                                            نفّذ الإجراء الآن
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => onOpenStory(topStory.id)}
+                                            className="inline-flex items-center gap-1 rounded-lg border border-emerald-300/40 bg-emerald-500/20 px-2.5 py-1.5 text-[11px] text-emerald-100"
+                                        >
+                                            فتح لوحة القرار
+                                            <ArrowLeftCircle className="w-3 h-3" />
+                                        </button>
+                                    </div>
                                 </>
                             ) : (
                                 <p className="text-[11px] text-slate-300">لا توجد إجراءات حالية.</p>
@@ -996,6 +1048,12 @@ function mapGapTaskLabel(gap: StoryGapItem) {
     if (task === 'background') return 'إضافة خلفية';
     if (task === 'source') return 'فتح مصدر';
     return 'إنشاء متابعة';
+}
+
+function storyDraftModeLabel(mode: 'followup' | 'analysis' | 'background') {
+    if (mode === 'analysis') return 'تحليل';
+    if (mode === 'background') return 'خلفية';
+    return 'متابعة';
 }
 
 function buildStoryDraftTitle(storyTitle: string, mode: 'followup' | 'analysis' | 'background') {
