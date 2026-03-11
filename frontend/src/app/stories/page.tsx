@@ -1,8 +1,8 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { AlertCircle, BookOpenText, RefreshCw } from 'lucide-react';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { AlertCircle, BookOpenText, RefreshCw, FolderPlus, ChevronDown, ChevronUp } from 'lucide-react';
 
 import { storiesApi, type StoryClusterRecord, type StoryDossierResponse } from '@/lib/api';
 import { cn, formatRelativeTime } from '@/lib/utils';
@@ -11,6 +11,11 @@ export default function StoriesPage() {
     const [selectedStoryId, setSelectedStoryId] = useState<number | null>(null);
     const [clusterHours, setClusterHours] = useState<number>(24);
     const [clusterMinSize, setClusterMinSize] = useState<number>(2);
+    const [view, setView] = useState<'stories' | 'clusters'>('stories');
+    const [clusterQuery, setClusterQuery] = useState<string>('');
+    const [expandedClusters, setExpandedClusters] = useState<Set<number>>(new Set());
+    const [actionMsg, setActionMsg] = useState<string | null>(null);
+    const [actionErr, setActionErr] = useState<string | null>(null);
 
     const { data, isLoading, refetch, isRefetching, error } = useQuery({
         queryKey: ['stories-page-list'],
@@ -30,6 +35,43 @@ export default function StoriesPage() {
     const stories = useMemo(() => data?.data || [], [data?.data]);
     const clusterReport = clustersData?.data;
     const clusterItems = clusterReport?.items || [];
+    const filteredClusters = useMemo(() => {
+        const query = clusterQuery.trim().toLowerCase();
+        if (!query) return clusterItems;
+        return clusterItems.filter((cluster) => {
+            const haystack = [
+                cluster.label,
+                cluster.cluster_key,
+                cluster.category,
+                cluster.geography,
+                ...cluster.top_entities.map((entity) => entity.entity),
+                ...cluster.top_topics.map((topic) => topic.topic),
+                ...cluster.members.map((member) => member.title),
+            ]
+                .filter(Boolean)
+                .join(' ')
+                .toLowerCase();
+            return haystack.includes(query);
+        });
+    }, [clusterItems, clusterQuery]);
+
+    const createStoryFromCluster = useMutation({
+        mutationFn: async (payload: { clusterId: number; articleId: number }) => {
+            setActionErr(null);
+            setActionMsg(null);
+            return storiesApi.createFromArticle(payload.articleId, { reuse: true });
+        },
+        onSuccess: (res) => {
+            const story = res.data?.story;
+            if (story?.id) {
+                setSelectedStoryId(story.id);
+                setActionMsg(`Linked to story ${story.story_key}.`);
+            } else {
+                setActionMsg('Story created and linked.');
+            }
+        },
+        onError: () => setActionErr('Failed to create story from this cluster.'),
+    });
 
     return (
         <div className="space-y-4" dir="rtl">
@@ -65,49 +107,105 @@ export default function StoriesPage() {
                 </div>
             )}
 
-            <StoryClustersSection
-                loading={clustersLoading}
-                report={clusterReport}
-                items={clusterItems}
-                hours={clusterHours}
-                minSize={clusterMinSize}
-                onChangeHours={setClusterHours}
-                onChangeMinSize={setClusterMinSize}
-            />
 
-            {isLoading ? (
-                <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-6 text-slate-400">جاري التحميل...</div>
-            ) : (
-                <div className="grid grid-cols-1 gap-3">
-                    {stories.length === 0 && (
-                        <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-6 text-slate-400">
-                            لا توجد قصص بعد. أنشئ قصة من صفحة الخبر باستخدام زر &quot;إنشاء قصة&quot;.
-                        </div>
-                    )}
-                    {stories.map((story) => (
-                        <button
-                            key={story.id}
-                            type="button"
-                            onClick={() => setSelectedStoryId(story.id)}
-                            className="text-right rounded-2xl border border-white/10 bg-slate-900/40 p-4 hover:border-cyan-400/40 hover:bg-slate-900/65 transition-colors"
-                        >
-                            <div className="flex items-center justify-between gap-3">
-                                <div>
-                                    <p className="text-sm text-cyan-300 font-medium">{story.story_key}</p>
-                                    <h2 className="text-lg font-semibold text-white mt-1">{story.title}</h2>
-                                    <p className="text-xs text-slate-400 mt-2 line-clamp-2">{story.summary || 'بدون ملخص'}</p>
-                                </div>
-                                <div className="text-left shrink-0">
-                                    <p className="text-xs text-slate-300">{story.status}</p>
-                                    <p className="text-[11px] text-slate-500 mt-1">{formatRelativeTime(story.updated_at || story.created_at || '')}</p>
-                                </div>
-                            </div>
-                        </button>
-                    ))}
+            {actionMsg && (
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs text-emerald-100">
+                    {actionMsg}
+                </div>
+            )}
+            {actionErr && (
+                <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs text-rose-100">
+                    {actionErr}
                 </div>
             )}
 
-            {selectedStoryId && (
+            <div className="flex items-center gap-2">
+                <button
+                    type="button"
+                    onClick={() => setView('stories')}
+                    className={cn(
+                        'rounded-lg border px-3 py-1.5 text-xs transition-colors',
+                        view === 'stories'
+                            ? 'border-cyan-400/60 bg-cyan-500/20 text-cyan-100'
+                            : 'border-white/10 bg-white/5 text-slate-300',
+                    )}
+                >
+                    القصص المنشأة
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setView('clusters')}
+                    className={cn(
+                        'rounded-lg border px-3 py-1.5 text-xs transition-colors',
+                        view === 'clusters'
+                            ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-100'
+                            : 'border-white/10 bg-white/5 text-slate-300',
+                    )}
+                >
+                    مجموعات مقترحة
+                </button>
+            </div>
+            {view === 'clusters' && (
+                <StoryClustersSection
+                    loading={clustersLoading}
+                    report={clusterReport}
+                    items={filteredClusters}
+                    hours={clusterHours}
+                    minSize={clusterMinSize}
+                    query={clusterQuery}
+                    onQueryChange={setClusterQuery}
+                    onChangeHours={setClusterHours}
+                    onChangeMinSize={setClusterMinSize}
+                    expandedClusters={expandedClusters}
+                    onToggleCluster={(clusterId) => {
+                        setExpandedClusters((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(clusterId)) {
+                                next.delete(clusterId);
+                            } else {
+                                next.add(clusterId);
+                            }
+                            return next;
+                        });
+                    }}
+                    onCreateStory={(clusterId, articleId) => createStoryFromCluster.mutate({ clusterId, articleId })}
+                    isCreatingStory={createStoryFromCluster.isPending}
+                />
+            )}
+            {view === 'stories' && (
+                isLoading ? (
+                    <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-6 text-slate-400">Loading...</div>
+                ) : (
+                    <div className="grid grid-cols-1 gap-3">
+                        {stories.length === 0 && (
+                            <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-6 text-slate-400">No stories yet. Create one from the news page.</div>
+                        )}
+                        {stories.map((story) => (
+                            <button
+                                key={story.id}
+                                type="button"
+                                onClick={() => setSelectedStoryId(story.id)}
+                                className="text-right rounded-2xl border border-white/10 bg-slate-900/40 p-4 hover:border-cyan-400/40 hover:bg-slate-900/65 transition-colors"
+                            >
+                                <div className="flex items-center justify-between gap-3">
+                                    <div>
+                                        <p className="text-sm text-cyan-300 font-medium">{story.story_key}</p>
+                                        <h2 className="text-lg font-semibold text-white mt-1">{story.title}</h2>
+                                        <p className="text-xs text-slate-400 mt-2 line-clamp-2">{story.summary || 'No summary'}</p>
+                                    </div>
+                                    <div className="text-left shrink-0">
+                                        <p className="text-xs text-slate-300">{story.status}</p>
+                                        <p className="text-[11px] text-slate-500 mt-1">{formatRelativeTime(story.updated_at || story.created_at || '')}</p>
+                                    </div>
+                                </div>
+                            </button>
+                        ))}
+                    </div>
+                )
+            )}
+
+            {selectedStoryId &&
+ (
                 <StoryDossierDrawer storyId={selectedStoryId} onClose={() => setSelectedStoryId(null)} />
             )}
         </div>
@@ -120,8 +218,14 @@ function StoryClustersSection({
     items,
     hours,
     minSize,
+    query,
+    onQueryChange,
     onChangeHours,
     onChangeMinSize,
+    expandedClusters,
+    onToggleCluster,
+    onCreateStory,
+    isCreatingStory,
 }: {
     loading: boolean;
     report?: {
@@ -134,14 +238,29 @@ function StoryClustersSection({
     items: StoryClusterRecord[];
     hours: number;
     minSize: number;
+    query: string;
+    onQueryChange: (value: string) => void;
     onChangeHours: (value: number) => void;
     onChangeMinSize: (value: number) => void;
+    expandedClusters: Set<number>;
+    onToggleCluster: (clusterId: number) => void;
+    onCreateStory: (clusterId: number, articleId: number) => void;
+    isCreatingStory: boolean;
 }) {
     return (
         <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-4 space-y-4">
-            <div className="flex items-center justify-between gap-2">
-                <h2 className="text-sm font-semibold text-white">Story Clusters</h2>
-                <div className="flex items-center gap-2">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div>
+                    <h2 className="text-sm font-semibold text-white">Story Clusters</h2>
+                    <p className="text-[11px] text-slate-400">Pick a cluster, review the items, then create a story.</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                    <input
+                        value={query}
+                        onChange={(e) => onQueryChange(e.target.value)}
+                        placeholder="بحث سريع داخل المجموعات..."
+                        className="rounded-lg border border-white/15 bg-black/20 px-2 py-1 text-xs text-white placeholder:text-slate-500"
+                    />
                     <label className="text-xs text-slate-300 inline-flex items-center gap-1">
                         النافذة
                         <select
@@ -171,6 +290,7 @@ function StoryClustersSection({
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+
                 <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-slate-200">
                     Clusters Created: <span className="text-white font-semibold">{report?.metrics?.clusters_created ?? 0}</span>
                 </div>
@@ -187,7 +307,14 @@ function StoryClustersSection({
             ) : (
                 <div className="space-y-2">
                     {items.map((cluster) => (
-                        <ClusterCard key={cluster.cluster_id} cluster={cluster} />
+                        <ClusterCard
+                        key={cluster.cluster_id}
+                        cluster={cluster}
+                        expanded={expandedClusters.has(cluster.cluster_id)}
+                        onToggle={() => onToggleCluster(cluster.cluster_id)}
+                        onCreateStory={(articleId) => onCreateStory(cluster.cluster_id, articleId)}
+                        isCreatingStory={isCreatingStory}
+                    />
                     ))}
                     {items.length === 0 && (
                         <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-4 text-xs text-slate-400">
@@ -200,39 +327,97 @@ function StoryClustersSection({
     );
 }
 
-function ClusterCard({ cluster }: { cluster: StoryClusterRecord }) {
+
+
+function ClusterCard({
+    cluster,
+    expanded,
+    onToggle,
+    onCreateStory,
+    isCreatingStory,
+}: {
+    cluster: StoryClusterRecord;
+    expanded: boolean;
+    onToggle: () => void;
+    onCreateStory: (articleId: number) => void;
+    isCreatingStory: boolean;
+}) {
+    const topMember = cluster.members[0];
+    const canCreate = Boolean(topMember?.article_id);
     return (
-        <div className="rounded-xl border border-white/10 bg-white/5 p-3 space-y-2">
+        <div className="rounded-xl border border-white/10 bg-white/5 p-3 space-y-3">
             <div className="flex items-start justify-between gap-3">
-                <div>
+                <div className="space-y-1">
                     <p className="text-[11px] text-cyan-300">{cluster.cluster_key}</p>
-                    <p className="text-sm text-white font-medium">{cluster.label || `Cluster #${cluster.cluster_id}`}</p>
-                    <p className="text-[11px] text-slate-400 mt-1">
-                        {cluster.category || 'uncategorized'} • {cluster.geography || 'n/a'} • members: {cluster.cluster_size}
+                    <p className="text-sm text-white font-medium line-clamp-1">{cluster.label || `Cluster #${cluster.cluster_id}`}</p>
+                    <p className="text-[11px] text-slate-400">
+                        {cluster.category || 'uncategorized'} - {cluster.geography || 'n/a'} - members: {cluster.cluster_size}
                     </p>
                 </div>
-                <p className="text-[11px] text-slate-500">{cluster.latest_article_at ? formatRelativeTime(cluster.latest_article_at) : 'no activity'}</p>
+                <div className="flex flex-col items-end gap-2">
+                    <p className="text-[11px] text-slate-500">{cluster.latest_article_at ? formatRelativeTime(cluster.latest_article_at) : 'no activity'}</p>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            disabled={!canCreate || isCreatingStory}
+                            onClick={() => canCreate && onCreateStory(topMember.article_id)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-emerald-400/40 bg-emerald-500/15 px-2 py-1 text-[11px] text-emerald-100 disabled:opacity-50"
+                        >
+                            <FolderPlus className="w-3 h-3" />
+                            Create story
+                        </button>
+                        <button
+                            type="button"
+                            onClick={onToggle}
+                            className="inline-flex items-center gap-1 rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-[11px] text-slate-300"
+                        >
+                            {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                            {expanded ? 'Hide' : 'Details'}
+                        </button>
+                    </div>
+                </div>
             </div>
-            <div className="flex flex-wrap gap-1">
-                {cluster.top_entities.slice(0, 4).map((entity) => (
-                    <span key={`${cluster.cluster_id}-entity-${entity.entity}`} className="rounded-full bg-cyan-500/15 px-2 py-0.5 text-[10px] text-cyan-100">
-                        {entity.entity} ({entity.count})
-                    </span>
-                ))}
-                {cluster.top_topics.slice(0, 4).map((topic) => (
-                    <span key={`${cluster.cluster_id}-topic-${topic.topic}`} className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] text-emerald-100">
-                        #{topic.topic}
-                    </span>
-                ))}
-            </div>
+
             <div className="space-y-1">
-                {cluster.members.slice(0, 5).map((member) => (
-                    <p key={`${cluster.cluster_id}-${member.article_id}`} className="text-[11px] text-slate-200">
-                        • {member.title} <span className="text-slate-500">({member.source_name || 'unknown'})</span>
+                {cluster.members.slice(0, 2).map((member) => (
+                    <p key={`${cluster.cluster_id}-${member.article_id}`} className="text-[11px] text-slate-200 line-clamp-1">
+                        - {member.title} <span className="text-slate-500">({member.source_name || 'unknown'})</span>
                     </p>
                 ))}
-                {cluster.members.length === 0 && <p className="text-[11px] text-slate-500">لا توجد عناصر.</p>}
             </div>
+
+            {expanded && (
+                <div className="space-y-3 pt-1">
+                    <div className="flex flex-wrap gap-1">
+                        {cluster.top_entities.slice(0, 6).map((entity) => (
+                            <span key={`${cluster.cluster_id}-entity-${entity.entity}`} className="rounded-full bg-cyan-500/15 px-2 py-0.5 text-[10px] text-cyan-100">
+                                {entity.entity} ({entity.count})
+                            </span>
+                        ))}
+                        {cluster.top_topics.slice(0, 6).map((topic) => (
+                            <span key={`${cluster.cluster_id}-topic-${topic.topic}`} className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] text-emerald-100">
+                                #{topic.topic}
+                            </span>
+                        ))}
+                    </div>
+                    <div className="space-y-1">
+                        {cluster.members.slice(0, 6).map((member) => (
+                            <div key={`${cluster.cluster_id}-member-${member.article_id}`} className="flex items-center justify-between text-[11px] text-slate-200">
+                                <span className="line-clamp-1">- {member.title}</span>
+                                <a
+                                    href={`/news/${member.article_id}`}
+                                    className="text-[11px] text-cyan-300"
+                                    target="_blank"
+                                    rel="noreferrer"
+                                >
+                                    Open
+                                </a>
+                            </div>
+                        ))}
+                        {cluster.members.length === 0 && <p className="text-[11px] text-slate-500">No items.</p>}
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
