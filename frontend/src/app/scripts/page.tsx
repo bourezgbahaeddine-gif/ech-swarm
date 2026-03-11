@@ -124,6 +124,53 @@ function ScriptsPageClient() {
             { key: 'rejected', label: 'مرفوض', tone: 'violet', count: rejected.length },
         ] as const;
     }, [projects]);
+    const needsReviewProjects = useMemo(() => projects.filter((item) => item.status === 'ready_for_review').slice(0, 5), [projects]);
+    const failedProjects = useMemo(() => projects.filter((item) => item.status === 'failed').slice(0, 5), [projects]);
+    const regeneratedProjects = useMemo(() => projects.filter((item) => (item.output_count || 0) > 1).slice(0, 5), [projects]);
+    const nextBestAction = useMemo(() => {
+        if (needsReviewProjects.length > 0) {
+            return {
+                label: 'مراجعة واعتماد السكربتات الجاهزة',
+                hint: `${needsReviewProjects.length} مشروع يحتاج قرار تحرير الآن`,
+                action: () => {
+                    setInboxFocus('all');
+                    setStatusFilter('ready_for_review');
+                    setSelectedScriptId(needsReviewProjects[0]?.id ?? null);
+                },
+                cta: 'ابدأ المراجعة',
+            };
+        }
+        if (failedProjects.length > 0) {
+            return {
+                label: 'استرجاع المشاريع الفاشلة',
+                hint: `${failedProjects.length} مشروع فشل ويحتاج إعادة توليد`,
+                action: () => {
+                    setInboxFocus('all');
+                    setStatusFilter('failed');
+                    setSelectedScriptId(failedProjects[0]?.id ?? null);
+                },
+                cta: 'معالجة الفشل',
+            };
+        }
+        if (regeneratedProjects.length > 0) {
+            return {
+                label: 'حسم النسخة النهائية للمشاريع المعاد توليدها',
+                hint: `${regeneratedProjects.length} مشروع يحتوي أكثر من نسخة`,
+                action: () => {
+                    setInboxFocus('regenerated');
+                    setStatusFilter('all');
+                    setSelectedScriptId(regeneratedProjects[0]?.id ?? null);
+                },
+                cta: 'فتح المقارنة',
+            };
+        }
+        return {
+            label: 'لا توجد مهام عاجلة',
+            hint: 'يمكنك إنشاء نشرة جديدة أو فتح مشروع جديد الآن',
+            action: () => undefined,
+            cta: 'جاهز',
+        };
+    }, [failedProjects, needsReviewProjects, regeneratedProjects]);
     const canReview = user?.role === 'editor_chief' || user?.role === 'director';
 
     return (
@@ -179,6 +226,32 @@ function ScriptsPageClient() {
                         <p className="text-xl font-semibold text-white">{section.count}</p>
                     </button>
                 ))}
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
+                <div className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-4 xl:col-span-1">
+                    <p className="text-xs text-cyan-200">أفضل إجراء تالٍ</p>
+                    <h3 className="text-sm font-semibold text-white mt-1">{nextBestAction.label}</h3>
+                    <p className="text-xs text-slate-300 mt-1">{nextBestAction.hint}</p>
+                    <button
+                        type="button"
+                        onClick={nextBestAction.action}
+                        className="mt-3 h-9 px-3 rounded-lg border border-cyan-400/40 bg-cyan-500/15 text-xs text-cyan-100"
+                    >
+                        {nextBestAction.cta}
+                    </button>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-4 xl:col-span-2">
+                    <div className="flex items-center justify-between mb-2">
+                        <h3 className="text-sm font-semibold text-white">Inbox سريع</h3>
+                        <span className="text-[11px] text-slate-400">أعلى أولوية فقط</span>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                        <QuickInboxLane title="يحتاج مراجعة" tone="cyan" items={needsReviewProjects} onOpen={setSelectedScriptId} />
+                        <QuickInboxLane title="فشل" tone="red" items={failedProjects} onOpen={setSelectedScriptId} />
+                        <QuickInboxLane title="معاد توليده" tone="amber" items={regeneratedProjects} onOpen={setSelectedScriptId} />
+                    </div>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
@@ -656,6 +729,53 @@ function ScriptViewerDrawer({
 
                         <StructuredScriptOutput projectType={project?.type} output={selectedOutput} />
                     </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+function QuickInboxLane({
+    title,
+    tone,
+    items,
+    onOpen,
+}: {
+    title: string;
+    tone: 'cyan' | 'red' | 'amber';
+    items: ScriptProjectRecord[];
+    onOpen: (scriptId: number) => void;
+}) {
+    const toneClass =
+        tone === 'red'
+            ? 'border-red-500/30 bg-red-500/10'
+            : tone === 'amber'
+              ? 'border-amber-500/30 bg-amber-500/10'
+              : 'border-cyan-500/30 bg-cyan-500/10';
+
+    return (
+        <div className={cn('rounded-xl border p-3', toneClass)}>
+            <div className="flex items-center justify-between">
+                <p className="text-xs text-slate-200">{title}</p>
+                <span className="text-[11px] text-white">{items.length}</span>
+            </div>
+            <div className="mt-2 space-y-1">
+                {items.length === 0 ? (
+                    <p className="text-[11px] text-slate-400">لا توجد عناصر</p>
+                ) : (
+                    items.slice(0, 3).map((item) => (
+                        <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => onOpen(item.id)}
+                            className="w-full text-right rounded-lg border border-white/10 bg-black/20 px-2 py-1.5 hover:border-cyan-400/30"
+                        >
+                            <p className="text-[11px] text-slate-100 truncate">{item.title}</p>
+                            <p className="text-[10px] text-slate-400 mt-0.5">
+                                {item.updated_at ? formatRelativeTime(item.updated_at) : '-'}
+                            </p>
+                        </button>
+                    ))
                 )}
             </div>
         </div>
