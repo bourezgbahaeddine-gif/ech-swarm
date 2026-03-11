@@ -104,6 +104,7 @@ type StoryContextItem = {
     category?: string | null;
     status?: string | null;
 };
+type StoryDraftMode = 'followup' | 'analysis' | 'background';
 
 const TABS: Array<{ id: RightTab; label: string }> = [
     { id: 'evidence', label: 'التحقق والأدلة' },
@@ -487,6 +488,21 @@ function mapStoryGapSeverity(severity?: string | null): DecisionSeverity {
     if (value === 'high' || value === 'critical') return 'high';
     if (value === 'medium' || value === 'warn') return 'medium';
     return 'low';
+}
+
+function mapGapToStoryTask(title: string, hint: string, id?: string): StoryDraftMode | 'source' {
+    const text = `${id || ''} ${title || ''} ${hint || ''}`.toLowerCase();
+    if (/source|مصدر|إسناد|quote|تصريح/.test(text)) return 'source';
+    if (/analysis|تحليل/.test(text)) return 'analysis';
+    if (/background|خلفي|timeline|سياق/.test(text)) return 'background';
+    return 'followup';
+}
+
+function storyTaskLabel(task: StoryDraftMode | 'source'): string {
+    if (task === 'source') return 'فتح المصدر';
+    if (task === 'analysis') return 'إنشاء تحليل';
+    if (task === 'background') return 'إنشاء خلفية';
+    return 'إنشاء متابعة';
 }
 
 function impactBySeverity(sev: DecisionSeverity): string {
@@ -1674,23 +1690,119 @@ function WorkspaceDraftsPageContent() {
                     runner();
                     setStoryOpen(false);
                 };
-            } else if (gap.id.includes('timeline')) {
-                actionLabel = 'إدراج تسلسل';
-                handler = () => {
-                    insertAutoTimeline();
-                    setStoryOpen(false);
-                };
-            } else if (gap.id.includes('sources')) {
-                actionLabel = 'فتح الأرشيف';
-                handler = () => {
-                    setDetailsOpen(true);
-                    setLeftTab('archive');
-                    setStoryOpen(false);
-                };
+            } else {
+                const task = mapGapToStoryTask(gap.title, gap.hint, gap.id);
+                actionLabel = storyTaskLabel(task);
+                if (task === 'source') {
+                    handler = () => {
+                        setDetailsOpen(true);
+                        setLeftTab('archive');
+                        setStoryOpen(false);
+                    };
+                } else if (task === 'background') {
+                    handler = () => {
+                        insertAutoTimeline();
+                        setStoryOpen(false);
+                    };
+                } else {
+                    handler = () => {
+                        createStoryDraft.mutate(task);
+                    };
+                }
             }
             return { ...gap, actionLabel, handler };
         });
     }, [storyGaps, decisionActionHandlers, setStoryOpen, setDetailsOpen, setLeftTab, insertAutoTimeline]);
+    const nextBestAction = useMemo(() => {
+        if (storyQuickActions.length > 0) return storyQuickActions[0];
+        return {
+            id: 'story_pack',
+            title: 'ابدأ من باقة القصة',
+            hint: 'أدرج القالب والخلفية والتسلسل الزمني مباشرة في المسودة.',
+            severity: 'low' as DecisionSeverity,
+            actionLabel: 'إدراج الباقة',
+            handler: () => {
+                insertStoryStarterPack();
+                setStoryOpen(false);
+            },
+        };
+    }, [storyQuickActions, insertStoryStarterPack, setStoryOpen]);
+
+    const storyType = useMemo(() => {
+        const latestTs = storyItemTimestamp(storyTimelineSorted[0] || {});
+        const recentHours = latestTs ? (Date.now() - latestTs) / 3_600_000 : 999;
+        const coverage = storyHub.coverageScore ?? 0;
+        if (recentHours <= 6 && storyHub.timelineCount <= 5) return 'breaking_expansion';
+        if (storyHub.timelineCount >= 6 && coverage >= 60) return 'running_story';
+        if (coverage < 50) return 'background_file';
+        return 'issue_tracking';
+    }, [storyTimelineSorted, storyHub.coverageScore, storyHub.timelineCount]);
+
+    const storyTypeLabel = useMemo(() => {
+        switch (storyType) {
+            case 'breaking_expansion':
+                return 'خبر عاجل يتوسع';
+            case 'running_story':
+                return 'قصة متابعة مستمرة';
+            case 'background_file':
+                return 'ملف خلفية';
+            default:
+                return 'قضية ممتدة';
+        }
+    }, [storyType]);
+
+    const [storyLastSeenAt, setStoryLastSeenAt] = useState<string | null>(null);
+    useEffect(() => {
+        if (!storyOpen || !selectedStoryId || typeof window === 'undefined') return;
+        const key = `story_last_seen_${selectedStoryId}`;
+        setStoryLastSeenAt(window.localStorage.getItem(key));
+    }, [storyOpen, selectedStoryId]);
+
+    const storyLastSeenMs = useMemo(() => {
+        if (!storyLastSeenAt) return 0;
+        const ts = new Date(storyLastSeenAt).getTime();
+        return Number.isNaN(ts) ? 0 : ts;
+    }, [storyLastSeenAt]);
+
+    const storyUpdatesSinceLastSeen = useMemo(() => {
+        if (!storyLastSeenMs) return [];
+        return storyTimelineSorted.filter((item) => storyItemTimestamp(item) > storyLastSeenMs);
+    }, [storyTimelineSorted, storyLastSeenMs]);
+
+    const storyWhatChanged = useMemo(() => {
+        if (!storyLastSeenMs) return 'هذه أول مرة تفتح هذه القصة.';
+        if (storyUpdatesSinceLastSeen.length === 0) return 'لا جديد منذ آخر زيارة.';
+        return `تمت إضافة ${storyUpdatesSinceLastSeen.length} مادة منذ آخر زيارة.`;
+    }, [storyLastSeenMs, storyUpdatesSinceLastSeen.length]);
+
+    const storyWhyNow = useMemo(() => {
+        if (storyUpdatesSinceLastSeen.length >= 2) return 'القصة نشطة الآن بسبب تحديثات متتالية خلال فترة قصيرة.';
+        if (storyGaps.some((gap) => gap.severity === 'high')) return 'القصة تحتاج تدخلًا تحريريًا لأن فيها فجوة حرجة.';
+        if ((storyHub.coverageScore ?? 0) < 60) return 'التغطية ما زالت ناقصة وتحتاج استكمالًا قبل الإغلاق.';
+        return 'القصة مستقرة ويمكن تعزيزها بمتابعة قصيرة.';
+    }, [storyUpdatesSinceLastSeen.length, storyGaps, storyHub.coverageScore]);
+
+    const storyUsage = useMemo(() => {
+        const contextText = normalizeForMatch(bodyText);
+        const used: StoryContextItem[] = [];
+        const unused: StoryContextItem[] = [];
+        storyTopSources.forEach((item) => {
+            const title = cleanText(item.title || '');
+            const isUsed = title ? entityMatchesContext(title, contextText) : false;
+            if (isUsed) used.push(item);
+            else unused.push(item);
+        });
+        return { used, unused };
+    }, [bodyText, storyTopSources]);
+
+    function closeStoryMode() {
+        if (selectedStoryId && typeof window !== 'undefined') {
+            const key = `story_last_seen_${selectedStoryId}`;
+            window.localStorage.setItem(key, new Date().toISOString());
+        }
+        setStoryAdvancedOpen(false);
+        setStoryOpen(false);
+    }
     const autoTimelineLines = useMemo(() => {
         const lines = storyTimelineChrono.slice(-8).map((item) => {
             const dateLabel = storyItemDateLabel(item);
@@ -1812,6 +1924,50 @@ function WorkspaceDraftsPageContent() {
             queryClient.invalidateQueries({ queryKey: ['smart-editor-versions', nextWorkId] });
         },
         onError: (e: any) => setErr(e?.response?.data?.detail || 'تعذر إنشاء المسودة الجديدة'),
+    });
+    const createStoryDraft = useMutation({
+        mutationFn: async (mode: StoryDraftMode) => {
+            const storyTitle = cleanText(storyCenter?.story?.title || context?.article?.title_ar || context?.article?.original_title || title || 'قصة');
+            const topItems = storyTopSources.slice(0, 4);
+            const topLines = topItems
+                .map((item, idx) => {
+                    const source = cleanText(item.source_name || '');
+                    const date = storyItemDateLabel(item);
+                    const meta = [source, date].filter(Boolean).join(' • ');
+                    return `${idx + 1}. ${cleanText(item.title || 'عنصر مرتبط')}${meta ? ` (${meta})` : ''}`;
+                })
+                .join('\n');
+            const gapsLines = storyGaps.slice(0, 3).map((gap) => `- ${gap.title}`).join('\n');
+            const header = mode === 'analysis' ? 'تحليل' : mode === 'background' ? 'خلفية' : 'متابعة';
+            const body = mode === 'analysis'
+                ? `مقدمة تحليلية:\n\nخلاصة المستجد:\n${cleanText(context?.article?.summary || '') || '—'}\n\nالمعطيات:\n${topLines || '- لا توجد مواد كافية بعد'}\n\nما الذي يحتاج تدقيقاً:\n${gapsLines || '- لا توجد فجوات حرجة'}\n\nالاستنتاج:\n`
+                : mode === 'background'
+                  ? `خلفية القصة:\n\nالمحطات الرئيسية:\n${topLines || '- لا توجد مواد كافية بعد'}\n\nالسياق الأوسع:\n\nنقاط تحتاج استكمال:\n${gapsLines || '- لا توجد فجوات حرجة'}\n`
+                  : `تحديث جديد على القصة:\n\nأبرز ما استجد:\n${topLines || '- لا توجد مواد كافية بعد'}\n\nما الذي تغيّر الآن:\n\nالمتابعة القادمة:\n`;
+            return editorialApi.createManualWorkspaceDraft({
+                title: `${storyTitle} — ${header}`,
+                body,
+                summary: cleanText(context?.article?.summary || '') || undefined,
+                category: storyCenter?.story?.category || context?.article?.category || undefined,
+                urgency: context?.article?.urgency || 'medium',
+                source_action: `story_${mode}`,
+            });
+        },
+        onSuccess: (res, mode) => {
+            const nextWorkId = res.data?.work_id;
+            if (!nextWorkId) {
+                setErr('تم إنشاء المسودة لكن بدون Work ID.');
+                return;
+            }
+            setWorkId(nextWorkId);
+            setStoryOpen(false);
+            setOk(mode === 'analysis' ? 'تم إنشاء مسودة تحليل وفتحها.' : mode === 'background' ? 'تم إنشاء مسودة خلفية وفتحها.' : 'تم إنشاء مسودة متابعة وفتحها.');
+            setErr(null);
+            queryClient.invalidateQueries({ queryKey: ['smart-editor-list'] });
+            queryClient.invalidateQueries({ queryKey: ['smart-editor-context', nextWorkId] });
+            queryClient.invalidateQueries({ queryKey: ['smart-editor-versions', nextWorkId] });
+        },
+        onError: (e: any) => setErr(e?.response?.data?.detail || 'تعذر إنشاء مسودة من القصة'),
     });
     const createDraftFromArticle = useMutation({
         mutationFn: () => editorialApi.handoff(articleNumericId!),
@@ -3692,10 +3848,7 @@ function WorkspaceDraftsPageContent() {
                                 <p className="text-[11px] text-gray-400">أدوات عملية لبناء قصة صحفية بسرعة وبدون تعقيد.</p>
                             </div>
                             <button
-                                onClick={() => {
-                                    setStoryAdvancedOpen(false);
-                                    setStoryOpen(false);
-                                }}
+                                onClick={closeStoryMode}
                                 className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-gray-200"
                             >
                                 إغلاق
@@ -3736,6 +3889,21 @@ function WorkspaceDraftsPageContent() {
                                 </div>
                             </div>
 
+                            <div className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 p-2 mt-2 space-y-1">
+                                <p className="text-[11px] text-cyan-100 font-semibold">لوحة القرار الآن</p>
+                                <p className="text-[10px] text-cyan-100/90">{storyWhatChanged}</p>
+                                <p className="text-[10px] text-cyan-100/80">{storyWhyNow}</p>
+                                <div className="flex flex-wrap items-center gap-2 pt-1">
+                                    <button
+                                        onClick={nextBestAction.handler}
+                                        className="px-2 py-1 rounded bg-cyan-500/20 text-[10px] text-cyan-100"
+                                    >
+                                        {nextBestAction.actionLabel}
+                                    </button>
+                                    <span className="text-[10px] text-gray-300 line-clamp-1">{nextBestAction.title}</span>
+                                </div>
+                            </div>
+
                             <div className="flex flex-wrap gap-2 mt-2">
                                 <button onClick={insertStoryStarterPack} className="px-2 py-1 rounded bg-emerald-500/20 text-[10px] text-emerald-100">
                                     إدراج باقة القصة
@@ -3756,6 +3924,27 @@ function WorkspaceDraftsPageContent() {
                                     className="px-2 py-1 rounded bg-white/10 text-[10px] text-gray-200"
                                 >
                                     فتح الأرشيف
+                                </button>
+                                <button
+                                    onClick={() => createStoryDraft.mutate('followup')}
+                                    disabled={createStoryDraft.isPending}
+                                    className="px-2 py-1 rounded bg-white/10 text-[10px] text-gray-200 disabled:opacity-50"
+                                >
+                                    إنشاء متابعة
+                                </button>
+                                <button
+                                    onClick={() => createStoryDraft.mutate('analysis')}
+                                    disabled={createStoryDraft.isPending}
+                                    className="px-2 py-1 rounded bg-white/10 text-[10px] text-gray-200 disabled:opacity-50"
+                                >
+                                    إنشاء تحليل
+                                </button>
+                                <button
+                                    onClick={() => createStoryDraft.mutate('background')}
+                                    disabled={createStoryDraft.isPending}
+                                    className="px-2 py-1 rounded bg-white/10 text-[10px] text-gray-200 disabled:opacity-50"
+                                >
+                                    إنشاء خلفية
                                 </button>
                             </div>
                         </div>
@@ -3797,6 +3986,28 @@ function WorkspaceDraftsPageContent() {
                                         <button onClick={() => openStoryInEditor(item)} className="px-2 py-1 rounded bg-emerald-500/15 text-[10px] text-emerald-100">فتح كخبر متابعة</button>
                                         {item.url && <a href={item.url} target="_blank" rel="noreferrer" className="text-[10px] text-cyan-300 underline decoration-dotted">المصدر</a>}
                                     </div>
+                                </div>
+                            ))}
+                            {createStoryDraft.isPending && (
+                                <p className="text-[10px] text-cyan-200">جاري تجهيز المسودة من القصة...</p>
+                            )}
+                        </div>
+
+                        <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
+                            <p className="text-xs text-gray-400">استخدام القصة داخل هذه المسودة</p>
+                            <div className="grid grid-cols-2 gap-2 text-[10px]">
+                                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2">
+                                    <p className="text-emerald-100">تم استخدامه</p>
+                                    <p className="text-white mt-1">{storyUsage.used.length}</p>
+                                </div>
+                                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2">
+                                    <p className="text-amber-100">غير مستخدم بعد</p>
+                                    <p className="text-white mt-1">{storyUsage.unused.length}</p>
+                                </div>
+                            </div>
+                            {storyUsage.unused.slice(0, 2).map((item, idx) => (
+                                <div key={`story-unused-${idx}`} className="rounded border border-white/10 bg-white/5 p-2 text-[10px] text-gray-300">
+                                    <p className="line-clamp-1">{cleanText(item.title || 'عنصر غير مستخدم')}</p>
                                 </div>
                             ))}
                         </div>
