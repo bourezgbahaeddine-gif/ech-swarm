@@ -1,22 +1,28 @@
 ﻿'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import {
     AlertCircle,
+    ArrowLeftCircle,
     BookOpenText,
     ChevronDown,
     ChevronUp,
+    ClipboardList,
     FolderPlus,
     Loader2,
+    Sparkles,
     RefreshCw,
 } from 'lucide-react';
 
 import {
+    editorialApi,
     storiesApi,
     type StoryClusterRecord,
     type StoryControlCenterResponse,
     type StoryGapItem,
+    type StoryRecord,
 } from '@/lib/api';
 import { cn, formatRelativeTime } from '@/lib/utils';
 
@@ -77,6 +83,22 @@ export default function StoriesPage() {
             return haystack.includes(query);
         });
     }, [clusterItems, clusterQuery]);
+
+    const storyDeskRows = useMemo(() => {
+        return [...stories]
+            .sort((a, b) => storyActionScore(b) - storyActionScore(a))
+            .slice(0, 14);
+    }, [stories]);
+
+    const storiesNeedingAction = useMemo(
+        () => storyDeskRows.filter((story) => storyActionScore(story) >= 45),
+        [storyDeskRows],
+    );
+
+    const storiesUpdatedRecently = useMemo(
+        () => storyDeskRows.filter((story) => storyHoursSinceLastUpdate(story) <= 12),
+        [storyDeskRows],
+    );
 
     const createStoryFromCluster = useMutation({
         mutationFn: async (payload: { articleId: number }) => {
@@ -197,33 +219,13 @@ export default function StoriesPage() {
                 storiesLoading ? (
                     <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-6 text-slate-400">جاري تحميل مركز القصص...</div>
                 ) : (
-                    <div className="grid grid-cols-1 gap-3">
-                        {stories.length === 0 && (
-                            <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-6 text-slate-400">لا توجد قصص بعد. ابدأ بقصة من خبر واحد أو من مجموعة مقترحة.</div>
-                        )}
-                        {stories.map((story) => (
-                            <button
-                                key={story.id}
-                                type="button"
-                                onClick={() => setSelectedStoryId(story.id)}
-                                className="text-right rounded-2xl border border-white/10 bg-slate-900/40 p-4 hover:border-cyan-400/40 hover:bg-slate-900/65 transition-colors"
-                            >
-                                <div className="flex items-center justify-between gap-3">
-                                    <div>
-                                        <p className="text-sm text-cyan-300 font-medium">{story.story_key}</p>
-                                        <h2 className="text-lg font-semibold text-white mt-1">{story.title}</h2>
-                                        <p className="text-xs text-slate-400 mt-2 line-clamp-2">{story.summary || 'بدون ملخص'}</p>
-                                    </div>
-                                    <div className="text-left shrink-0">
-                                        <p className="text-xs text-slate-300">{story.status}</p>
-                                        <p className="text-[11px] text-slate-500 mt-1">
-                                            {formatRelativeTime(story.updated_at || story.created_at || '')}
-                                        </p>
-                                    </div>
-                                </div>
-                            </button>
-                        ))}
-                    </div>
+                    <StoryDeskSection
+                        stories={storyDeskRows}
+                        totalStories={stories.length}
+                        needsActionCount={storiesNeedingAction.length}
+                        recentlyUpdatedCount={storiesUpdatedRecently.length}
+                        onOpenStory={(storyId) => setSelectedStoryId(storyId)}
+                    />
                 )
             )}
 
@@ -231,6 +233,121 @@ export default function StoriesPage() {
                 <StoryControlCenterDrawer storyId={selectedStoryId} onClose={() => setSelectedStoryId(null)} />
             )}
         </div>
+    );
+}
+
+function StoryDeskSection({
+    stories,
+    totalStories,
+    needsActionCount,
+    recentlyUpdatedCount,
+    onOpenStory,
+}: {
+    stories: StoryRecord[];
+    totalStories: number;
+    needsActionCount: number;
+    recentlyUpdatedCount: number;
+    onOpenStory: (storyId: number) => void;
+}) {
+    const urgentStories = useMemo(() => stories.filter((story) => storyActionScore(story) >= 45).slice(0, 5), [stories]);
+    const latestStories = useMemo(
+        () =>
+            [...stories]
+                .sort((a, b) => storyTimestamp(b.updated_at || b.created_at) - storyTimestamp(a.updated_at || a.created_at))
+                .slice(0, 5),
+        [stories],
+    );
+
+    return (
+        <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-4 space-y-4">
+            <div>
+                <h2 className="text-sm font-semibold text-white inline-flex items-center gap-1.5">
+                    <ClipboardList className="w-4 h-4 text-cyan-300" />
+                    Story Desk
+                </h2>
+                <p className="text-[11px] text-slate-400 mt-1">قرار سريع: ما الجديد؟ ما الذي ينقص؟ وما الإجراء التالي؟</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+                <MetricCard label="إجمالي القصص" value={totalStories} />
+                <MetricCard label="تحتاج إجراء الآن" value={needsActionCount} />
+                <MetricCard label="تحديثات آخر 12 ساعة" value={recentlyUpdatedCount} />
+            </div>
+
+            {stories.length === 0 ? (
+                <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-6 text-slate-400">
+                    لا توجد قصص بعد. ابدأ بقصة من خبر واحد أو من مجموعة مقترحة.
+                </div>
+            ) : (
+                <>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
+                            <p className="text-xs font-semibold text-amber-100">تحتاج إجراء الآن</p>
+                            {urgentStories.length === 0 ? (
+                                <p className="text-[11px] text-emerald-100">لا توجد قصص حرجة حاليًا.</p>
+                            ) : (
+                                urgentStories.map((story) => (
+                                    <button
+                                        key={`urgent-${story.id}`}
+                                        onClick={() => onOpenStory(story.id)}
+                                        className="w-full text-right rounded-lg border border-white/10 bg-black/20 p-2 hover:border-amber-300/40"
+                                    >
+                                        <p className="text-xs text-white line-clamp-1">{story.title}</p>
+                                        <p className="text-[10px] text-amber-100/90 mt-1">{storyNeedsNowReason(story)}</p>
+                                        <p className="text-[10px] text-slate-400 mt-1">الإجراء المقترح: {storyNextActionLabel(story)}</p>
+                                    </button>
+                                ))
+                            )}
+                        </div>
+
+                        <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3 space-y-2">
+                            <p className="text-xs font-semibold text-cyan-100">ما الجديد منذ آخر تحديث</p>
+                            {latestStories.map((story) => (
+                                <button
+                                    key={`latest-${story.id}`}
+                                    onClick={() => onOpenStory(story.id)}
+                                    className="w-full text-right rounded-lg border border-white/10 bg-black/20 p-2 hover:border-cyan-300/40"
+                                >
+                                    <p className="text-xs text-white line-clamp-1">{story.title}</p>
+                                    <p className="text-[10px] text-slate-400 mt-1">
+                                        آخر نشاط: {formatRelativeTime(story.updated_at || story.created_at || '')}
+                                    </p>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="rounded-xl border border-white/10 bg-black/20 p-2">
+                        <p className="text-xs text-slate-300 mb-2">قائمة العمل (أعلى القصص أولوية)</p>
+                        <div className="space-y-2">
+                            {stories.slice(0, 8).map((story) => (
+                                <div
+                                    key={`desk-row-${story.id}`}
+                                    className="rounded-lg border border-white/10 bg-white/5 p-2 flex items-center justify-between gap-3"
+                                >
+                                    <div className="min-w-0">
+                                        <p className="text-[11px] text-cyan-300">{story.story_key}</p>
+                                        <p className="text-sm text-white line-clamp-1">{story.title}</p>
+                                        <p className="text-[10px] text-slate-400 line-clamp-1">{story.summary || storyNeedsNowReason(story)}</p>
+                                    </div>
+                                    <div className="shrink-0 text-left">
+                                        <p className="text-[10px] text-slate-400">{storyNextActionLabel(story)}</p>
+                                        <button
+                                            type="button"
+                                            onClick={() => onOpenStory(story.id)}
+                                            className="mt-1 inline-flex items-center gap-1 rounded-lg border border-cyan-400/40 bg-cyan-500/15 px-2 py-1 text-[10px] text-cyan-100"
+                                        >
+                                            فتح لوحة القرار
+                                            <ArrowLeftCircle className="w-3 h-3" />
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </>
+            )}
+        </section>
     );
 }
 
@@ -445,6 +562,12 @@ function ClusterCard({
 }
 
 function StoryControlCenterDrawer({ storyId, onClose }: { storyId: number; onClose: () => void }) {
+    const router = useRouter();
+    const [showAdvanced, setShowAdvanced] = useState(false);
+    const [taskMsg, setTaskMsg] = useState<string | null>(null);
+    const [taskErr, setTaskErr] = useState<string | null>(null);
+    const [lastSeenAt, setLastSeenAt] = useState<string | null>(null);
+
     const { data, isLoading, error } = useQuery({
         queryKey: ['stories-control-center', storyId],
         queryFn: () => storiesApi.controlCenter(storyId, { timeline_limit: 40 }),
@@ -452,22 +575,109 @@ function StoryControlCenterDrawer({ storyId, onClose }: { storyId: number; onClo
 
     const center: StoryControlCenterResponse | undefined = data?.data;
     const timeline = useMemo(() => {
-        if (!center?.timeline) {
-            return [];
-        }
-        return [...center.timeline].sort((a, b) => {
-            const aValue = a.created_at ? new Date(a.created_at).getTime() : 0;
-            const bValue = b.created_at ? new Date(b.created_at).getTime() : 0;
-            return bValue - aValue;
-        });
+        if (!center?.timeline) return [];
+        return [...center.timeline].sort((a, b) => storyTimestamp(b.created_at) - storyTimestamp(a.created_at));
     }, [center?.timeline]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const key = `story_last_seen_${storyId}`;
+        setLastSeenAt(window.localStorage.getItem(key));
+    }, [storyId]);
+
+    const lastSeenMs = useMemo(() => storyTimestamp(lastSeenAt), [lastSeenAt]);
+    const updatesSinceLastSeen = useMemo(() => {
+        if (!lastSeenMs) return timeline.slice(0, 2);
+        return timeline.filter((item) => storyTimestamp(item.created_at) > lastSeenMs);
+    }, [timeline, lastSeenMs]);
+
+    const whatChangedLine = useMemo(() => {
+        if (!lastSeenMs) return 'هذه أول زيارة لهذه القصة. ابدأ من الإجراء التالي مباشرة.';
+        if (updatesSinceLastSeen.length === 0) return 'لا جديد منذ آخر زيارة.';
+        return `تمت إضافة ${updatesSinceLastSeen.length} مادة منذ آخر زيارة.`;
+    }, [lastSeenMs, updatesSinceLastSeen.length]);
+
+    const topMaterials = useMemo(() => timeline.slice(0, 5), [timeline]);
+    const taskGaps = useMemo(() => (center?.gaps || []).slice(0, 3), [center?.gaps]);
+    const nextBestTask = useMemo(() => (taskGaps.length > 0 ? taskGaps[0] : null), [taskGaps]);
+
+    const createStoryDraft = useMutation({
+        mutationFn: async (mode: 'followup' | 'analysis' | 'background') => {
+            if (!center) throw new Error('story_not_loaded');
+            return editorialApi.createManualWorkspaceDraft({
+                title: buildStoryDraftTitle(center.story.title, mode),
+                body: buildStoryDraftBody(center, mode),
+                summary: `مسودة ${mode === 'analysis' ? 'تحليل' : mode === 'background' ? 'خلفية' : 'متابعة'} مرتبطة بالقصة ${center.story.story_key}`,
+                category: center.story.category || undefined,
+                urgency: 'medium',
+                source_action: `story_${mode}`,
+            });
+        },
+        onSuccess: (res, mode) => {
+            const workId = res.data?.work_id;
+            if (!workId) {
+                setTaskErr('تم إنشاء المسودة لكن بدون Work ID.');
+                return;
+            }
+            setTaskErr(null);
+            setTaskMsg(
+                mode === 'analysis'
+                    ? 'تم إنشاء مسودة تحليل وفتحها.'
+                    : mode === 'background'
+                      ? 'تم إنشاء مسودة خلفية وفتحها.'
+                      : 'تم إنشاء مسودة متابعة وفتحها.',
+            );
+            router.push(`/workspace-drafts?work_id=${encodeURIComponent(workId)}`);
+        },
+        onError: () => setTaskErr('تعذر تنفيذ الإجراء. حاول مرة أخرى.'),
+    });
+
+    const runGapTask = (gap: StoryGapItem) => {
+        setTaskMsg(null);
+        setTaskErr(null);
+        const task = mapGapToTask(gap);
+        if (task === 'source') {
+            const link = topMaterials.find((item) => Boolean(item.url))?.url;
+            if (link && typeof window !== 'undefined') {
+                window.open(link, '_blank', 'noopener,noreferrer');
+                setTaskMsg('تم فتح مصدر مرجعي. أضف الإسناد ثم ارجع لإغلاق الفجوة.');
+                return;
+            }
+            createStoryDraft.mutate('followup');
+            return;
+        }
+        if (task === 'analysis') {
+            createStoryDraft.mutate('analysis');
+            return;
+        }
+        if (task === 'background') {
+            createStoryDraft.mutate('background');
+            return;
+        }
+        createStoryDraft.mutate('followup');
+    };
+
+    const runNextBestAction = () => {
+        if (nextBestTask) {
+            runGapTask(nextBestTask);
+            return;
+        }
+        createStoryDraft.mutate('followup');
+    };
+
+    const closeDrawer = () => {
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(`story_last_seen_${storyId}`, new Date().toISOString());
+        }
+        onClose();
+    };
 
     return (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex justify-end" dir="rtl">
             <div className="w-full max-w-3xl h-full overflow-y-auto border-l border-white/10 bg-slate-950 p-5">
                 <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-white">Story Control Center</h3>
-                    <button onClick={onClose} className="rounded-lg border border-white/15 px-3 py-1.5 text-xs text-slate-300">إغلاق</button>
+                    <h3 className="text-lg font-semibold text-white">مركز قرار القصة</h3>
+                    <button onClick={closeDrawer} className="rounded-lg border border-white/15 px-3 py-1.5 text-xs text-slate-300">إغلاق</button>
                 </div>
 
                 {isLoading && <p className="text-slate-400 text-sm">جاري تحميل لوحة القصة...</p>}
@@ -479,99 +689,184 @@ function StoryControlCenterDrawer({ storyId, onClose }: { storyId: number; onClo
                 )}
 
                 {center && (
-                    <div className="space-y-5">
-                        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                    <div className="space-y-4">
+                        <section className="rounded-xl border border-white/10 bg-white/5 p-4">
                             <p className="text-xs text-cyan-300">{center.story.story_key}</p>
                             <h4 className="text-xl font-semibold text-white mt-1">{center.story.title}</h4>
-                            <p className="text-xs text-slate-300 mt-2">
-                                الحالة: {center.story.status} • الأولوية: {center.story.priority}
+                            <p className="text-xs text-slate-300 mt-2 line-clamp-2">
+                                {center.highlights.latest_titles[0] || 'لا يوجد ملخص جاهز. استخدم الخطوة التالية لبدء المتابعة.'}
                             </p>
-                        </div>
+                            <p className="text-[11px] text-slate-400 mt-2">
+                                الحالة: {center.story.status} • الأولوية: {center.story.priority} • آخر نشاط:{' '}
+                                {center.overview.last_activity_at ? formatRelativeTime(center.overview.last_activity_at) : 'غير متاح'}
+                            </p>
+                        </section>
 
-                        <section className="space-y-2">
-                            <h5 className="text-sm font-semibold text-white">Overview</h5>
-                            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
-                                <MetricCard label="العناصر" value={center.overview.items_total} />
-                                <MetricCard label="الأخبار" value={center.overview.articles_count} />
-                                <MetricCard label="المسودات" value={center.overview.drafts_count} />
+                        <section className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-4 space-y-3">
+                            <div className="flex items-center justify-between gap-3">
+                                <div>
+                                    <p className="text-xs font-semibold text-cyan-100">ما الجديد منذ آخر مرة؟</p>
+                                    <p className="text-[11px] text-cyan-100/90 mt-1">{whatChangedLine}</p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={runNextBestAction}
+                                    disabled={createStoryDraft.isPending}
+                                    className="inline-flex items-center gap-1 rounded-lg border border-cyan-300/40 bg-cyan-500/20 px-3 py-1.5 text-xs text-cyan-100 disabled:opacity-50"
+                                >
+                                    <Sparkles className="w-3.5 h-3.5" />
+                                    {nextBestTask ? `الإجراء التالي: ${mapGapTaskLabel(nextBestTask)}` : 'إنشاء متابعة الآن'}
+                                </button>
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
                                 <MetricCard label="التغطية" value={`${center.overview.coverage_score}%`} />
                                 <MetricCard label="الفجوات" value={center.overview.gaps_count} />
+                                <MetricCard label="مواد القصة" value={center.overview.items_total} />
+                                <MetricCard label="المسودات" value={center.overview.drafts_count} />
                             </div>
                         </section>
 
-                        <section className="space-y-2">
-                            <h5 className="text-sm font-semibold text-white">Coverage Map</h5>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                {center.coverage_map.items.map((item) => (
-                                    <div
-                                        key={item.key}
-                                        className={cn(
-                                            'rounded-xl border p-3 text-xs',
-                                            item.status === 'covered'
-                                                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100'
-                                                : 'border-amber-500/30 bg-amber-500/10 text-amber-100',
-                                        )}
-                                    >
-                                        <div className="flex items-center justify-between gap-2">
-                                            <p className="font-semibold">{item.label}</p>
-                                            <span className="text-[11px]">{item.count}</span>
-                                        </div>
-                                        <p className="text-[11px] mt-1 opacity-90">{item.description}</p>
-                                    </div>
-                                ))}
-                            </div>
-                        </section>
+                        {taskMsg && (
+                            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">{taskMsg}</div>
+                        )}
+                        {taskErr && (
+                            <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">{taskErr}</div>
+                        )}
 
                         <section className="space-y-2">
-                            <h5 className="text-sm font-semibold text-white">Story Gaps</h5>
-                            {center.gaps.length > 0 ? (
+                            <h5 className="text-sm font-semibold text-white">الفجوات كمهام تنفيذية</h5>
+                            {taskGaps.length > 0 ? (
                                 <div className="space-y-2">
-                                    {center.gaps.map((gap) => (
-                                        <GapRow key={gap.code} gap={gap} />
+                                    {taskGaps.map((gap) => (
+                                        <div key={gap.code} className="rounded-xl border border-white/10 bg-white/5 p-3">
+                                            <div className="flex items-start justify-between gap-2">
+                                                <div className="min-w-0">
+                                                    <p className="text-xs text-white font-semibold">{gap.title}</p>
+                                                    <p className="text-[11px] text-slate-300 mt-1">{gap.recommendation}</p>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => runGapTask(gap)}
+                                                    disabled={createStoryDraft.isPending}
+                                                    className="shrink-0 rounded-lg border border-white/15 bg-white/10 px-2 py-1 text-[11px] text-slate-100 disabled:opacity-50"
+                                                >
+                                                    {mapGapTaskLabel(gap)}
+                                                </button>
+                                            </div>
+                                        </div>
                                     ))}
                                 </div>
                             ) : (
                                 <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-100">
-                                    لا توجد فجوات حرجة الآن. التغطية متوازنة.
+                                    لا توجد فجوات حرجة. يمكنك إنشاء متابعة قصيرة أو إغلاق القصة.
                                 </div>
                             )}
                         </section>
 
                         <section className="space-y-2">
-                            <h5 className="text-sm font-semibold text-white">الخط الزمني</h5>
-                            <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
-                                {timeline.map((item) => (
+                            <h5 className="text-sm font-semibold text-white">مواد جاهزة للاستخدام (5 عناصر)</h5>
+                            <div className="space-y-2">
+                                {topMaterials.map((item) => (
                                     <div key={`${item.type}-${item.id}`} className="rounded-xl border border-white/10 bg-slate-900/60 p-3">
                                         <div className="flex items-center justify-between gap-3">
-                                            <p className="text-[11px] text-cyan-300">
-                                                {item.type === 'article' ? 'خبر' : 'مسودة'} #{item.id}
-                                            </p>
-                                            <p className="text-[11px] text-slate-500">
-                                                {item.created_at ? formatRelativeTime(item.created_at) : 'بدون تاريخ'}
-                                            </p>
+                                            <p className="text-[11px] text-cyan-300">{item.type === 'article' ? 'خبر' : 'مسودة'} #{item.id}</p>
+                                            <p className="text-[11px] text-slate-500">{item.created_at ? formatRelativeTime(item.created_at) : 'بدون تاريخ'}</p>
                                         </div>
                                         <p className="text-sm text-white mt-1">{item.title}</p>
                                         <p className="text-[11px] text-slate-400 mt-1">
                                             {item.source_name ? `${item.source_name} • ` : ''}
                                             {item.status || 'بدون حالة'}
                                         </p>
+                                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                                            {item.type === 'article' && (
+                                                <a href={`/news/${item.id}`} className="text-[11px] text-cyan-300" target="_blank" rel="noreferrer">فتح الخبر</a>
+                                            )}
+                                            {item.work_id && (
+                                                <a
+                                                    href={`/workspace-drafts?work_id=${encodeURIComponent(item.work_id)}`}
+                                                    className="text-[11px] text-emerald-300"
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                >
+                                                    فتح المسودة
+                                                </a>
+                                            )}
+                                            {item.url && <a href={item.url} className="text-[11px] text-sky-300" target="_blank" rel="noreferrer">المصدر</a>}
+                                        </div>
                                     </div>
                                 ))}
-                                {timeline.length === 0 && <p className="text-xs text-slate-400">لا يوجد خط زمني متاح.</p>}
+                                {topMaterials.length === 0 && <p className="text-xs text-slate-400">لا توجد مواد مرتبطة كافية بعد.</p>}
                             </div>
                         </section>
 
-                        <section className="space-y-2">
-                            <h5 className="text-sm font-semibold text-white">قوالب القصة</h5>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                                {center.templates.map((tpl) => (
-                                    <div key={tpl.key} className="rounded-xl border border-white/10 bg-white/5 p-3">
-                                        <p className="text-xs text-cyan-300">{tpl.label}</p>
-                                        <p className="text-[11px] text-slate-400 mt-2 line-clamp-3">{tpl.sections.join(' • ')}</p>
-                                    </div>
-                                ))}
+                        <section className="rounded-xl border border-white/10 bg-black/20 p-3">
+                            <div className="flex flex-wrap gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => createStoryDraft.mutate('followup')}
+                                    disabled={createStoryDraft.isPending}
+                                    className="rounded-lg border border-white/15 bg-white/10 px-2.5 py-1 text-[11px] text-slate-100 disabled:opacity-50"
+                                >
+                                    إنشاء متابعة
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => createStoryDraft.mutate('analysis')}
+                                    disabled={createStoryDraft.isPending}
+                                    className="rounded-lg border border-white/15 bg-white/10 px-2.5 py-1 text-[11px] text-slate-100 disabled:opacity-50"
+                                >
+                                    إنشاء تحليل
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => createStoryDraft.mutate('background')}
+                                    disabled={createStoryDraft.isPending}
+                                    className="rounded-lg border border-white/15 bg-white/10 px-2.5 py-1 text-[11px] text-slate-100 disabled:opacity-50"
+                                >
+                                    إنشاء خلفية
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowAdvanced((prev) => !prev)}
+                                    className="rounded-lg border border-white/15 bg-white/5 px-2.5 py-1 text-[11px] text-slate-300"
+                                >
+                                    {showAdvanced ? 'إخفاء التفاصيل المتقدمة' : 'عرض التفاصيل المتقدمة'}
+                                </button>
                             </div>
                         </section>
+
+                        {showAdvanced && (
+                            <section className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-3">
+                                <h5 className="text-sm font-semibold text-white">تفاصيل متقدمة</h5>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                    {center.coverage_map.items.map((item) => (
+                                        <div
+                                            key={item.key}
+                                            className={cn(
+                                                'rounded-xl border p-3 text-xs',
+                                                item.status === 'covered'
+                                                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100'
+                                                    : 'border-amber-500/30 bg-amber-500/10 text-amber-100',
+                                            )}
+                                        >
+                                            <div className="flex items-center justify-between gap-2">
+                                                <p className="font-semibold">{item.label}</p>
+                                                <span className="text-[11px]">{item.count}</span>
+                                            </div>
+                                            <p className="text-[11px] mt-1 opacity-90">{item.description}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                                    {center.templates.map((tpl) => (
+                                        <div key={tpl.key} className="rounded-xl border border-white/10 bg-white/5 p-3">
+                                            <p className="text-xs text-cyan-300">{tpl.label}</p>
+                                            <p className="text-[11px] text-slate-400 mt-2 line-clamp-3">{tpl.sections.join(' • ')}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </section>
+                        )}
                     </div>
                 )}
             </div>
@@ -579,35 +874,88 @@ function StoryControlCenterDrawer({ storyId, onClose }: { storyId: number; onClo
     );
 }
 
+function storyTimestamp(value?: string | null) {
+    if (!value) return 0;
+    const ts = new Date(value).getTime();
+    return Number.isFinite(ts) ? ts : 0;
+}
+
+function storyHoursSinceLastUpdate(story: StoryRecord) {
+    const ts = storyTimestamp(story.updated_at || story.created_at);
+    if (!ts) return 999;
+    return Math.max(0, (Date.now() - ts) / 3_600_000);
+}
+
+function storyActionScore(story: StoryRecord) {
+    const status = (story.status || '').toLowerCase();
+    const hours = storyHoursSinceLastUpdate(story);
+    let score = Math.min(story.priority || 0, 10) * 4;
+    if (hours <= 2) score += 35;
+    else if (hours <= 6) score += 25;
+    else if (hours <= 12) score += 15;
+    if (['draft', 'active', 'in_progress', 'open'].some((item) => status.includes(item))) score += 18;
+    if (!story.summary) score += 8;
+    return score;
+}
+
+function storyNeedsNowReason(story: StoryRecord) {
+    const hours = storyHoursSinceLastUpdate(story);
+    if (hours <= 3) return 'تحديثات حديثة؛ تحتاج متابعة مباشرة.';
+    if (!story.summary) return 'لا يوجد ملخص واضح للقصة حتى الآن.';
+    if ((story.priority || 0) >= 8) return 'القصة ذات أولوية عالية وتحتاج متابعة.';
+    return 'التغطية بحاجة مراجعة فجوات قبل الإغلاق.';
+}
+
+function storyNextActionLabel(story: StoryRecord) {
+    const status = (story.status || '').toLowerCase();
+    if (status.includes('draft')) return 'إنهاء المتابعة الحالية';
+    if (!story.summary) return 'إضافة ملخص وزاوية';
+    if ((story.priority || 0) >= 8) return 'إنشاء متابعة قصيرة';
+    return 'مراجعة الفجوات';
+}
+
+function mapGapToTask(gap: StoryGapItem): 'followup' | 'analysis' | 'background' | 'source' {
+    const text = `${gap.code} ${gap.title} ${gap.recommendation}`.toLowerCase();
+    if (text.includes('تحليل') || text.includes('analysis')) return 'analysis';
+    if (text.includes('خلفي') || text.includes('background') || text.includes('timeline')) return 'background';
+    if (text.includes('مصدر') || text.includes('source') || text.includes('تصريح') || text.includes('quote')) return 'source';
+    return 'followup';
+}
+
+function mapGapTaskLabel(gap: StoryGapItem) {
+    const task = mapGapToTask(gap);
+    if (task === 'analysis') return 'إنشاء تحليل';
+    if (task === 'background') return 'إضافة خلفية';
+    if (task === 'source') return 'فتح مصدر';
+    return 'إنشاء متابعة';
+}
+
+function buildStoryDraftTitle(storyTitle: string, mode: 'followup' | 'analysis' | 'background') {
+    if (mode === 'analysis') return `${storyTitle} — تحليل`;
+    if (mode === 'background') return `${storyTitle} — خلفية`;
+    return `${storyTitle} — متابعة`;
+}
+
+function buildStoryDraftBody(center: StoryControlCenterResponse, mode: 'followup' | 'analysis' | 'background') {
+    const latest = center.timeline.slice(0, 3);
+    const latestLines = latest
+        .map((item, idx) => `${idx + 1}. ${item.title}${item.source_name ? ` (${item.source_name})` : ''}`)
+        .join('\n');
+    const gapLines = center.gaps.slice(0, 3).map((gap) => `- ${gap.title}`).join('\n');
+    if (mode === 'analysis') {
+        return `مقدمة تحليلية:\n\nالخلفية:\n${latestLines || '- لا توجد مواد بعد'}\n\nقراءة وتأثيرات:\n\nما الذي ينقص:\n${gapLines || '- لا توجد فجوات حرجة'}\n\nخلاصة:\n`;
+    }
+    if (mode === 'background') {
+        return `خلفية القصة:\n\nالتسلسل:\n${latestLines || '- لا توجد مواد بعد'}\n\nالسياق الأوسع:\n\nنقاط يجب توضيحها:\n${gapLines || '- لا توجد فجوات حرجة'}\n`;
+    }
+    return `تحديث جديد على القصة:\n\nأهم المستجدات:\n${latestLines || '- لا توجد مواد بعد'}\n\nما الجديد عن التغطية السابقة:\n\nالخطوة التالية:\n`;
+}
+
 function MetricCard({ label, value }: { label: string; value: string | number }) {
     return (
         <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-slate-200">
             <p className="text-[11px] text-slate-400">{label}</p>
             <p className="text-sm font-semibold text-white mt-1">{value}</p>
-        </div>
-    );
-}
-
-function GapRow({ gap }: { gap: StoryGapItem }) {
-    const severityClass = {
-        high: 'border-red-500/30 bg-red-500/10 text-red-100',
-        medium: 'border-amber-500/30 bg-amber-500/10 text-amber-100',
-        low: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-100',
-    }[gap.severity] || 'border-white/15 bg-white/5 text-slate-100';
-
-    const severityLabel = {
-        high: 'مرتفع',
-        medium: 'متوسط',
-        low: 'منخفض',
-    }[gap.severity] || gap.severity;
-
-    return (
-        <div className={cn('rounded-xl border p-3 text-xs', severityClass)}>
-            <div className="flex items-center justify-between gap-2">
-                <p className="font-semibold">{gap.title}</p>
-                <span className="text-[11px]">{severityLabel}</span>
-            </div>
-            <p className="mt-1 opacity-95">{gap.recommendation}</p>
         </div>
     );
 }
