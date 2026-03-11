@@ -82,6 +82,13 @@ type BlockerExplanation = {
     stage?: string;
     raw?: string;
 };
+type StoryGap = {
+    id: string;
+    title: string;
+    hint: string;
+    severity: DecisionSeverity;
+    action?: DecisionActionId;
+};
 type StoryContextItem = {
     id?: number;
     title?: string;
@@ -396,6 +403,12 @@ function cleanText(value: string): string {
         .trim();
 }
 
+function safeInlineText(value: string): string {
+    return cleanText(value || '')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
 function htmlToReadableText(value: string): string {
     if (!value) return '';
     if (typeof window !== 'undefined') {
@@ -417,6 +430,22 @@ function normalizeForMatch(value: string): string {
         .replace(/\s+/g, ' ')
         .trim()
         .toLowerCase();
+}
+
+function storyItemTimestamp(item: StoryContextItem): number {
+    const value = item?.published_at || item?.created_at;
+    if (!value) return 0;
+    const parsed = new Date(value);
+    const ts = parsed.getTime();
+    return Number.isNaN(ts) ? 0 : ts;
+}
+
+function storyItemDateLabel(item: StoryContextItem): string {
+    const value = item?.published_at || item?.created_at;
+    if (!value) return '';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '';
+    return parsed.toLocaleDateString('ar-DZ');
 }
 
 function entityMatchesContext(entity: string, contextText: string): boolean {
@@ -1467,6 +1496,107 @@ function WorkspaceDraftsPageContent() {
     }, [readiness, claims, quality]);
 
     const bodyText = useMemo(() => htmlToReadableText(bodyHtml || ''), [bodyHtml]);
+    const storyTimeline = useMemo(() => (context?.story_context?.timeline || []) as StoryContextItem[], [context?.story_context?.timeline]);
+    const storyRelations = useMemo(() => (context?.story_context?.relations || []) as StoryContextItem[], [context?.story_context?.relations]);
+    const storyItems = useMemo(() => [...storyTimeline, ...storyRelations], [storyTimeline, storyRelations]);
+    const storyTimelineSorted = useMemo(() => {
+        const list = [...storyTimeline];
+        list.sort((a, b) => storyItemTimestamp(b) - storyItemTimestamp(a));
+        return list;
+    }, [storyTimeline]);
+    const storyTimelineChrono = useMemo(() => {
+        const list = [...storyTimeline].filter((item) => storyItemTimestamp(item) > 0);
+        list.sort((a, b) => storyItemTimestamp(a) - storyItemTimestamp(b));
+        return list;
+    }, [storyTimeline]);
+    const storyHub = useMemo(() => {
+        const sources = new Set<string>();
+        const categories = new Set<string>();
+        let latest = 0;
+        for (const item of storyItems) {
+            const source = cleanText(item?.source_name || '');
+            const category = cleanText(item?.category || '');
+            if (source) sources.add(source);
+            if (category) categories.add(category);
+            latest = Math.max(latest, storyItemTimestamp(item));
+        }
+        const latestLabel = latest ? new Date(latest).toLocaleString('ar-DZ') : '—';
+        return {
+            total: storyItems.length,
+            timelineCount: storyTimeline.length,
+            relationsCount: storyRelations.length,
+            sourcesCount: sources.size,
+            categories: Array.from(categories).slice(0, 4),
+            latestLabel,
+        };
+    }, [storyItems, storyTimeline.length, storyRelations.length]);
+    const storyGaps = useMemo<StoryGap[]>(() => {
+        const gaps: StoryGap[] = [];
+        const text = `${bodyText} ${cleanText(context?.article?.summary || '')} ${cleanText(context?.article?.original_content || '')}`.trim();
+        const hasNumbers = /\d/.test(text);
+        const hasQuote = /(قال|أفاد|أعلن|صرّح|صرح|أكد|حسب|وفق)/.test(text);
+        const hasReaction = /(رد|تعليق|انتقاد|ترحيب|أكدت المعارضة|رفض|طالبت)/.test(text);
+        const sourcesSet = new Set(storyItems.map((item) => cleanText(item?.source_name || '')).filter(Boolean));
+        const hasBlockingClaims = claims.some((claim: any) => claim?.blocking);
+        if (hasBlockingClaims) {
+            gaps.push({
+                id: 'claims',
+                title: 'ادعاءات بحاجة إلى توثيق',
+                hint: 'يوجد ادعاءات حرجة بدون مصادر كافية. شغّل التحقق لإضافة الأدلة.',
+                severity: 'high',
+                action: 'verify',
+            });
+        }
+        if (sourcesSet.size < 2) {
+            gaps.push({
+                id: 'sources',
+                title: 'تنويع المصادر',
+                hint: 'أضف مصدراً ثانياً مستقلاً لتقوية المصداقية.',
+                severity: 'medium',
+            });
+        }
+        if (!hasNumbers) {
+            gaps.push({
+                id: 'numbers',
+                title: 'لا توجد بيانات رقمية',
+                hint: 'أضف أرقاماً أو إحصاءات موثقة لتدعيم الخبر.',
+                severity: 'medium',
+            });
+        }
+        if (!hasQuote) {
+            gaps.push({
+                id: 'quote',
+                title: 'لا يوجد تصريح مباشر',
+                hint: 'أدرج تصريحاً أو بياناً رسمياً إن توفر.',
+                severity: 'low',
+            });
+        }
+        if (!hasReaction) {
+            gaps.push({
+                id: 'reaction',
+                title: 'لا توجد ردود فعل',
+                hint: 'حاول إضافة رأي طرف آخر أو رد فعل مختصر.',
+                severity: 'low',
+            });
+        }
+        if (storyTimeline.length < 3) {
+            gaps.push({
+                id: 'timeline',
+                title: 'السياق الزمني محدود',
+                hint: 'أضف مواد سابقة لشرح الخلفية والتطورات.',
+                severity: 'low',
+            });
+        }
+        return gaps.slice(0, 5);
+    }, [bodyText, context?.article?.summary, context?.article?.original_content, storyItems, storyTimeline.length, claims]);
+    const autoTimelineLines = useMemo(() => {
+        const lines = storyTimelineChrono.slice(-8).map((item) => {
+            const dateLabel = storyItemDateLabel(item);
+            const titleLine = cleanText(item?.title || 'خبر مرتبط');
+            return dateLabel ? `${dateLabel} — ${titleLine}` : titleLine;
+        });
+        return lines.filter(Boolean);
+    }, [storyTimelineChrono]);
     const workflowSteps = useMemo(() => {
         const hasContext = Boolean(cleanText(context?.article?.summary || context?.article?.original_content || '').trim());
         const hasDraft = bodyText.trim().length >= 400;
@@ -1874,6 +2004,20 @@ function WorkspaceDraftsPageContent() {
             .join('');
         editor.chain().focus().insertContent(html).run();
         setSaveState('unsaved');
+    }
+
+    function insertAutoTimeline() {
+        if (!editor) return;
+        if (autoTimelineLines.length === 0) {
+            setErr('لا يوجد خط زمني كافٍ للإدراج.');
+            return;
+        }
+        const html = `<h2>التسلسل الزمني</h2><ul>${autoTimelineLines
+            .map((line) => `<li>${safeInlineText(line)}</li>`)
+            .join('')}</ul>`;
+        editor.chain().focus().insertContent(html).run();
+        setSaveState('unsaved');
+        setOk('تم إدراج التسلسل الزمني في المسودة.');
     }
 
     async function openStoryInEditor(item: StoryContextItem) {
@@ -3463,16 +3607,80 @@ function WorkspaceDraftsPageContent() {
                             </div>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-300 space-y-2">
+                                <p className="text-gray-400">لوحة القصة</p>
+                                <div className="grid grid-cols-2 gap-2 text-[11px] text-gray-200">
+                                    <div className="rounded-lg border border-white/10 bg-white/5 px-2 py-1">
+                                        <p className="text-[10px] text-gray-400">العناصر المرتبطة</p>
+                                        <p>{storyHub.total}</p>
+                                    </div>
+                                    <div className="rounded-lg border border-white/10 bg-white/5 px-2 py-1">
+                                        <p className="text-[10px] text-gray-400">مصادر متنوعة</p>
+                                        <p>{storyHub.sourcesCount}</p>
+                                    </div>
+                                    <div className="rounded-lg border border-white/10 bg-white/5 px-2 py-1">
+                                        <p className="text-[10px] text-gray-400">الخط الزمني</p>
+                                        <p>{storyHub.timelineCount}</p>
+                                    </div>
+                                    <div className="rounded-lg border border-white/10 bg-white/5 px-2 py-1">
+                                        <p className="text-[10px] text-gray-400">العلاقات</p>
+                                        <p>{storyHub.relationsCount}</p>
+                                    </div>
+                                </div>
+                                <p className="text-[10px] text-gray-500">آخر تحديث: {storyHub.latestLabel}</p>
+                                {!!storyHub.categories.length && (
+                                    <div className="flex flex-wrap gap-1 text-[10px] text-gray-300">
+                                        {storyHub.categories.map((cat) => (
+                                            <span key={`story-cat-${cat}`} className="rounded bg-white/10 px-2 py-0.5">
+                                                {cat}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-300 space-y-2">
+                                <p className="text-gray-400">الفجوات المحتملة في القصة</p>
+                                {storyGaps.length === 0 ? (
+                                    <p className="text-[11px] text-emerald-200">لا توجد فجوات حرجة ظاهرة الآن.</p>
+                                ) : (
+                                    storyGaps.map((gap) => (
+                                        <div key={gap.id} className={cn('rounded-lg border px-2 py-1 text-[11px] space-y-1', severityStyles(gap.severity).border)}>
+                                            <p className="text-gray-100">{gap.title}</p>
+                                            <p className="text-[10px] text-gray-400">{gap.hint}</p>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
-                                <p className="text-gray-400 text-xs">الخط الزمني</p>
-                                {(context?.story_context?.timeline || []).length === 0 && <p className="text-xs text-gray-500">لا توجد مواد زمنية مرتبطة.</p>}
-                                {(context?.story_context?.timeline || []).map((item: any) => (
+                                <div className="flex items-center justify-between gap-2">
+                                    <p className="text-gray-400 text-xs">الخط الزمني</p>
+                                    <button
+                                        onClick={insertAutoTimeline}
+                                        disabled={autoTimelineLines.length === 0}
+                                        className="px-2 py-1 rounded bg-emerald-500/20 text-[10px] text-emerald-100 disabled:opacity-40"
+                                    >
+                                        إدراج تسلسل زمني
+                                    </button>
+                                </div>
+                                {autoTimelineLines.length > 0 && (
+                                    <div className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-gray-300">
+                                        {autoTimelineLines.slice(0, 4).map((line, idx) => (
+                                            <p key={`tl-preview-${idx}`} className="line-clamp-1">
+                                                {line}
+                                            </p>
+                                        ))}
+                                    </div>
+                                )}
+                                {storyTimelineSorted.length === 0 && <p className="text-xs text-gray-500">لا توجد مواد زمنية مرتبطة.</p>}
+                                {storyTimelineSorted.map((item: any) => (
                                     <div key={`timeline-${item.id}`} className="rounded-lg border border-white/10 bg-white/5 p-2">
                                         <p className="text-xs text-gray-200 line-clamp-2">{cleanText(item.title || 'بدون عنوان')}</p>
                                         {item.summary && <p className="text-[10px] text-gray-400 mt-1 line-clamp-2">{cleanText(item.summary)}</p>}
                                         {(item.published_at || item.created_at) && (
                                             <p className="text-[10px] text-gray-500 mt-1">
-                                                {new Date(item.published_at || item.created_at).toLocaleDateString('ar-DZ')}
+                                                {storyItemDateLabel(item)}
                                                 {item.source_name ? ` • ${cleanText(item.source_name)}` : ''}
                                             </p>
                                         )}
