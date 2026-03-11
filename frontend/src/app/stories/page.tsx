@@ -29,7 +29,7 @@ export default function StoriesPage() {
         isRefetching: isClustersRefetching,
     } = useQuery({
         queryKey: ['stories-page-clusters', clusterHours, clusterMinSize],
-        queryFn: () => storiesApi.clusters({ hours: clusterHours, min_size: clusterMinSize, limit: 20 }),
+        queryFn: () => storiesApi.clusters({ hours: clusterHours, ?????_size: clusterMinSize, limit: 20 }),
     });
 
     const stories = useMemo(() => data?.data || [], [data?.data]);
@@ -65,12 +65,12 @@ export default function StoriesPage() {
             const story = res.data?.story;
             if (story?.id) {
                 setSelectedStoryId(story.id);
-                setActionMsg(`Linked to story ${story.story_key}.`);
+                setActionMsg(`تم الربط مع القصة ${story.story_key}.`);
             } else {
-                setActionMsg('Story created and linked.');
+                setActionMsg('تم إنشاء القصة وربطها.');
             }
         },
-        onError: () => setActionErr('Failed to create story from this cluster.'),
+        onError: () => setActionErr('تعذر إنشاء قصة من هذه المجموعة.'),
     });
 
     return (
@@ -151,7 +151,7 @@ export default function StoriesPage() {
                     report={clusterReport}
                     items={filteredClusters}
                     hours={clusterHours}
-                    minSize={clusterMinSize}
+                    ?????Size={clusterMinSize}
                     query={clusterQuery}
                     onQueryChange={setClusterQuery}
                     onChangeHours={setClusterHours}
@@ -174,11 +174,11 @@ export default function StoriesPage() {
             )}
             {view === 'stories' && (
                 isLoading ? (
-                    <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-6 text-slate-400">Loading...</div>
+                    <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-6 text-slate-400">جاري التحميل...</div>
                 ) : (
                     <div className="grid grid-cols-1 gap-3">
                         {stories.length === 0 && (
-                            <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-6 text-slate-400">No stories yet. Create one from the news page.</div>
+                            <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-6 text-slate-400">لا توجد قصص بعد. أنشئ قصة من صفحة الخبر.</div>
                         )}
                         {stories.map((story) => (
                             <button
@@ -191,7 +191,7 @@ export default function StoriesPage() {
                                     <div>
                                         <p className="text-sm text-cyan-300 font-medium">{story.story_key}</p>
                                         <h2 className="text-lg font-semibold text-white mt-1">{story.title}</h2>
-                                        <p className="text-xs text-slate-400 mt-2 line-clamp-2">{story.summary || 'No summary'}</p>
+                                        <p className="text-xs text-slate-400 mt-2 line-clamp-2">{story.summary || 'بدون ملخص'}</p>
                                     </div>
                                     <div className="text-left shrink-0">
                                         <p className="text-xs text-slate-300">{story.status}</p>
@@ -217,7 +217,7 @@ function StoryClustersSection({
     report,
     items,
     hours,
-    minSize,
+    ?????Size,
     query,
     onQueryChange,
     onChangeHours,
@@ -237,7 +237,7 @@ function StoryClustersSection({
     };
     items: StoryClusterRecord[];
     hours: number;
-    minSize: number;
+    ?????Size: number;
     query: string;
     onQueryChange: (value: string) => void;
     onChangeHours: (value: number) => void;
@@ -251,8 +251,8 @@ function StoryClustersSection({
         <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-4 space-y-4">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div>
-                    <h2 className="text-sm font-semibold text-white">Story Clusters</h2>
-                    <p className="text-[11px] text-slate-400">Pick a cluster, review the items, then create a story.</p>
+                    <h2 className="text-sm font-semibold text-white">مجموعات القصص</h2>
+                    <p className="text-[11px] text-slate-400">اختر مجموعة، راجع العناصر، ثم أنشئ قصة.</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                     <input
@@ -292,13 +292,13 @@ function StoryClustersSection({
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
 
                 <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-slate-200">
-                    Clusters Created: <span className="text-white font-semibold">{report?.metrics?.clusters_created ?? 0}</span>
+                    ????????? ???????: <span className="text-white font-semibold">{report?.metrics?.clusters_created ?? 0}</span>
                 </div>
                 <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-slate-200">
-                    Avg Cluster Size: <span className="text-white font-semibold">{report?.metrics?.average_cluster_size ?? 0}</span>
+                    ????? ??? ????????: <span className="text-white font-semibold">{report?.metrics?.average_cluster_size ?? 0}</span>
                 </div>
                 <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-slate-200">
-                    Avg Time To Cluster: <span className="text-white font-semibold">{report?.metrics?.time_to_cluster_minutes ?? 'n/a'} min</span>
+                    ????? ??? ???????: <span className="text-white font-semibold">{report?.metrics?.time_to_cluster_minutes ?? '??? ????'} ?????</span>
                 </div>
             </div>
 
@@ -349,13 +349,13 @@ function ClusterCard({
             <div className="flex items-start justify-between gap-3">
                 <div className="space-y-1">
                     <p className="text-[11px] text-cyan-300">{cluster.cluster_key}</p>
-                    <p className="text-sm text-white font-medium line-clamp-1">{cluster.label || `Cluster #${cluster.cluster_id}`}</p>
+                    <p className="text-sm text-white font-medium line-clamp-1">{cluster.label || `مجموعة #${cluster.cluster_id}`}</p>
                     <p className="text-[11px] text-slate-400">
-                        {cluster.category || 'uncategorized'} - {cluster.geography || 'n/a'} - members: {cluster.cluster_size}
+                        {cluster.category || 'غير مصنف'} • {cluster.geography || 'غير محدد'} • الأعضاء: {cluster.cluster_size}
                     </p>
                 </div>
                 <div className="flex flex-col items-end gap-2">
-                    <p className="text-[11px] text-slate-500">{cluster.latest_article_at ? formatRelativeTime(cluster.latest_article_at) : 'no activity'}</p>
+                    <p className="text-[11px] text-slate-500">{cluster.latest_article_at ? formatRelativeTime(cluster.latest_article_at) : 'لا توجد نشاطات'}</p>
                     <div className="flex items-center gap-2">
                         <button
                             type="button"
@@ -364,7 +364,7 @@ function ClusterCard({
                             className="inline-flex items-center gap-1 rounded-lg border border-emerald-400/40 bg-emerald-500/15 px-2 py-1 text-[11px] text-emerald-100 disabled:opacity-50"
                         >
                             <FolderPlus className="w-3 h-3" />
-                            Create story
+                            إنشاء قصة
                         </button>
                         <button
                             type="button"
@@ -372,7 +372,7 @@ function ClusterCard({
                             className="inline-flex items-center gap-1 rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-[11px] text-slate-300"
                         >
                             {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                            {expanded ? 'Hide' : 'Details'}
+                            {expanded ? 'إخفاء' : 'تفاصيل'}
                         </button>
                     </div>
                 </div>
@@ -410,11 +410,11 @@ function ClusterCard({
                                     target="_blank"
                                     rel="noreferrer"
                                 >
-                                    Open
+                                    فتح
                                 </a>
                             </div>
                         ))}
-                        {cluster.members.length === 0 && <p className="text-[11px] text-slate-500">No items.</p>}
+                        {cluster.members.length === 0 && <p className="text-[11px] text-slate-500">لا توجد عناصر.</p>}
                     </div>
                 </div>
             )}
