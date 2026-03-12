@@ -805,6 +805,7 @@ async def upcoming_events(
         select(EventMemoItem)
         .where(
             EventMemoItem.status.in_(list(ACTIVE_STATUSES)),
+            EventMemoItem.starts_at >= now,
             EventMemoItem.starts_at <= window_end,
         )
         .order_by(EventMemoItem.starts_at.asc(), EventMemoItem.priority.desc())
