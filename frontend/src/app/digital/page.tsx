@@ -3,15 +3,18 @@
 import { useMemo, useState } from 'react';
 import { isAxiosError } from 'axios';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarDays, CheckCircle2, Copy, Megaphone, PlusCircle, RefreshCcw, Sparkles, UploadCloud } from 'lucide-react';
+import { AlertTriangle, ArrowRightCircle, CalendarDays, CheckCircle2, Copy, Megaphone, PlusCircle, RefreshCcw, Sparkles, UploadCloud } from 'lucide-react';
 
 import {
     authApi,
     digitalApi,
     type DigitalChannel,
     type DigitalPost,
+    type DigitalPostVersion,
     type DigitalPostStatus,
+    type DigitalScopePerformanceItem,
     type DigitalTask,
+    type DigitalTaskActionItem,
     type DigitalTaskStatus,
     type TeamMember,
 } from '@/lib/api';
@@ -117,6 +120,38 @@ function postStatusClass(status: string): string {
     return 'border-blue-500/30 bg-blue-500/10 text-blue-200';
 }
 
+function actionCodeLabel(code: string): string {
+    const labels: Record<string, string> = {
+        recover_failed: 'استرجاع الفشل',
+        assign_owner: 'تعيين مالك',
+        generate_posts: 'توليد منشورات',
+        review_drafts: 'راجع المسودات',
+        approve_posts: 'اعتماد',
+        publish_or_schedule: 'نشر/جدولة',
+        start_task: 'بدء التنفيذ',
+        move_to_review: 'إرسال للمراجعة',
+        monitor: 'متابعة',
+    };
+    return labels[code] || 'إجراء';
+}
+
+function actionCodeClass(code: string): string {
+    if (code === 'recover_failed') return 'border-rose-500/30 bg-rose-500/10 text-rose-200';
+    if (code === 'publish_or_schedule' || code === 'approve_posts') return 'border-amber-500/30 bg-amber-500/10 text-amber-200';
+    if (code === 'generate_posts') return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200';
+    return 'border-slate-500/30 bg-slate-500/10 text-slate-200';
+}
+
+function taskObjectiveLabel(taskType: string): string {
+    const key = (taskType || '').toLowerCase();
+    if (key.includes('breaking')) return 'breaking';
+    if (key.includes('pre')) return 'teaser';
+    if (key.includes('live')) return 'live_update';
+    if (key.includes('post')) return 'recap';
+    if (key.includes('event')) return 'event_coverage';
+    return 'general';
+}
+
 export default function DigitalPage() {
     const { user } = useAuth();
     const role = (user?.role || '').toLowerCase();
@@ -134,6 +169,7 @@ export default function DigitalPage() {
     const [taskTypeFilter, setTaskTypeFilter] = useState<string>('all');
     const [onlyMine, setOnlyMine] = useState(false);
     const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
+    const [selectedTaskIds, setSelectedTaskIds] = useState<number[]>([]);
 
     const [taskTitle, setTaskTitle] = useState('');
     const [taskBrief, setTaskBrief] = useState('');
@@ -156,12 +192,24 @@ export default function DigitalPage() {
     const [composerPlatforms, setComposerPlatforms] = useState<string[]>(['facebook']);
     const [composerTaskId, setComposerTaskId] = useState<number | null>(null);
     const [composerGenerated, setComposerGenerated] = useState<Record<string, { text: string; hashtags: string[] }>>({});
+    const [bundlePlaybookKey, setBundlePlaybookKey] = useState('breaking_alert');
+    const [openVersionsForPost, setOpenVersionsForPost] = useState<number | null>(null);
+    const [compareBaseVersionNo, setCompareBaseVersionNo] = useState<number | null>(null);
+    const [compareTargetVersionNo, setCompareTargetVersionNo] = useState<number | null>(null);
+    const [engagementByPostId, setEngagementByPostId] = useState<Record<number, { score: number; rec: string[] }>>({});
 
     const overviewQuery = useQuery({
         queryKey: ['digital-overview'],
         queryFn: () => digitalApi.overview(),
         enabled: canRead,
         refetchInterval: 30000,
+    });
+
+    const actionDeskQuery = useQuery({
+        queryKey: ['digital-action-desk', channel],
+        queryFn: () => digitalApi.actionDesk({ channel, limit_each: 10 }),
+        enabled: canRead,
+        refetchInterval: 20000,
     });
 
     const tasksQuery = useQuery({
@@ -196,6 +244,19 @@ export default function DigitalPage() {
         enabled: canManage,
     });
 
+    const playbooksQuery = useQuery({
+        queryKey: ['digital-playbooks'],
+        queryFn: () => digitalApi.playbooks(),
+        enabled: canRead,
+    });
+
+    const scopePerformanceQuery = useQuery({
+        queryKey: ['digital-scope-performance'],
+        queryFn: () => digitalApi.scopePerformance(),
+        enabled: canManage,
+        refetchInterval: 60000,
+    });
+
     const usersQuery = useQuery({
         queryKey: ['digital-users'],
         queryFn: () => authApi.users(),
@@ -214,8 +275,19 @@ export default function DigitalPage() {
             if (onlyMine && (!user?.id || task.owner_user_id !== user.id)) return false;
             return true;
         });
-    }, [onlyMine, taskTypeFilter, tasks, user?.id]);
+    }, [onlyMine, taskTypeFilter, tasks, user]);
     const selectedTask = useMemo(() => filteredTasks.find((t) => t.id === selectedTaskId) || null, [filteredTasks, selectedTaskId]);
+    const actionDesk = actionDeskQuery.data?.data;
+    const actionDeskItems = useMemo(() => {
+        const rows = [...(actionDesk?.now || []), ...(actionDesk?.next || []), ...(actionDesk?.at_risk || [])];
+        const map = new Map<number, DigitalTaskActionItem>();
+        rows.forEach((row) => map.set(row.task.id, row));
+        return map;
+    }, [actionDesk?.at_risk, actionDesk?.next, actionDesk?.now]);
+    const failedRiskItems = useMemo(
+        () => (actionDesk?.at_risk || []).filter((item) => (item.risk_flags || []).some((flag) => flag.includes('فاشل'))),
+        [actionDesk?.at_risk]
+    );
 
     const postsQuery = useQuery({
         queryKey: ['digital-posts', selectedTaskId],
@@ -223,6 +295,22 @@ export default function DigitalPage() {
         enabled: canRead && !!selectedTaskId,
     });
     const posts = useMemo(() => (postsQuery.data?.data?.items || []) as DigitalPost[], [postsQuery.data?.data?.items]);
+    const versionsQuery = useQuery({
+        queryKey: ['digital-post-versions', openVersionsForPost],
+        queryFn: () => digitalApi.listPostVersions(openVersionsForPost as number),
+        enabled: canRead && !!openVersionsForPost,
+    });
+    const versions = useMemo(() => (versionsQuery.data?.data?.items || []) as DigitalPostVersion[], [versionsQuery.data?.data?.items]);
+
+    const versionCompareQuery = useQuery({
+        queryKey: ['digital-post-compare', openVersionsForPost, compareBaseVersionNo, compareTargetVersionNo],
+        queryFn: () =>
+            digitalApi.comparePostVersions(openVersionsForPost as number, {
+                base_version_no: compareBaseVersionNo as number,
+                target_version_no: compareTargetVersionNo as number,
+            }),
+        enabled: canRead && !!openVersionsForPost && !!compareBaseVersionNo && !!compareTargetVersionNo,
+    });
 
     const socialUsers = useMemo(
         () =>
@@ -272,11 +360,26 @@ export default function DigitalPage() {
 
     const refreshAll = async () => {
         await queryClient.invalidateQueries({ queryKey: ['digital-overview'] });
+        await queryClient.invalidateQueries({ queryKey: ['digital-action-desk'] });
+        await queryClient.invalidateQueries({ queryKey: ['digital-playbooks'] });
+        await queryClient.invalidateQueries({ queryKey: ['digital-scope-performance'] });
         await queryClient.invalidateQueries({ queryKey: ['digital-tasks'] });
         await queryClient.invalidateQueries({ queryKey: ['digital-slots'] });
         await queryClient.invalidateQueries({ queryKey: ['digital-calendar'] });
         await queryClient.invalidateQueries({ queryKey: ['digital-posts'] });
+        await queryClient.invalidateQueries({ queryKey: ['digital-post-versions'] });
+        await queryClient.invalidateQueries({ queryKey: ['digital-post-compare'] });
         await queryClient.invalidateQueries({ queryKey: ['digital-scopes'] });
+    };
+
+    const toggleTaskSelection = (taskId: number, checked: boolean) => {
+        setSelectedTaskIds((prev) => {
+            if (checked) {
+                if (prev.includes(taskId)) return prev;
+                return [...prev, taskId];
+            }
+            return prev.filter((id) => id !== taskId);
+        });
     };
 
     const toggleComposerPlatform = (platform: string) => {
@@ -511,6 +614,76 @@ export default function DigitalPage() {
         onError: (err) => setError(apiErrorMessage(err, 'تعذر تحديث حالة المادة.')),
     });
 
+    const generateBundleMutation = useMutation({
+        mutationFn: () => {
+            if (!selectedTaskId) throw new Error('اختر مهمة أولاً.');
+            return digitalApi.generateBundle(selectedTaskId, {
+                playbook_key: bundlePlaybookKey,
+                save_as_posts: true,
+            });
+        },
+        onSuccess: async (res) => {
+            setError(null);
+            setMessage(`تم توليد باقة رقمية: ${res.data.generated_count} منشور.`);
+            await refreshAll();
+        },
+        onError: (err) => setError(apiErrorMessage(err, 'تعذر توليد الباقة الرقمية.')),
+    });
+
+    const regeneratePostMutation = useMutation({
+        mutationFn: (postId: number) => digitalApi.regeneratePost(postId),
+        onSuccess: async () => {
+            setError(null);
+            setMessage('تمت إعادة التوليد وحفظ نسخة جديدة.');
+            await refreshAll();
+        },
+        onError: (err) => setError(apiErrorMessage(err, 'تعذرت إعادة التوليد.')),
+    });
+
+    const duplicatePostVersionMutation = useMutation({
+        mutationFn: ({ postId, sourceVersionNo }: { postId: number; sourceVersionNo?: number }) =>
+            digitalApi.duplicatePostVersion(postId, {
+                source_version_no: sourceVersionNo,
+                version_type: 'duplicated',
+            }),
+        onSuccess: async () => {
+            setError(null);
+            setMessage('تم إنشاء نسخة جديدة من الإصدار المحدد.');
+            await refreshAll();
+        },
+        onError: (err) => setError(apiErrorMessage(err, 'تعذر تكرار النسخة.')),
+    });
+
+    const dispatchPostMutation = useMutation({
+        mutationFn: ({ postId, action }: { postId: number; action: 'publish' | 'schedule' }) =>
+            digitalApi.dispatchPost(postId, {
+                adapter: 'manual',
+                action,
+                scheduled_at: action === 'schedule' ? new Date(Date.now() + 5 * 60 * 1000).toISOString() : null,
+            }),
+        onSuccess: async (res) => {
+            setError(null);
+            setMessage(res.data.message || 'تم تنفيذ التسليم.');
+            await refreshAll();
+        },
+        onError: (err) => setError(apiErrorMessage(err, 'تعذر تنفيذ التسليم.')),
+    });
+
+    const engagementMutation = useMutation({
+        mutationFn: (postId: number) => digitalApi.postEngagementScore(postId),
+        onSuccess: (res) => {
+            setEngagementByPostId((prev) => ({
+                ...prev,
+                [res.data.post_id]: {
+                    score: res.data.score,
+                    rec: res.data.recommendations || [],
+                },
+            }));
+            setError(null);
+        },
+        onError: (err) => setError(apiErrorMessage(err, 'تعذر حساب مؤشر التفاعل.')),
+    });
+
     const quickPostStatusMutation = useMutation({
         mutationFn: ({ postId, status }: { postId: number; status: DigitalPostStatus }) =>
             digitalApi.updatePost(postId, { status }),
@@ -519,6 +692,78 @@ export default function DigitalPage() {
             await refreshAll();
         },
         onError: (err) => setError(apiErrorMessage(err, 'تعذر تحديث حالة المنشور.')),
+    });
+
+    const bulkTaskStatusMutation = useMutation({
+        mutationFn: async (nextStatus: DigitalTaskStatus) => {
+            const ids = selectedTaskIds.slice();
+            if (!ids.length) throw new Error('حدد مهمة واحدة على الأقل.');
+            await Promise.all(ids.map((taskId) => digitalApi.updateTask(taskId, { status: nextStatus })));
+            return ids.length;
+        },
+        onSuccess: async (count) => {
+            setSelectedTaskIds([]);
+            setError(null);
+            setMessage(`تم تحديث ${count} مهمة.`);
+            await refreshAll();
+        },
+        onError: (err) => setError(apiErrorMessage(err, 'تعذر تنفيذ الإجراء الجماعي.')),
+    });
+
+    const runNextActionMutation = useMutation({
+        mutationFn: async (item: DigitalTaskActionItem) => {
+            const taskId = item.task.id;
+            const code = item.next_best_action_code;
+            if (code === 'assign_owner') {
+                if (!user?.id) throw new Error('تعذر تحديد المستخدم الحالي.');
+                await digitalApi.updateTask(taskId, { owner_user_id: user.id });
+                return 'تم تعيينك مالكًا للمهمة.';
+            }
+            if (code === 'start_task') {
+                await digitalApi.updateTask(taskId, { status: 'in_progress' });
+                return 'تم بدء التنفيذ.';
+            }
+            if (code === 'move_to_review') {
+                await digitalApi.updateTask(taskId, { status: 'review' });
+                return 'تم نقل المهمة للمراجعة.';
+            }
+            if (code === 'generate_posts') {
+                const composed = await digitalApi.composeTask(taskId, { platform: 'facebook', max_hashtags: 6 });
+                setSelectedTaskId(taskId);
+                setPostPlatform('facebook');
+                setPostContent(composed.data.recommended_text || '');
+                setPostHashtags((composed.data.hashtags || []).join(', '));
+                return 'تم توليد مسودة منشور وفتحها للتحرير.';
+            }
+            if (code === 'approve_posts') {
+                const postList = await digitalApi.listTaskPosts(taskId);
+                const candidate = (postList.data.items || []).find((post) => post.status === 'ready' || post.status === 'draft');
+                if (!candidate) return 'لا توجد مادة قابلة للاعتماد حالياً.';
+                await digitalApi.updatePost(candidate.id, { status: 'approved' });
+                return 'تم اعتماد أول مادة جاهزة.';
+            }
+            if (code === 'publish_or_schedule') {
+                const postList = await digitalApi.listTaskPosts(taskId);
+                const candidate = (postList.data.items || []).find((post) => post.status === 'approved');
+                if (!candidate) return 'لا توجد مادة معتمدة للنشر.';
+                await digitalApi.updatePost(candidate.id, { status: 'scheduled', scheduled_at: new Date().toISOString() });
+                return 'تمت جدولة المادة المعتمدة.';
+            }
+            if (code === 'recover_failed') {
+                const postList = await digitalApi.listTaskPosts(taskId);
+                const failed = (postList.data.items || []).find((post) => post.status === 'failed');
+                if (!failed) return 'لا يوجد منشور فاشل لهذا العنصر.';
+                await digitalApi.updatePost(failed.id, { status: 'draft', error_message: null });
+                return 'تم استرجاع المنشور الفاشل إلى مسودة.';
+            }
+            return 'لا يوجد إجراء آلي لهذه المهمة حالياً.';
+        },
+        onSuccess: async (msg) => {
+            setError(null);
+            setMessage(msg);
+            await refreshAll();
+        },
+        onError: (err) => setError(apiErrorMessage(err, 'تعذر تنفيذ الإجراء التالي.')),
     });
 
     const saveScopeMutation = useMutation({
@@ -560,6 +805,90 @@ export default function DigitalPage() {
             {message && <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-emerald-200 text-sm">{message}</div>}
             {error && <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-rose-200 text-sm">{error}</div>}
 
+            <section className="rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                    <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                        <ArrowRightCircle className="w-4 h-4 text-cyan-300" />
+                        نفّذ الآن
+                    </h2>
+                    <div className="text-xs text-slate-400">Now / Next / At Risk</div>
+                </div>
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
+                    {[
+                        {
+                            key: 'now',
+                            title: `Now (${actionDesk?.now_count || 0})`,
+                            items: actionDesk?.now || [],
+                            empty: 'لا توجد مهام حرجة الآن.',
+                            tone: 'border-cyan-500/20 bg-cyan-500/5',
+                        },
+                        {
+                            key: 'next',
+                            title: `Next (${actionDesk?.next_count || 0})`,
+                            items: actionDesk?.next || [],
+                            empty: 'لا توجد مهام خلال الساعتين القادمتين.',
+                            tone: 'border-indigo-500/20 bg-indigo-500/5',
+                        },
+                        {
+                            key: 'risk',
+                            title: `At Risk (${actionDesk?.at_risk_count || 0})`,
+                            items: actionDesk?.at_risk || [],
+                            empty: 'لا توجد مهام مهددة حالياً.',
+                            tone: 'border-rose-500/20 bg-rose-500/5',
+                        },
+                    ].map((group) => (
+                        <div key={group.key} className={cn('rounded-xl border p-3 space-y-2', group.tone)}>
+                            <div className="text-sm font-medium text-white">{group.title}</div>
+                            <div className="space-y-2 max-h-64 overflow-auto">
+                                {group.items.map((item) => (
+                                    <div key={`${group.key}-${item.task.id}`} className="rounded-lg border border-slate-800 bg-slate-900/60 p-2">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <button
+                                                onClick={() => setSelectedTaskId(item.task.id)}
+                                                className="text-right text-xs text-cyan-200 hover:text-cyan-100"
+                                            >
+                                                {item.task.title}
+                                            </button>
+                                            <span className={cn('inline-flex px-2 py-0.5 rounded-lg border text-[10px]', actionCodeClass(item.next_best_action_code))}>
+                                                {actionCodeLabel(item.next_best_action_code)}
+                                            </span>
+                                        </div>
+                                        <div className="text-[11px] text-slate-400 mt-1">{item.why_now}</div>
+                                        {!!item.risk_flags?.length && (
+                                            <div className="mt-1 flex flex-wrap gap-1">
+                                                {item.risk_flags.map((flag) => (
+                                                    <span key={flag} className="inline-flex rounded-md border border-rose-500/30 bg-rose-500/10 px-1.5 py-0.5 text-[10px] text-rose-200">
+                                                        {flag}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        )}
+                                        {canWrite && (
+                                            <button
+                                                onClick={() => runNextActionMutation.mutate(item)}
+                                                className="mt-2 h-7 px-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-[11px] disabled:opacity-50"
+                                                disabled={runNextActionMutation.isPending}
+                                            >
+                                                تنفيذ: {item.next_best_action}
+                                            </button>
+                                        )}
+                                    </div>
+                                ))}
+                                {!group.items.length && <div className="text-xs text-slate-500">{group.empty}</div>}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+                {!!failedRiskItems.length && (
+                    <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3">
+                        <div className="text-xs text-rose-200 flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" />
+                            Recovery Desk: توجد {failedRiskItems.length} مهمة بها منشورات فاشلة.
+                        </div>
+                    </div>
+                )}
+            </section>
+
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
                 <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-3"><div className="text-xs text-gray-400">إجمالي المهام</div><div className="text-2xl font-bold text-white">{overviewQuery.data?.data?.total_tasks ?? 0}</div></div>
                 <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-3"><div className="text-xs text-gray-400">متأخرة</div><div className="text-2xl font-bold text-white">{overviewQuery.data?.data?.overdue ?? 0}</div></div>
@@ -588,22 +917,92 @@ export default function DigitalPage() {
                             مهامي فقط
                         </label>
                     </div>
+                    {canWrite && (
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button
+                                onClick={() => setSelectedTaskIds(filteredTasks.map((task) => task.id))}
+                                className="h-8 px-2 rounded-lg border border-slate-600 bg-slate-800/60 text-slate-200 text-xs"
+                            >
+                                تحديد الكل
+                            </button>
+                            <button
+                                onClick={() => setSelectedTaskIds([])}
+                                className="h-8 px-2 rounded-lg border border-slate-600 bg-slate-800/60 text-slate-200 text-xs"
+                            >
+                                إلغاء التحديد
+                            </button>
+                            <button
+                                onClick={() => bulkTaskStatusMutation.mutate('in_progress')}
+                                disabled={!selectedTaskIds.length || bulkTaskStatusMutation.isPending}
+                                className="h-8 px-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-xs disabled:opacity-50"
+                            >
+                                بدء جماعي
+                            </button>
+                            <button
+                                onClick={() => bulkTaskStatusMutation.mutate('review')}
+                                disabled={!selectedTaskIds.length || bulkTaskStatusMutation.isPending}
+                                className="h-8 px-2 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-200 text-xs disabled:opacity-50"
+                            >
+                                مراجعة جماعية
+                            </button>
+                            <button
+                                onClick={() => bulkTaskStatusMutation.mutate('done')}
+                                disabled={!selectedTaskIds.length || bulkTaskStatusMutation.isPending}
+                                className="h-8 px-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-xs disabled:opacity-50"
+                            >
+                                إغلاق جماعي
+                            </button>
+                            <div className="text-xs text-slate-400">المحدد: {selectedTaskIds.length}</div>
+                        </div>
+                    )}
                     <div className="max-h-[520px] overflow-auto rounded-xl border border-slate-800">
                         <table className="w-full text-sm">
-                            <thead className="bg-slate-900/80 text-slate-300 sticky top-0"><tr><th className="text-right px-3 py-2">المهمة</th><th className="text-right px-3 py-2">القناة</th><th className="text-right px-3 py-2">الحالة</th><th className="text-right px-3 py-2">الاستحقاق</th><th className="text-right px-3 py-2">إجراءات</th></tr></thead>
+                            <thead className="bg-slate-900/80 text-slate-300 sticky top-0"><tr><th className="text-right px-3 py-2">تحديد</th><th className="text-right px-3 py-2">المهمة</th><th className="text-right px-3 py-2">القناة</th><th className="text-right px-3 py-2">الحالة</th><th className="text-right px-3 py-2">الاستحقاق</th><th className="text-right px-3 py-2">الإجراء التالي</th><th className="text-right px-3 py-2">إجراءات</th></tr></thead>
                             <tbody>
                                 {filteredTasks.map((task) => (
                                     <tr key={task.id} className={cn('border-t border-slate-800 hover:bg-slate-900/50 cursor-pointer', selectedTaskId === task.id && 'bg-cyan-500/10')} onClick={() => setSelectedTaskId(task.id)}>
+                                        <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedTaskIds.includes(task.id)}
+                                                onChange={(e) => toggleTaskSelection(task.id, e.target.checked)}
+                                            />
+                                        </td>
                                         <td className="px-3 py-2">
                                             <div className="text-white font-medium">{task.title}</div>
                                             <div className="text-xs text-slate-500 mt-1">{task.brief || 'بدون وصف'}</div>
                                             <div className="text-[11px] text-slate-500 mt-1">{task.task_type} {task.owner_username ? `• ${task.owner_username}` : ''}</div>
+                                            {actionDeskItems.get(task.id)?.why_now && (
+                                                <div className="text-[11px] text-cyan-300/80 mt-1">{actionDeskItems.get(task.id)?.why_now}</div>
+                                            )}
                                         </td>
                                         <td className="px-3 py-2 text-slate-300">{channelLabel(task.channel)}</td>
                                         <td className="px-3 py-2"><span className={cn('inline-flex px-2 py-0.5 rounded-lg border text-xs', taskStatusClass(task.status))}>{taskStatusLabel(task.status)}</span></td>
                                         <td className="px-3 py-2 text-slate-300">{task.due_at ? <div><div>{formatDate(task.due_at)}</div><div className="text-xs text-slate-500">{formatRelativeTime(task.due_at)}</div></div> : '—'}</td>
                                         <td className="px-3 py-2">
+                                            {actionDeskItems.get(task.id) ? (
+                                                <div className="space-y-1">
+                                                    <span className={cn('inline-flex px-2 py-0.5 rounded-lg border text-xs', actionCodeClass(actionDeskItems.get(task.id)?.next_best_action_code || ''))}>
+                                                        {actionDeskItems.get(task.id)?.next_best_action || '—'}
+                                                    </span>
+                                                    {!!actionDeskItems.get(task.id)?.risk_flags?.length && (
+                                                        <div className="text-[11px] text-rose-300">{actionDeskItems.get(task.id)?.risk_flags.join('، ')}</div>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <span className="text-xs text-slate-500">—</span>
+                                            )}
+                                        </td>
+                                        <td className="px-3 py-2">
                                             {canWrite && <div className="flex gap-1 flex-wrap">
+                                                {actionDeskItems.get(task.id) && (
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); runNextActionMutation.mutate(actionDeskItems.get(task.id) as DigitalTaskActionItem); }}
+                                                        className="text-xs px-2 py-1 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-200"
+                                                    >
+                                                        التالي
+                                                    </button>
+                                                )}
                                                 {user?.id && task.owner_user_id !== user.id && <button onClick={(e) => { e.stopPropagation(); claimTaskMutation.mutate(task.id); }} className="text-xs px-2 py-1 rounded-lg border border-slate-500/30 bg-slate-500/10 text-slate-200">استلام</button>}
                                                 {task.status !== 'in_progress' && <button onClick={(e) => { e.stopPropagation(); updateTaskMutation.mutate({ taskId: task.id, nextStatus: 'in_progress' }); }} className="text-xs px-2 py-1 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-200">بدء</button>}
                                                 {task.status !== 'review' && task.status !== 'done' && <button onClick={(e) => { e.stopPropagation(); updateTaskMutation.mutate({ taskId: task.id, nextStatus: 'review' }); }} className="text-xs px-2 py-1 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-200">مراجعة</button>}
@@ -612,7 +1011,7 @@ export default function DigitalPage() {
                                         </td>
                                     </tr>
                                 ))}
-                                {!filteredTasks.length && <tr><td colSpan={5} className="px-3 py-8 text-center text-slate-500">لا توجد مهام مطابقة للفلاتر.</td></tr>}
+                                {!filteredTasks.length && <tr><td colSpan={7} className="px-3 py-8 text-center text-slate-500">لا توجد مهام مطابقة للفلاتر.</td></tr>}
                             </tbody>
                         </table>
                     </div>
@@ -772,6 +1171,40 @@ export default function DigitalPage() {
                 {selectedTask && (
                     <div className="space-y-3">
                         <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-3 text-sm text-slate-200">{selectedTask.title}</div>
+                        {actionDeskItems.get(selectedTask.id) && (
+                            <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-3 space-y-2">
+                                <div className="text-xs text-slate-300">سبب الإنشاء / Why now</div>
+                                <div className="text-sm text-white">{actionDeskItems.get(selectedTask.id)?.why_now}</div>
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-xs">
+                                    <div className="rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-1 text-slate-300">المصدر: {actionDeskItems.get(selectedTask.id)?.source_type || 'task'}</div>
+                                    <div className="rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-1 text-slate-300">النافذة: {actionDeskItems.get(selectedTask.id)?.trigger_window || '—'}</div>
+                                    <div className="rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-1 text-slate-300">إنشاء: {actionDeskItems.get(selectedTask.id)?.auto_generated ? 'آلي' : 'يدوي'}</div>
+                                    <div className="rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-1 text-slate-300">المرجع: {actionDeskItems.get(selectedTask.id)?.source_ref || '—'}</div>
+                                </div>
+                            </div>
+                        )}
+                        <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-3 space-y-2">
+                            <div className="text-xs text-slate-300">Digital Story Pack</div>
+                            <div className="flex flex-wrap gap-2 items-center">
+                                <select
+                                    value={bundlePlaybookKey}
+                                    onChange={(e) => setBundlePlaybookKey(e.target.value)}
+                                    className="h-9 min-w-[220px] rounded-lg border border-slate-700 bg-slate-900/60 px-3 text-xs text-white"
+                                >
+                                    {(playbooksQuery.data?.data || []).map((pb) => (
+                                        <option key={pb.key} value={pb.key}>{pb.label}</option>
+                                    ))}
+                                    {!playbooksQuery.data?.data?.length && <option value="breaking_alert">Breaking Alert</option>}
+                                </select>
+                                <button
+                                    onClick={() => generateBundleMutation.mutate()}
+                                    disabled={!canWrite || generateBundleMutation.isPending}
+                                    className="h-9 px-3 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-200 text-xs disabled:opacity-50"
+                                >
+                                    توليد باقة رقمية
+                                </button>
+                            </div>
+                        </div>
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
                             <select value={postPlatform} onChange={(e) => setPostPlatform(e.target.value)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white"><option value="facebook">facebook</option><option value="x">x</option><option value="youtube">youtube</option><option value="tiktok">tiktok</option><option value="instagram">instagram</option></select>
                             <select value={postStatus} onChange={(e) => setPostStatus(e.target.value as DigitalPostStatus)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white"><option value="draft">مسودة</option><option value="ready">جاهز</option><option value="approved">معتمد</option><option value="scheduled">مجدول</option></select>
@@ -800,20 +1233,106 @@ export default function DigitalPage() {
                                     {!!(post.hashtags || []).length && (
                                         <div className="text-xs text-slate-400 mt-2">{(post.hashtags || []).map((tag) => `#${String(tag).replace(/^#/, '')}`).join(' ')}</div>
                                     )}
+                                    <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2 text-[11px]">
+                                        <div className="rounded-md border border-slate-700 bg-slate-900/60 px-2 py-1 text-slate-300">المنصة: {normalizePlatform(post.platform)}</div>
+                                        <div className="rounded-md border border-slate-700 bg-slate-900/60 px-2 py-1 text-slate-300">الهدف: {taskObjectiveLabel(selectedTask.task_type)}</div>
+                                        <div className="rounded-md border border-slate-700 bg-slate-900/60 px-2 py-1 text-slate-300">المنشأ: {post.created_by_username === 'system' ? 'AI/Auto' : 'Manual'}</div>
+                                    </div>
                                     <div className="mt-2 flex flex-wrap gap-2">
                                         <button onClick={() => copySimple(post.content_text)} className="h-8 px-2 rounded-lg border border-slate-600 bg-slate-800/60 text-slate-200 text-xs inline-flex items-center gap-1"><Copy className="w-3 h-3" />نسخ النص</button>
                                         <button onClick={() => copySimple(composeCopyText(post.content_text, post.hashtags || []))} className="h-8 px-2 rounded-lg border border-cyan-600/40 bg-cyan-900/20 text-cyan-200 text-xs">نسخ كامل</button>
                                         <button onClick={() => openComposer(post.platform)} className="h-8 px-2 rounded-lg border border-indigo-600/40 bg-indigo-900/20 text-indigo-200 text-xs">فتح المنصة</button>
                                         <button onClick={() => copyAndOpenComposer(post.platform, post.content_text, post.hashtags || [])} className="h-8 px-2 rounded-lg border border-emerald-600/40 bg-emerald-900/20 text-emerald-200 text-xs">نسخ + فتح</button>
+                                        <button onClick={() => engagementMutation.mutate(post.id)} className="h-8 px-2 rounded-lg border border-violet-600/40 bg-violet-900/20 text-violet-200 text-xs">Engagement</button>
+                                        <button onClick={() => regeneratePostMutation.mutate(post.id)} className="h-8 px-2 rounded-lg border border-sky-600/40 bg-sky-900/20 text-sky-200 text-xs">Regenerate</button>
+                                        <button onClick={() => duplicatePostVersionMutation.mutate({ postId: post.id })} className="h-8 px-2 rounded-lg border border-slate-500/40 bg-slate-900/30 text-slate-200 text-xs">Duplicate version</button>
+                                        <button
+                                            onClick={() => {
+                                                setOpenVersionsForPost(post.id);
+                                                setCompareBaseVersionNo(null);
+                                                setCompareTargetVersionNo(null);
+                                            }}
+                                            className="h-8 px-2 rounded-lg border border-amber-600/40 bg-amber-900/20 text-amber-200 text-xs"
+                                        >
+                                            Versions ({post.versions_count || 0})
+                                        </button>
                                         {canWrite && post.status === 'draft' && <button onClick={() => quickPostStatusMutation.mutate({ postId: post.id, status: 'ready' })} className="h-8 px-2 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-200 text-xs">جاهز</button>}
                                         {canWrite && (post.status === 'ready' || post.status === 'draft') && <button onClick={() => quickPostStatusMutation.mutate({ postId: post.id, status: 'approved' })} className="h-8 px-2 rounded-lg border border-blue-500/30 bg-blue-500/10 text-blue-200 text-xs">اعتماد</button>}
+                                        {canWrite && post.status === 'failed' && <button onClick={() => quickPostStatusMutation.mutate({ postId: post.id, status: 'draft' })} className="h-8 px-2 rounded-lg border border-rose-500/30 bg-rose-500/10 text-rose-200 text-xs">استرجاع</button>}
+                                        {canWrite && post.status === 'approved' && <button onClick={() => dispatchPostMutation.mutate({ postId: post.id, action: 'publish' })} className="h-8 px-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-xs">Publish adapter</button>}
+                                        {canWrite && post.status === 'approved' && <button onClick={() => dispatchPostMutation.mutate({ postId: post.id, action: 'schedule' })} className="h-8 px-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-xs">Schedule adapter</button>}
                                     </div>
+                                    {engagementByPostId[post.id] && (
+                                        <div className="mt-2 rounded-lg border border-violet-500/30 bg-violet-500/10 p-2 text-xs text-violet-200">
+                                            Score: {engagementByPostId[post.id].score}/100
+                                            {!!engagementByPostId[post.id].rec.length && (
+                                                <div className="text-violet-100 mt-1">{engagementByPostId[post.id].rec[0]}</div>
+                                            )}
+                                        </div>
+                                    )}
                                     <div className="mt-2 flex flex-wrap gap-2">
                                         <input value={publishUrlDraft[post.id] || ''} onChange={(e) => setPublishUrlDraft((prev) => ({ ...prev, [post.id]: e.target.value }))} placeholder="رابط المنشور" className="h-9 min-w-[260px] flex-1 rounded-lg border border-slate-700 bg-slate-900/60 px-3 text-xs text-white" />
                                         {canWrite && post.status !== 'published' && <button onClick={() => publishPostMutation.mutate({ postId: post.id, publishedUrl: publishUrlDraft[post.id] })} className="h-9 px-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-xs inline-flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />تم النشر</button>}
                                     </div>
                                 </div>
                             ))}
+                            {openVersionsForPost && (
+                                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <div className="text-sm text-amber-100">Version History • Post #{openVersionsForPost}</div>
+                                        <button
+                                            onClick={() => setOpenVersionsForPost(null)}
+                                            className="h-7 px-2 rounded-lg border border-slate-600 bg-slate-800/60 text-slate-200 text-xs"
+                                        >
+                                            إغلاق
+                                        </button>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                        <select
+                                            value={compareBaseVersionNo || ''}
+                                            onChange={(e) => setCompareBaseVersionNo(e.target.value ? Number(e.target.value) : null)}
+                                            className="h-9 rounded-lg border border-slate-700 bg-slate-900/60 px-3 text-xs text-white"
+                                        >
+                                            <option value="">اختر النسخة الأساسية</option>
+                                            {versions.map((v) => <option key={`base-${v.id}`} value={v.version_no}>v{v.version_no} - {v.version_type}</option>)}
+                                        </select>
+                                        <select
+                                            value={compareTargetVersionNo || ''}
+                                            onChange={(e) => setCompareTargetVersionNo(e.target.value ? Number(e.target.value) : null)}
+                                            className="h-9 rounded-lg border border-slate-700 bg-slate-900/60 px-3 text-xs text-white"
+                                        >
+                                            <option value="">اختر نسخة المقارنة</option>
+                                            {versions.map((v) => <option key={`target-${v.id}`} value={v.version_no}>v{v.version_no} - {v.version_type}</option>)}
+                                        </select>
+                                    </div>
+                                    {versionCompareQuery.data?.data && (
+                                        <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-2 text-xs text-slate-200">
+                                            Delta: {versionCompareQuery.data.data.length_delta} chars
+                                            <div className="text-slate-400 mt-1">
+                                                +Tags: {(versionCompareQuery.data.data.hashtags_added || []).join(', ') || '—'} | -Tags: {(versionCompareQuery.data.data.hashtags_removed || []).join(', ') || '—'}
+                                            </div>
+                                        </div>
+                                    )}
+                                    <div className="max-h-44 overflow-auto space-y-1">
+                                        {versions.map((v) => (
+                                            <div key={v.id} className="rounded-md border border-slate-700 bg-slate-900/60 p-2 text-xs text-slate-200">
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <div>v{v.version_no} • {v.version_type}</div>
+                                                    <button
+                                                        onClick={() => duplicatePostVersionMutation.mutate({ postId: openVersionsForPost, sourceVersionNo: v.version_no })}
+                                                        className="h-7 px-2 rounded-lg border border-slate-600 bg-slate-800/60 text-slate-200 text-[11px]"
+                                                    >
+                                                        استعادة/تكرار
+                                                    </button>
+                                                </div>
+                                                <div className="text-slate-400 mt-1">{formatDate(v.created_at)}</div>
+                                                <div className="text-slate-300 mt-1 line-clamp-2">{v.content_text}</div>
+                                            </div>
+                                        ))}
+                                        {!versions.length && <div className="text-xs text-slate-400">لا توجد نسخ بعد.</div>}
+                                    </div>
+                                </div>
+                            )}
                             {!posts.length && <div className="text-xs text-slate-500">لا توجد مواد بعد.</div>}
                         </div>
                     </div>
@@ -831,6 +1350,40 @@ export default function DigitalPage() {
                     <button onClick={() => saveScopeMutation.mutate()} disabled={!scopeUserId} className="h-10 px-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-200 text-sm disabled:opacity-50">حفظ الصلاحية</button>
                     <div className="max-h-44 overflow-auto rounded-xl border border-slate-800">
                         <table className="w-full text-xs"><thead className="bg-slate-900/80 text-slate-300 sticky top-0"><tr><th className="text-right px-3 py-2">المستخدم</th><th className="text-right px-3 py-2">نيوز</th><th className="text-right px-3 py-2">TV</th><th className="text-right px-3 py-2">تحديث</th></tr></thead><tbody>{(scopesQuery.data?.data || []).map((scope) => <tr key={scope.id} className="border-t border-slate-800 text-slate-300"><td className="px-3 py-2">{scope.full_name_ar || scope.username || scope.user_id}</td><td className="px-3 py-2">{scope.can_manage_news ? '✓' : '—'}</td><td className="px-3 py-2">{scope.can_manage_tv ? '✓' : '—'}</td><td className="px-3 py-2">{formatRelativeTime(scope.updated_at)}</td></tr>)}</tbody></table>
+                    </div>
+                    <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                        <div className="text-xs text-slate-300 mb-2">Scope Performance</div>
+                        <div className="max-h-44 overflow-auto">
+                            <table className="w-full text-xs">
+                                <thead className="bg-slate-900/80 text-slate-300 sticky top-0">
+                                    <tr>
+                                        <th className="text-right px-2 py-1">المستخدم</th>
+                                        <th className="text-right px-2 py-1">المهام</th>
+                                        <th className="text-right px-2 py-1">نشطة</th>
+                                        <th className="text-right px-2 py-1">متأخرة</th>
+                                        <th className="text-right px-2 py-1">فشل</th>
+                                        <th className="text-right px-2 py-1">منشور</th>
+                                        <th className="text-right px-2 py-1">On-time</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {((scopePerformanceQuery.data?.data?.items || []) as DigitalScopePerformanceItem[]).map((row) => (
+                                        <tr key={`${row.user_id}-${row.username}`} className="border-t border-slate-800 text-slate-300">
+                                            <td className="px-2 py-1">{row.username || row.user_id || '—'}</td>
+                                            <td className="px-2 py-1">{row.total_tasks}</td>
+                                            <td className="px-2 py-1">{row.active_tasks}</td>
+                                            <td className="px-2 py-1 text-amber-200">{row.overdue_tasks}</td>
+                                            <td className="px-2 py-1 text-rose-200">{row.failed_posts}</td>
+                                            <td className="px-2 py-1 text-emerald-200">{row.published_posts}</td>
+                                            <td className="px-2 py-1">{Number(row.on_time_rate || 0).toFixed(1)}%</td>
+                                        </tr>
+                                    ))}
+                                    {!scopePerformanceQuery.data?.data?.items?.length && (
+                                        <tr><td colSpan={7} className="px-2 py-3 text-center text-slate-500">لا توجد بيانات أداء بعد.</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </section>
             )}

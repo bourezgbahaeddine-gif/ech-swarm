@@ -74,6 +74,7 @@ from app.models.digital_team import (
     ProgramSlot,
     SocialTask,
     SocialPost,
+    SocialPostVersion,
 )
 
 __all__ = [
@@ -145,4 +146,5 @@ __all__ = [
     "ProgramSlot",
     "SocialTask",
     "SocialPost",
+    "SocialPostVersion",
 ]

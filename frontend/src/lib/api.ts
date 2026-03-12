@@ -1470,6 +1470,7 @@ export interface DigitalTask {
     program_slot_id: number | null;
     event_id: number | null;
     article_id: number | null;
+    story_id: number | null;
     owner_user_id: number | null;
     owner_username: string | null;
     published_posts_count: number;
@@ -1504,6 +1505,7 @@ export interface DigitalPost {
     updated_by_username: string | null;
     created_at: string;
     updated_at: string;
+    versions_count: number;
 }
 
 export interface DigitalOverview {
@@ -1556,6 +1558,115 @@ export interface DigitalComposeResult {
         id: number | null;
         title: string;
     };
+}
+
+export interface DigitalTaskActionItem {
+    task: DigitalTask;
+    next_best_action_code: string;
+    next_best_action: string;
+    why_now: string;
+    source_type: string;
+    source_ref: string | null;
+    auto_generated: boolean;
+    trigger_window: string | null;
+    risk_flags: string[];
+}
+
+export interface DigitalActionDeskResponse {
+    now: DigitalTaskActionItem[];
+    next: DigitalTaskActionItem[];
+    at_risk: DigitalTaskActionItem[];
+    now_count: number;
+    next_count: number;
+    at_risk_count: number;
+}
+
+export interface DigitalPostVersion {
+    id: number;
+    post_id: number;
+    version_no: number;
+    version_type: string;
+    content_text: string;
+    hashtags: string[];
+    media_urls: string[];
+    note: string | null;
+    created_by_username: string | null;
+    created_at: string;
+}
+
+export interface DigitalPostVersionListResponse {
+    items: DigitalPostVersion[];
+    total: number;
+}
+
+export interface DigitalPostCompareResponse {
+    post_id: number;
+    base_version_no: number;
+    target_version_no: number;
+    base_length: number;
+    target_length: number;
+    length_delta: number;
+    hashtags_added: string[];
+    hashtags_removed: string[];
+    media_added: string[];
+    media_removed: string[];
+    changed: boolean;
+}
+
+export interface DigitalEngagementScoreResponse {
+    post_id: number;
+    platform: string;
+    score: number;
+    signals: Record<string, number>;
+    recommendations: string[];
+}
+
+export interface DigitalPlaybookTemplate {
+    key: string;
+    label: string;
+    objective: string;
+    platforms: string[];
+    max_length_hint: Record<string, number>;
+    cta_style: string | null;
+    include_hashtags: boolean;
+    include_media_slot: boolean;
+}
+
+export interface DigitalBundleGenerateResponse {
+    task_id: number;
+    playbook_key: string;
+    generated_count: number;
+    created_post_ids: number[];
+    variants: Record<string, string>;
+    hashtags: string[];
+}
+
+export interface DigitalDispatchResponse {
+    post_id: number;
+    adapter: string;
+    action: string;
+    status: string;
+    dispatched_at: string;
+    message: string;
+}
+
+export interface DigitalScopePerformanceItem {
+    user_id: number | null;
+    username: string | null;
+    can_manage_news: boolean;
+    can_manage_tv: boolean;
+    total_tasks: number;
+    active_tasks: number;
+    overdue_tasks: number;
+    done_tasks: number;
+    failed_posts: number;
+    published_posts: number;
+    on_time_rate: number;
+}
+
+export interface DigitalScopePerformanceResponse {
+    items: DigitalScopePerformanceItem[];
+    total: number;
 }
 
 export interface MsiProfileInfo {
@@ -2038,6 +2149,9 @@ export const eventsApi = {
 
 export const digitalApi = {
     overview: () => api.get<DigitalOverview>('/digital/overview'),
+    actionDesk: (params?: { channel?: DigitalChannel | 'all'; limit_each?: number }) =>
+        api.get<DigitalActionDeskResponse>('/digital/action-desk', { params }),
+    playbooks: () => api.get<DigitalPlaybookTemplate[]>('/digital/playbooks'),
     scopes: () => api.get<DigitalScope[]>('/digital/scopes'),
     updateScope: (
         userId: number,
@@ -2121,6 +2235,7 @@ export const digitalApi = {
         program_slot_id?: number | null;
         event_id?: number | null;
         article_id?: number | null;
+        story_id?: number | null;
     }) => api.post<DigitalTask>('/digital/tasks', payload),
     updateTask: (
         taskId: number,
@@ -2134,8 +2249,13 @@ export const digitalApi = {
             due_at: string | null;
             scheduled_at: string | null;
             owner_user_id: number | null;
+            story_id: number | null;
         }>
     ) => api.patch<DigitalTask>(`/digital/tasks/${taskId}`, payload),
+    generateBundle: (
+        taskId: number,
+        payload: { playbook_key?: string; save_as_posts?: boolean }
+    ) => api.post<DigitalBundleGenerateResponse>(`/digital/tasks/${taskId}/bundle`, payload),
     composeTask: (
         taskId: number,
         payload?: {
@@ -2169,10 +2289,32 @@ export const digitalApi = {
             published_url: string | null;
             external_post_id: string | null;
             error_message: string | null;
+            version_note: string | null;
         }>
     ) => api.patch<DigitalPost>(`/digital/posts/${postId}`, payload),
     markPostPublished: (postId: number, params?: { published_url?: string; external_post_id?: string }) =>
         api.post<DigitalPost>(`/digital/posts/${postId}/mark-published`, null, { params }),
+    regeneratePost: (postId: number) => api.post<DigitalPost>(`/digital/posts/${postId}/regenerate`, {}),
+    listPostVersions: (postId: number) => api.get<DigitalPostVersionListResponse>(`/digital/posts/${postId}/versions`),
+    duplicatePostVersion: (
+        postId: number,
+        payload?: { source_version_no?: number; version_type?: string; note?: string | null }
+    ) => api.post<DigitalPostVersion>(`/digital/posts/${postId}/versions/duplicate`, payload || {}),
+    comparePostVersions: (postId: number, params: { base_version_no: number; target_version_no: number }) =>
+        api.get<DigitalPostCompareResponse>(`/digital/posts/${postId}/compare`, { params }),
+    postEngagementScore: (postId: number) =>
+        api.get<DigitalEngagementScoreResponse>(`/digital/posts/${postId}/engagement-score`),
+    dispatchPost: (
+        postId: number,
+        payload: {
+            adapter?: string;
+            action?: 'publish' | 'schedule';
+            scheduled_at?: string | null;
+            published_url?: string | null;
+            external_post_id?: string | null;
+        }
+    ) => api.post<DigitalDispatchResponse>(`/digital/posts/${postId}/dispatch`, payload),
+    scopePerformance: () => api.get<DigitalScopePerformanceResponse>('/digital/scopes/performance'),
     calendar: (params?: { from_date?: string; days?: number; channel?: DigitalChannel | 'all' }) =>
         api.get<DigitalCalendarResponse>('/digital/calendar', { params }),
 };

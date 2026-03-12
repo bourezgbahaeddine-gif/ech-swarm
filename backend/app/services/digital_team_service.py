@@ -14,8 +14,8 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.models import Article, EventMemoItem, NewsStatus
-from app.models.digital_team import DigitalTeamScope, ProgramSlot, SocialPost, SocialTask
+from app.models import Article, EventMemoItem, NewsStatus, Story
+from app.models.digital_team import DigitalTeamScope, ProgramSlot, SocialPost, SocialPostVersion, SocialTask
 from app.models.user import User, UserRole
 from app.services.smart_editor_service import smart_editor_service
 
@@ -24,6 +24,59 @@ logger = get_logger("digital_team_service")
 PROGRAM_GRID_PATH = Path(__file__).resolve().parents[1] / "data" / "programs" / "program_grid.json"
 ACTIVE_TASK_STATUSES = {"todo", "in_progress", "review"}
 ACTIVE_EVENT_STATUSES = {"planned", "monitoring"}
+DELIVERY_ADAPTERS = {"manual", "facebook", "x", "push", "instagram", "youtube"}
+DIGITAL_PLAYBOOKS = {
+    "breaking_alert": {
+        "key": "breaking_alert",
+        "label": "Breaking Alert",
+        "objective": "breaking",
+        "platforms": ["x", "facebook", "push"],
+        "max_length_hint": {"x": 280, "facebook": 1200, "push": 180},
+        "cta_style": "urgent",
+        "include_hashtags": True,
+        "include_media_slot": False,
+    },
+    "pre_show_teaser": {
+        "key": "pre_show_teaser",
+        "label": "Pre-show Teaser",
+        "objective": "teaser",
+        "platforms": ["facebook", "x", "instagram"],
+        "max_length_hint": {"x": 240, "facebook": 1000, "instagram": 1800},
+        "cta_style": "tune_in",
+        "include_hashtags": True,
+        "include_media_slot": True,
+    },
+    "live_now": {
+        "key": "live_now",
+        "label": "Live Now",
+        "objective": "live",
+        "platforms": ["x", "facebook", "push"],
+        "max_length_hint": {"x": 260, "facebook": 900, "push": 140},
+        "cta_style": "watch_now",
+        "include_hashtags": True,
+        "include_media_slot": False,
+    },
+    "post_show_recap": {
+        "key": "post_show_recap",
+        "label": "Post-show Recap",
+        "objective": "recap",
+        "platforms": ["facebook", "x", "youtube"],
+        "max_length_hint": {"x": 260, "facebook": 1800, "youtube": 3000},
+        "cta_style": "read_more",
+        "include_hashtags": True,
+        "include_media_slot": True,
+    },
+    "event_reminder": {
+        "key": "event_reminder",
+        "label": "Event Reminder",
+        "objective": "reminder",
+        "platforms": ["facebook", "x"],
+        "max_length_hint": {"x": 220, "facebook": 1200},
+        "cta_style": "reminder",
+        "include_hashtags": True,
+        "include_media_slot": False,
+    },
+}
 
 
 @dataclass(slots=True)
@@ -117,6 +170,197 @@ class DigitalTeamService:
         scope.updated_at = datetime.utcnow()
         await db.flush()
         return scope
+
+    def list_playbooks(self) -> list[dict]:
+        return list(DIGITAL_PLAYBOOKS.values())
+
+    def get_playbook(self, key: str | None) -> dict:
+        normalized = (key or "breaking_alert").strip().lower()
+        return DIGITAL_PLAYBOOKS.get(normalized, DIGITAL_PLAYBOOKS["breaking_alert"])
+
+    async def create_post_version(
+        self,
+        db: AsyncSession,
+        *,
+        post: SocialPost,
+        version_type: str,
+        note: str | None = None,
+        actor: User | None = None,
+    ) -> SocialPostVersion:
+        row = await db.execute(
+            select(func.coalesce(func.max(SocialPostVersion.version_no), 0)).where(SocialPostVersion.post_id == post.id)
+        )
+        next_no = int(row.scalar() or 0) + 1
+        version = SocialPostVersion(
+            post_id=post.id,
+            version_no=next_no,
+            version_type=(version_type or "edited")[:32],
+            content_text=post.content_text or "",
+            hashtags=list(post.hashtags or []),
+            media_urls=list(post.media_urls or []),
+            note=_clean_text(note, max_len=4000),
+            created_by_user_id=actor.id if actor else post.updated_by_user_id,
+            created_by_username=actor.username if actor else post.updated_by_username,
+        )
+        db.add(version)
+        await db.flush()
+        return version
+
+    async def list_post_versions(self, db: AsyncSession, *, post_id: int) -> list[SocialPostVersion]:
+        rows = await db.execute(
+            select(SocialPostVersion)
+            .where(SocialPostVersion.post_id == post_id)
+            .order_by(SocialPostVersion.version_no.desc(), SocialPostVersion.created_at.desc())
+        )
+        return rows.scalars().all()
+
+    async def duplicate_post_version(
+        self,
+        db: AsyncSession,
+        *,
+        post: SocialPost,
+        source_version_no: int | None = None,
+        version_type: str = "duplicated",
+        note: str | None = None,
+        actor: User | None = None,
+    ) -> SocialPostVersion:
+        source: SocialPostVersion | None = None
+        if source_version_no is not None:
+            row = await db.execute(
+                select(SocialPostVersion).where(
+                    SocialPostVersion.post_id == post.id,
+                    SocialPostVersion.version_no == source_version_no,
+                )
+            )
+            source = row.scalar_one_or_none()
+        if source is None:
+            row = await db.execute(
+                select(SocialPostVersion)
+                .where(SocialPostVersion.post_id == post.id)
+                .order_by(SocialPostVersion.version_no.desc())
+                .limit(1)
+            )
+            source = row.scalar_one_or_none()
+
+        if source is None:
+            source_text = post.content_text
+            source_tags = list(post.hashtags or [])
+            source_media = list(post.media_urls or [])
+        else:
+            source_text = source.content_text
+            source_tags = list(source.hashtags or [])
+            source_media = list(source.media_urls or [])
+
+        post.content_text = source_text or ""
+        post.hashtags = source_tags
+        post.media_urls = source_media
+        post.updated_at = datetime.utcnow()
+        if actor:
+            post.updated_by_user_id = actor.id
+            post.updated_by_username = actor.username
+
+        version = await self.create_post_version(
+            db,
+            post=post,
+            version_type=version_type,
+            note=note or f"Duplicated from version {source.version_no}" if source else note,
+            actor=actor,
+        )
+        return version
+
+    def compare_versions(self, *, base: SocialPostVersion, target: SocialPostVersion) -> dict:
+        base_tags = {str(tag).strip() for tag in (base.hashtags or []) if str(tag).strip()}
+        target_tags = {str(tag).strip() for tag in (target.hashtags or []) if str(tag).strip()}
+        base_media = {str(url).strip() for url in (base.media_urls or []) if str(url).strip()}
+        target_media = {str(url).strip() for url in (target.media_urls or []) if str(url).strip()}
+        base_text = (base.content_text or "").strip()
+        target_text = (target.content_text or "").strip()
+        return {
+            "base_version_no": base.version_no,
+            "target_version_no": target.version_no,
+            "base_length": len(base_text),
+            "target_length": len(target_text),
+            "length_delta": len(target_text) - len(base_text),
+            "hashtags_added": sorted(target_tags - base_tags),
+            "hashtags_removed": sorted(base_tags - target_tags),
+            "media_added": sorted(target_media - base_media),
+            "media_removed": sorted(base_media - target_media),
+            "changed": bool(
+                base_text != target_text
+                or base_tags != target_tags
+                or base_media != target_media
+            ),
+        }
+
+    def score_engagement(
+        self,
+        *,
+        platform: str,
+        content_text: str,
+        hashtags: list[str] | None = None,
+        scheduled_at: datetime | None = None,
+    ) -> dict:
+        text = (content_text or "").strip()
+        tags = hashtags or []
+        platform_key = (platform or "").strip().lower()
+        limits = {"x": 280, "facebook": 5000, "instagram": 2200, "tiktok": 2200, "youtube": 5000, "push": 180}
+        limit = limits.get(platform_key, 5000)
+
+        hook = 0
+        if "؟" in text or "!" in text:
+            hook += 20
+        if len(text) >= 40:
+            hook += 15
+        if any(term in text for term in ["عاجل", "الآن", "مباشر", "حصري"]):
+            hook += 15
+        hook = min(30, hook)
+
+        length_score = 30
+        ratio = (len(text) / limit) if limit else 0
+        if ratio > 1:
+            length_score = 0
+        elif ratio > 0.9:
+            length_score = 12
+        elif ratio < 0.08:
+            length_score = 10
+        elif ratio < 0.2:
+            length_score = 18
+
+        cta_score = 20 if any(term in text for term in ["تابع", "اقرأ", "شاهد", "اضغط", "المزيد"]) else 10
+        hashtag_score = 20 if 1 <= len(tags) <= 5 else (10 if len(tags) <= 8 else 4)
+
+        timing_score = 10
+        if scheduled_at:
+            hour = scheduled_at.hour
+            if 8 <= hour <= 11 or 18 <= hour <= 22:
+                timing_score = 20
+            elif 0 <= hour <= 5:
+                timing_score = 6
+            else:
+                timing_score = 14
+        total = min(100, max(0, hook + length_score + cta_score + hashtag_score + timing_score))
+
+        recommendations: list[str] = []
+        if length_score <= 12:
+            recommendations.append("اختصر النص ليتناسب أكثر مع المنصة.")
+        if cta_score < 20:
+            recommendations.append("أضف دعوة إجراء واضحة (CTA).")
+        if hashtag_score < 15:
+            recommendations.append("حسّن عدد الوسوم بين 1 و5.")
+        if hook < 20:
+            recommendations.append("قوِّ الجملة الافتتاحية بهوك أو سؤال مباشر.")
+
+        return {
+            "score": int(total),
+            "signals": {
+                "hook": int(hook),
+                "length_fit": int(length_score),
+                "cta": int(cta_score),
+                "hashtags_fit": int(hashtag_score),
+                "timing_fit": int(timing_score),
+            },
+            "recommendations": recommendations[:4],
+        }
 
     async def import_program_grid(
         self,
@@ -308,32 +552,47 @@ class DigitalTeamService:
         skipped = 0
         for event in events:
             channel = "tv" if (event.scope or "").lower() == "religious" else "news"
-            dedupe_key = f"event:{event.id}:{event.starts_at.isoformat()}"
             owner_user_id, owner_username = await self._pick_owner_for_channel(db, channel)
-            task = SocialTask(
-                channel=channel,
-                platform="all",
-                task_type="event_coverage",
-                title=f"{event.title} | تغطية سوشيال استباقية",
-                brief=_build_event_brief(event),
-                status="todo",
-                priority=max(1, min(5, int(event.priority or 3))),
-                due_at=event.starts_at - timedelta(hours=min(6, max(1, int(event.lead_time_hours or 6)))),
-                scheduled_at=event.starts_at,
-                dedupe_key=dedupe_key,
-                event_id=event.id,
-                owner_user_id=owner_user_id,
-                owner_username=owner_username,
-                created_by_user_id=actor.id if actor else None,
-                created_by_username=actor.username if actor else "system",
-                updated_by_user_id=actor.id if actor else None,
-                updated_by_username=actor.username if actor else "system",
-            )
-            created_ok = await self._create_task_if_new(db, task)
-            if created_ok:
-                created += 1
-            else:
-                skipped += 1
+            story_title = None
+            if getattr(event, "story_id", None):
+                story_row = await db.execute(select(Story).where(Story.id == event.story_id))
+                story = story_row.scalar_one_or_none()
+                story_title = story.title if story else None
+
+            phases = [
+                ("event_t24", "T-24 | تجهيز تغطية الحدث", event.starts_at - timedelta(hours=24), 4),
+                ("event_t6", "T-6 | متابعة قبل الحدث", event.starts_at - timedelta(hours=6), 5),
+                ("event_live", "Live | تغطية مباشرة", event.starts_at, 5),
+                ("event_post", "Post | خلاصة بعد الحدث", event.starts_at + timedelta(hours=1), 3),
+            ]
+
+            for task_type, phase_label, due_at, phase_priority in phases:
+                dedupe_key = f"event:{event.id}:{event.starts_at.isoformat()}:{task_type}"
+                task = SocialTask(
+                    channel=channel,
+                    platform="all",
+                    task_type=task_type,
+                    title=f"{event.title} | {phase_label}",
+                    brief=_build_event_brief(event) + (f"\nStory: {story_title}" if story_title else ""),
+                    status="todo",
+                    priority=max(phase_priority, max(1, min(5, int(event.priority or 3)))),
+                    due_at=due_at,
+                    scheduled_at=event.starts_at,
+                    dedupe_key=dedupe_key,
+                    event_id=event.id,
+                    story_id=getattr(event, "story_id", None),
+                    owner_user_id=owner_user_id,
+                    owner_username=owner_username,
+                    created_by_user_id=actor.id if actor else None,
+                    created_by_username=actor.username if actor else "system",
+                    updated_by_user_id=actor.id if actor else None,
+                    updated_by_username=actor.username if actor else "system",
+                )
+                created_ok = await self._create_task_if_new(db, task)
+                if created_ok:
+                    created += 1
+                else:
+                    skipped += 1
 
         return {"created": created, "skipped": skipped}
 
@@ -608,6 +867,21 @@ class DigitalTeamService:
                 )
                 candidate_tags.extend([str(x).strip() for x in (slot.tags or []) if str(x).strip()])
 
+        if task.story_id:
+            story_row = await db.execute(select(Story).where(Story.id == task.story_id))
+            story = story_row.scalar_one_or_none()
+            if story:
+                if source_type == "task":
+                    source_type = "story"
+                    source_id = story.id
+                    source_title = story.title or source_title
+                    draft_title = story.title or draft_title
+                story_context = "\n".join(
+                    part for part in [story.summary or "", story.geography or ""] if part
+                )
+                if story_context:
+                    source_text = "\n".join(part for part in [source_text, story_context] if part)
+
         variants: dict[str, str] = {}
         try:
             variants = await smart_editor_service.social_variants(
@@ -651,6 +925,184 @@ class DigitalTeamService:
                 "title": source_title,
             },
         }
+
+    async def generate_bundle_for_task(
+        self,
+        db: AsyncSession,
+        *,
+        task: SocialTask,
+        playbook_key: str,
+        save_as_posts: bool,
+        actor: User | None = None,
+    ) -> dict:
+        playbook = self.get_playbook(playbook_key)
+        platforms = list(playbook.get("platforms") or ["facebook", "x"])
+        variants: dict[str, str] = {}
+        hashtags: list[str] = []
+        created_post_ids: list[int] = []
+
+        for platform in platforms:
+            composed = await self.compose_for_task(
+                db,
+                task_id=task.id,
+                platform=platform,
+                max_hashtags=6,
+            )
+            variants[platform] = composed.get("recommended_text", "")
+            if not hashtags and composed.get("hashtags"):
+                hashtags = list(composed["hashtags"])
+            if save_as_posts:
+                post = SocialPost(
+                    task_id=task.id,
+                    channel=task.channel,
+                    platform=platform,
+                    content_text=(composed.get("recommended_text") or "").strip(),
+                    hashtags=list(composed.get("hashtags") or []),
+                    media_urls=[],
+                    status="ready",
+                    created_by_user_id=actor.id if actor else None,
+                    created_by_username=actor.username if actor else "system",
+                    updated_by_user_id=actor.id if actor else None,
+                    updated_by_username=actor.username if actor else "system",
+                )
+                db.add(post)
+                await db.flush()
+                created_post_ids.append(post.id)
+                await self.create_post_version(
+                    db,
+                    post=post,
+                    version_type="generated",
+                    note=f"bundle:{playbook['key']}",
+                    actor=actor,
+                )
+
+        await self.refresh_task_post_stats(db, task.id)
+        return {
+            "task_id": task.id,
+            "playbook_key": playbook["key"],
+            "generated_count": len(variants),
+            "created_post_ids": created_post_ids,
+            "variants": variants,
+            "hashtags": hashtags,
+        }
+
+    async def dispatch_post(
+        self,
+        db: AsyncSession,
+        *,
+        post: SocialPost,
+        adapter: str,
+        action: str,
+        scheduled_at: datetime | None,
+        published_url: str | None,
+        external_post_id: str | None,
+        actor: User | None = None,
+    ) -> dict:
+        adapter_key = (adapter or "manual").strip().lower()
+        if adapter_key not in DELIVERY_ADAPTERS:
+            adapter_key = "manual"
+
+        if action == "schedule":
+            post.status = "scheduled"
+            post.scheduled_at = scheduled_at or datetime.utcnow() + timedelta(minutes=5)
+            message = f"Scheduled via {adapter_key}"
+        else:
+            post.status = "published"
+            post.published_at = datetime.utcnow()
+            post.published_url = _clean_text(published_url, max_len=2048)
+            post.external_post_id = _clean_text(external_post_id, max_len=128)
+            message = f"Published via {adapter_key}"
+
+        post.updated_at = datetime.utcnow()
+        if actor:
+            post.updated_by_user_id = actor.id
+            post.updated_by_username = actor.username
+
+        await self.create_post_version(
+            db,
+            post=post,
+            version_type="delivery",
+            note=message,
+            actor=actor,
+        )
+        await self.refresh_task_post_stats(db, post.task_id)
+        return {
+            "post_id": post.id,
+            "adapter": adapter_key,
+            "action": action,
+            "status": post.status,
+            "dispatched_at": datetime.utcnow(),
+            "message": message,
+        }
+
+    async def scope_performance(self, db: AsyncSession) -> list[dict]:
+        scope_rows = await db.execute(
+            select(DigitalTeamScope, User)
+            .join(User, User.id == DigitalTeamScope.user_id)
+            .order_by(User.username.asc())
+        )
+        scopes = scope_rows.all()
+        if not scopes:
+            return []
+
+        now = datetime.utcnow()
+        out: list[dict] = []
+        for scope, user in scopes:
+            channels: list[str] = []
+            if scope.can_manage_news:
+                channels.append("news")
+            if scope.can_manage_tv:
+                channels.append("tv")
+            if not channels:
+                channels = ["news", "tv"]
+
+            task_rows = await db.execute(
+                select(SocialTask).where(
+                    SocialTask.channel.in_(channels),
+                    or_(SocialTask.owner_user_id == user.id, SocialTask.owner_user_id.is_(None)),
+                )
+            )
+            tasks = task_rows.scalars().all()
+            task_ids = [task.id for task in tasks]
+            post_rows = await db.execute(select(SocialPost).where(SocialPost.task_id.in_(task_ids))) if task_ids else None
+            posts = post_rows.scalars().all() if post_rows else []
+
+            total_tasks = len(tasks)
+            active_tasks = sum(1 for task in tasks if task.status in ACTIVE_TASK_STATUSES)
+            overdue_tasks = sum(
+                1
+                for task in tasks
+                if task.status in ACTIVE_TASK_STATUSES and task.due_at and task.due_at < now
+            )
+            done_tasks = sum(1 for task in tasks if task.status == "done")
+            failed_posts = sum(1 for post in posts if post.status == "failed")
+            published_posts = sum(1 for post in posts if post.status == "published")
+
+            on_time_total = 0
+            on_time_done = 0
+            for task in tasks:
+                if task.status == "done" and task.due_at and task.completed_at:
+                    on_time_total += 1
+                    if task.completed_at <= task.due_at:
+                        on_time_done += 1
+            on_time_rate = round((on_time_done / on_time_total) * 100, 1) if on_time_total else 0.0
+
+            out.append(
+                {
+                    "user_id": user.id,
+                    "username": user.username,
+                    "can_manage_news": bool(scope.can_manage_news),
+                    "can_manage_tv": bool(scope.can_manage_tv),
+                    "total_tasks": total_tasks,
+                    "active_tasks": active_tasks,
+                    "overdue_tasks": overdue_tasks,
+                    "done_tasks": done_tasks,
+                    "failed_posts": failed_posts,
+                    "published_posts": published_posts,
+                    "on_time_rate": on_time_rate,
+                }
+            )
+        return out
 
 
 def _normalize_channel(value: object) -> str:
