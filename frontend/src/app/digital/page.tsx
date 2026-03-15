@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useMemo, useState } from 'react';
+import { startTransition, useEffect, useMemo, useState } from 'react';
 import { isAxiosError } from 'axios';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ArrowRightCircle, CalendarDays, CheckCircle2, Copy, Megaphone, PlusCircle, RefreshCcw, Sparkles, UploadCloud } from 'lucide-react';
@@ -170,6 +170,12 @@ export default function DigitalPage() {
     const [onlyMine, setOnlyMine] = useState(false);
     const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
     const [selectedTaskIds, setSelectedTaskIds] = useState<number[]>([]);
+    const [deskMode, setDeskMode] = useState<'execute' | 'compose' | 'planning'>('execute');
+    const [changesSinceLast, setChangesSinceLast] = useState<{
+        new_now: number;
+        new_risk: number;
+        moved_to_next: number;
+    } | null>(null);
 
     const [taskTitle, setTaskTitle] = useState('');
     const [taskBrief, setTaskBrief] = useState('');
@@ -288,6 +294,102 @@ export default function DigitalPage() {
         () => (actionDesk?.at_risk || []).filter((item) => (item.risk_flags || []).some((flag) => flag.includes('فاشل'))),
         [actionDesk?.at_risk]
     );
+    const executeQueue = useMemo(() => {
+        const seen = new Set<number>();
+        const ordered = [...(actionDesk?.now || []), ...(actionDesk?.at_risk || []), ...(actionDesk?.next || [])];
+        return ordered.filter((item) => {
+            if (seen.has(item.task.id)) return false;
+            seen.add(item.task.id);
+            return true;
+        });
+    }, [actionDesk?.at_risk, actionDesk?.next, actionDesk?.now]);
+    const selectedTaskAction = useMemo(
+        () => (selectedTask ? actionDeskItems.get(selectedTask.id) || null : null),
+        [actionDeskItems, selectedTask]
+    );
+    const operationalKpis = useMemo(
+        () => [
+            {
+                label: 'يحتاج تنفيذ الآن',
+                value: actionDesk?.now_count || 0,
+                tone: 'border-cyan-500/20 bg-cyan-500/5',
+            },
+            {
+                label: 'At Risk / Failed',
+                value: actionDesk?.at_risk_count || 0,
+                tone: 'border-rose-500/20 bg-rose-500/5',
+            },
+            {
+                label: 'جاهز أو مجدول',
+                value: overviewQuery.data?.data?.scheduled_posts_next_24h ?? 0,
+                tone: 'border-emerald-500/20 bg-emerald-500/5',
+            },
+        ],
+        [actionDesk?.at_risk_count, actionDesk?.now_count, overviewQuery.data?.data?.scheduled_posts_next_24h]
+    );
+    const planningKpis = useMemo(
+        () => [
+            { label: 'إجمالي المهام', value: overviewQuery.data?.data?.total_tasks ?? 0, tone: 'border-cyan-500/20 bg-cyan-500/5' },
+            { label: 'متأخرة', value: overviewQuery.data?.data?.overdue ?? 0, tone: 'border-rose-500/20 bg-rose-500/5' },
+            { label: 'مستحقة اليوم', value: overviewQuery.data?.data?.due_today ?? 0, tone: 'border-amber-500/20 bg-amber-500/5' },
+            { label: 'قيد التنفيذ', value: overviewQuery.data?.data?.in_progress ?? 0, tone: 'border-blue-500/20 bg-blue-500/5' },
+            { label: 'منجزة اليوم', value: overviewQuery.data?.data?.done_today ?? 0, tone: 'border-emerald-500/20 bg-emerald-500/5' },
+            { label: 'منشور 24 ساعة', value: overviewQuery.data?.data?.published_posts_24h ?? 0, tone: 'border-violet-500/20 bg-violet-500/5' },
+            { label: 'مجدول 24 ساعة', value: overviewQuery.data?.data?.scheduled_posts_next_24h ?? 0, tone: 'border-indigo-500/20 bg-indigo-500/5' },
+            {
+                label: 'الانضباط',
+                value: `${Number(overviewQuery.data?.data?.on_time_rate || 0).toFixed(1)}%`,
+                tone: 'border-slate-500/20 bg-slate-500/5',
+            },
+        ],
+        [
+            overviewQuery.data?.data?.done_today,
+            overviewQuery.data?.data?.due_today,
+            overviewQuery.data?.data?.in_progress,
+            overviewQuery.data?.data?.on_time_rate,
+            overviewQuery.data?.data?.overdue,
+            overviewQuery.data?.data?.published_posts_24h,
+            overviewQuery.data?.data?.scheduled_posts_next_24h,
+            overviewQuery.data?.data?.total_tasks,
+        ]
+    );
+
+    useEffect(() => {
+        const nowItems = actionDesk?.now || [];
+        const nextItems = actionDesk?.next || [];
+        const riskItems = actionDesk?.at_risk || [];
+        const prev = (window as typeof window & { __digitalDeskSnapshot?: { now: number[]; next: number[]; risk: number[] } }).__digitalDeskSnapshot;
+        if (!prev) {
+            (window as typeof window & { __digitalDeskSnapshot?: { now: number[]; next: number[]; risk: number[] } }).__digitalDeskSnapshot = {
+                now: nowItems.map((x) => x.task.id),
+                next: nextItems.map((x) => x.task.id),
+                risk: riskItems.map((x) => x.task.id),
+            };
+            return;
+        }
+        const nowIds = new Set(nowItems.map((x) => x.task.id));
+        const nextIds = new Set(nextItems.map((x) => x.task.id));
+        const riskIds = new Set(riskItems.map((x) => x.task.id));
+        const prevNow = new Set(prev.now);
+        const prevRisk = new Set(prev.risk);
+        const prevNext = new Set(prev.next);
+
+        const newNow = [...nowIds].filter((id) => !prevNow.has(id)).length;
+        const newRisk = [...riskIds].filter((id) => !prevRisk.has(id)).length;
+        const movedToNext = [...nextIds].filter((id) => !prevNext.has(id)).length;
+
+        if (newNow > 0 || newRisk > 0 || movedToNext > 0) {
+            startTransition(() => {
+                setChangesSinceLast({ new_now: newNow, new_risk: newRisk, moved_to_next: movedToNext });
+            });
+        }
+
+        (window as typeof window & { __digitalDeskSnapshot?: { now: number[]; next: number[]; risk: number[] } }).__digitalDeskSnapshot = {
+            now: [...nowIds],
+            next: [...nextIds],
+            risk: [...riskIds],
+        };
+    }, [actionDesk?.at_risk, actionDesk?.next, actionDesk?.now]);
 
     const postsQuery = useQuery({
         queryKey: ['digital-posts', selectedTaskId],
@@ -804,7 +906,158 @@ export default function DigitalPage() {
 
             {message && <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-emerald-200 text-sm">{message}</div>}
             {error && <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-rose-200 text-sm">{error}</div>}
+            {changesSinceLast && (
+                <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3 text-cyan-100 text-sm flex flex-wrap gap-4">
+                    <span>جديد منذ آخر زيارة: {changesSinceLast.new_now} في Now</span>
+                    <span>{changesSinceLast.new_risk} في At Risk</span>
+                    <span>{changesSinceLast.moved_to_next} انتقلت إلى Next</span>
+                </div>
+            )}
 
+            {deskMode === 'planning' && (
+                <>
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
+                        {planningKpis.map((kpi) => (
+                            <div key={kpi.label} className={cn('rounded-xl border p-3', kpi.tone)}>
+                                <div className="text-xs text-gray-400">{kpi.label}</div>
+                                <div className="text-2xl font-bold text-white">{kpi.value}</div>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                        <section className="xl:col-span-2 rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
+                            <div className="flex flex-wrap gap-2 items-center">
+                                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="بحث..." className="h-10 w-full md:w-72 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white" />
+                                <select value={channel} onChange={(e) => setChannel(e.target.value as 'all' | DigitalChannel)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white"><option value="all">كل القنوات</option><option value="news">نيوز</option><option value="tv">TV</option></select>
+                                <select value={status} onChange={(e) => setStatus(e.target.value as 'all' | DigitalTaskStatus)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white"><option value="all">كل الحالات</option><option value="todo">جديد</option><option value="in_progress">قيد التنفيذ</option><option value="review">مراجعة</option><option value="done">منجز</option><option value="cancelled">ملغي</option></select>
+                                <select value={taskTypeFilter} onChange={(e) => setTaskTypeFilter(e.target.value)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white">
+                                    <option value="all">كل أنواع المهام</option>
+                                    {taskTypeOptions.map((type) => (
+                                        <option key={type} value={type}>{type}</option>
+                                    ))}
+                                </select>
+                                <label className="inline-flex items-center gap-2 px-3 h-10 rounded-xl border border-slate-700 bg-slate-900/60 text-xs text-slate-300">
+                                    <input type="checkbox" checked={onlyMine} onChange={(e) => setOnlyMine(e.target.checked)} />
+                                    مهامي فقط
+                                </label>
+                            </div>
+                            {canWrite && (
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <button onClick={() => setSelectedTaskIds(filteredTasks.map((task) => task.id))} className="h-8 px-2 rounded-lg border border-slate-600 bg-slate-800/60 text-slate-200 text-xs">تحديد الكل</button>
+                                    <button onClick={() => setSelectedTaskIds([])} className="h-8 px-2 rounded-lg border border-slate-600 bg-slate-800/60 text-slate-200 text-xs">إلغاء التحديد</button>
+                                    <button onClick={() => bulkTaskStatusMutation.mutate('in_progress')} disabled={!selectedTaskIds.length || bulkTaskStatusMutation.isPending} className="h-8 px-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-xs disabled:opacity-50">بدء جماعي</button>
+                                    <button onClick={() => bulkTaskStatusMutation.mutate('review')} disabled={!selectedTaskIds.length || bulkTaskStatusMutation.isPending} className="h-8 px-2 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-200 text-xs disabled:opacity-50">مراجعة جماعية</button>
+                                    <button onClick={() => bulkTaskStatusMutation.mutate('done')} disabled={!selectedTaskIds.length || bulkTaskStatusMutation.isPending} className="h-8 px-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-xs disabled:opacity-50">إغلاق جماعي</button>
+                                    <div className="text-xs text-slate-400">المحدد: {selectedTaskIds.length}</div>
+                                </div>
+                            )}
+                            <div className="max-h-[520px] overflow-auto rounded-xl border border-slate-800">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-slate-900/80 text-slate-300 sticky top-0"><tr><th className="text-right px-3 py-2">تحديد</th><th className="text-right px-3 py-2">المهمة</th><th className="text-right px-3 py-2">القناة</th><th className="text-right px-3 py-2">الحالة</th><th className="text-right px-3 py-2">الاستحقاق</th><th className="text-right px-3 py-2">الإجراء التالي</th><th className="text-right px-3 py-2">إجراءات</th></tr></thead>
+                                    <tbody>
+                                        {filteredTasks.map((task) => (
+                                            <tr key={task.id} className={cn('border-t border-slate-800 hover:bg-slate-900/50 cursor-pointer', selectedTaskId === task.id && 'bg-cyan-500/10')} onClick={() => setSelectedTaskId(task.id)}>
+                                                <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                                                    <input type="checkbox" checked={selectedTaskIds.includes(task.id)} onChange={(e) => toggleTaskSelection(task.id, e.target.checked)} />
+                                                </td>
+                                                <td className="px-3 py-2">
+                                                    <div className="text-white font-medium">{task.title}</div>
+                                                    <div className="text-xs text-slate-500 mt-1">{task.brief || 'بدون وصف'}</div>
+                                                    <div className="text-[11px] text-slate-500 mt-1">{task.task_type} {task.owner_username ? `• ${task.owner_username}` : ''}</div>
+                                                    {actionDeskItems.get(task.id)?.why_now && <div className="text-[11px] text-cyan-300/80 mt-1">{actionDeskItems.get(task.id)?.why_now}</div>}
+                                                </td>
+                                                <td className="px-3 py-2 text-slate-300">{channelLabel(task.channel)}</td>
+                                                <td className="px-3 py-2"><span className={cn('inline-flex px-2 py-0.5 rounded-lg border text-xs', taskStatusClass(task.status))}>{taskStatusLabel(task.status)}</span></td>
+                                                <td className="px-3 py-2 text-slate-300">{task.due_at ? <div><div>{formatDate(task.due_at)}</div><div className="text-xs text-slate-500">{formatRelativeTime(task.due_at)}</div></div> : '—'}</td>
+                                                <td className="px-3 py-2">
+                                                    {actionDeskItems.get(task.id) ? (
+                                                        <div className="space-y-1">
+                                                            <span className={cn('inline-flex px-2 py-0.5 rounded-lg border text-xs', actionCodeClass(actionDeskItems.get(task.id)?.next_best_action_code || ''))}>{actionDeskItems.get(task.id)?.next_best_action || '—'}</span>
+                                                            {!!actionDeskItems.get(task.id)?.risk_flags?.length && <div className="text-[11px] text-rose-300">{actionDeskItems.get(task.id)?.risk_flags.join('، ')}</div>}
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-xs text-slate-500">—</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-3 py-2">
+                                                    {canWrite && <div className="flex gap-1 flex-wrap">
+                                                        {actionDeskItems.get(task.id) && <button onClick={(e) => { e.stopPropagation(); runNextActionMutation.mutate(actionDeskItems.get(task.id) as DigitalTaskActionItem); }} className="text-xs px-2 py-1 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-200">التالي</button>}
+                                                        {user?.id && task.owner_user_id !== user.id && <button onClick={(e) => { e.stopPropagation(); claimTaskMutation.mutate(task.id); }} className="text-xs px-2 py-1 rounded-lg border border-slate-500/30 bg-slate-500/10 text-slate-200">استلام</button>}
+                                                        {task.status !== 'in_progress' && <button onClick={(e) => { e.stopPropagation(); updateTaskMutation.mutate({ taskId: task.id, nextStatus: 'in_progress' }); }} className="text-xs px-2 py-1 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-200">بدء</button>}
+                                                        {task.status !== 'review' && task.status !== 'done' && <button onClick={(e) => { e.stopPropagation(); updateTaskMutation.mutate({ taskId: task.id, nextStatus: 'review' }); }} className="text-xs px-2 py-1 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-200">مراجعة</button>}
+                                                        {task.status !== 'done' && <button onClick={(e) => { e.stopPropagation(); updateTaskMutation.mutate({ taskId: task.id, nextStatus: 'done' }); }} className="text-xs px-2 py-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-200">إغلاق</button>}
+                                                    </div>}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                        {!filteredTasks.length && <tr><td colSpan={7} className="px-3 py-8 text-center text-slate-500">لا توجد مهام مطابقة للفلاتر.</td></tr>}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </section>
+                        <section className="rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
+                            <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2"><PlusCircle className="w-4 h-4 text-cyan-300" />إضافة مهمة</h2>
+                            <input value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} placeholder="عنوان المهمة" className="h-10 w-full rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white" />
+                            <textarea value={taskBrief} onChange={(e) => setTaskBrief(e.target.value)} placeholder="وصف مختصر" rows={3} className="w-full rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-white" />
+                            <div className="grid grid-cols-2 gap-2">
+                                <select value={taskChannel} onChange={(e) => setTaskChannel(e.target.value as DigitalChannel)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white"><option value="news">الشروق نيوز</option><option value="tv">الشروق تي في</option></select>
+                                <input type="datetime-local" value={taskDueAt} onChange={(e) => setTaskDueAt(e.target.value)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white" />
+                            </div>
+                            <button onClick={() => createTaskMutation.mutate()} disabled={!canWrite || !taskTitle.trim()} className="h-10 w-full rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-sm disabled:opacity-50">حفظ المهمة</button>
+                            <div className="pt-3 border-t border-slate-800">
+                                <h3 className="text-sm text-slate-200 mb-2 flex items-center gap-1"><CalendarDays className="w-4 h-4 text-indigo-300" />روزنامة 7 أيام</h3>
+                                <div className="space-y-2 max-h-48 overflow-auto">
+                                    {(calendarQuery.data?.data?.items || []).slice(0, 12).map((item, idx) => (
+                                        <div key={`${item.item_type}-${item.reference_id}-${idx}`} className="rounded-lg border border-slate-800 bg-slate-900/50 p-2 text-xs text-slate-300">
+                                            <div>{item.title}</div><div className="text-slate-500 mt-1">{formatDate(item.starts_at)} • {channelLabel(item.channel)}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                </>
+            )}
+
+            <div className="rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-2">
+                <div className="flex flex-wrap gap-2">
+                    <button
+                        onClick={() => setDeskMode('execute')}
+                        className={cn(
+                            'h-9 px-3 rounded-xl border text-xs',
+                            deskMode === 'execute'
+                                ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200'
+                                : 'border-slate-700 bg-slate-900/60 text-slate-300'
+                        )}
+                    >
+                        تنفيذ Now
+                    </button>
+                    <button
+                        onClick={() => setDeskMode('compose')}
+                        className={cn(
+                            'h-9 px-3 rounded-xl border text-xs',
+                            deskMode === 'compose'
+                                ? 'border-indigo-500/30 bg-indigo-500/10 text-indigo-200'
+                                : 'border-slate-700 bg-slate-900/60 text-slate-300'
+                        )}
+                    >
+                        Compose
+                    </button>
+                    <button
+                        onClick={() => setDeskMode('planning')}
+                        className={cn(
+                            'h-9 px-3 rounded-xl border text-xs',
+                            deskMode === 'planning'
+                                ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+                                : 'border-slate-700 bg-slate-900/60 text-slate-300'
+                        )}
+                    >
+                        Planning
+                    </button>
+                </div>
+            </div>
+
+            {deskMode === 'execute' && (
             <section className="rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
                 <div className="flex items-center justify-between gap-2">
                     <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
@@ -888,157 +1141,134 @@ export default function DigitalPage() {
                     </div>
                 )}
             </section>
+            )}
 
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
-                <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-3"><div className="text-xs text-gray-400">إجمالي المهام</div><div className="text-2xl font-bold text-white">{overviewQuery.data?.data?.total_tasks ?? 0}</div></div>
-                <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-3"><div className="text-xs text-gray-400">متأخرة</div><div className="text-2xl font-bold text-white">{overviewQuery.data?.data?.overdue ?? 0}</div></div>
-                <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3"><div className="text-xs text-gray-400">مستحقة اليوم</div><div className="text-2xl font-bold text-white">{overviewQuery.data?.data?.due_today ?? 0}</div></div>
-                <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3"><div className="text-xs text-gray-400">قيد التنفيذ</div><div className="text-2xl font-bold text-white">{overviewQuery.data?.data?.in_progress ?? 0}</div></div>
-                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3"><div className="text-xs text-gray-400">منجزة اليوم</div><div className="text-2xl font-bold text-white">{overviewQuery.data?.data?.done_today ?? 0}</div></div>
-                <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-3"><div className="text-xs text-gray-400">منشور 24 ساعة</div><div className="text-2xl font-bold text-white">{overviewQuery.data?.data?.published_posts_24h ?? 0}</div></div>
-                <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-3"><div className="text-xs text-gray-400">مجدول 24 ساعة</div><div className="text-2xl font-bold text-white">{overviewQuery.data?.data?.scheduled_posts_next_24h ?? 0}</div></div>
-                <div className="rounded-xl border border-slate-500/20 bg-slate-500/5 p-3"><div className="text-xs text-gray-400">الانضباط</div><div className="text-2xl font-bold text-white">{Number(overviewQuery.data?.data?.on_time_rate || 0).toFixed(1)}%</div></div>
-            </div>
-
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-                <section className="xl:col-span-2 rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
-                    <div className="flex flex-wrap gap-2 items-center">
-                        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="بحث..." className="h-10 w-full md:w-72 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white" />
-                        <select value={channel} onChange={(e) => setChannel(e.target.value as 'all' | DigitalChannel)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white"><option value="all">كل القنوات</option><option value="news">نيوز</option><option value="tv">TV</option></select>
-                        <select value={status} onChange={(e) => setStatus(e.target.value as 'all' | DigitalTaskStatus)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white"><option value="all">كل الحالات</option><option value="todo">جديد</option><option value="in_progress">قيد التنفيذ</option><option value="review">مراجعة</option><option value="done">منجز</option><option value="cancelled">ملغي</option></select>
-                        <select value={taskTypeFilter} onChange={(e) => setTaskTypeFilter(e.target.value)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white">
-                            <option value="all">كل أنواع المهام</option>
-                            {taskTypeOptions.map((type) => (
-                                <option key={type} value={type}>{type}</option>
-                            ))}
-                        </select>
-                        <label className="inline-flex items-center gap-2 px-3 h-10 rounded-xl border border-slate-700 bg-slate-900/60 text-xs text-slate-300">
-                            <input type="checkbox" checked={onlyMine} onChange={(e) => setOnlyMine(e.target.checked)} />
-                            مهامي فقط
-                        </label>
+            {deskMode === 'execute' && (
+                <>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        {operationalKpis.map((kpi) => (
+                            <div key={kpi.label} className={cn('rounded-xl border p-3', kpi.tone)}>
+                                <div className="text-xs text-gray-400">{kpi.label}</div>
+                                <div className="text-2xl font-bold text-white">{kpi.value}</div>
+                            </div>
+                        ))}
                     </div>
-                    {canWrite && (
-                        <div className="flex flex-wrap items-center gap-2">
-                            <button
-                                onClick={() => setSelectedTaskIds(filteredTasks.map((task) => task.id))}
-                                className="h-8 px-2 rounded-lg border border-slate-600 bg-slate-800/60 text-slate-200 text-xs"
-                            >
-                                تحديد الكل
-                            </button>
-                            <button
-                                onClick={() => setSelectedTaskIds([])}
-                                className="h-8 px-2 rounded-lg border border-slate-600 bg-slate-800/60 text-slate-200 text-xs"
-                            >
-                                إلغاء التحديد
-                            </button>
-                            <button
-                                onClick={() => bulkTaskStatusMutation.mutate('in_progress')}
-                                disabled={!selectedTaskIds.length || bulkTaskStatusMutation.isPending}
-                                className="h-8 px-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-xs disabled:opacity-50"
-                            >
-                                بدء جماعي
-                            </button>
-                            <button
-                                onClick={() => bulkTaskStatusMutation.mutate('review')}
-                                disabled={!selectedTaskIds.length || bulkTaskStatusMutation.isPending}
-                                className="h-8 px-2 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-200 text-xs disabled:opacity-50"
-                            >
-                                مراجعة جماعية
-                            </button>
-                            <button
-                                onClick={() => bulkTaskStatusMutation.mutate('done')}
-                                disabled={!selectedTaskIds.length || bulkTaskStatusMutation.isPending}
-                                className="h-8 px-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-xs disabled:opacity-50"
-                            >
-                                إغلاق جماعي
-                            </button>
-                            <div className="text-xs text-slate-400">المحدد: {selectedTaskIds.length}</div>
-                        </div>
-                    )}
-                    <div className="max-h-[520px] overflow-auto rounded-xl border border-slate-800">
-                        <table className="w-full text-sm">
-                            <thead className="bg-slate-900/80 text-slate-300 sticky top-0"><tr><th className="text-right px-3 py-2">تحديد</th><th className="text-right px-3 py-2">المهمة</th><th className="text-right px-3 py-2">القناة</th><th className="text-right px-3 py-2">الحالة</th><th className="text-right px-3 py-2">الاستحقاق</th><th className="text-right px-3 py-2">الإجراء التالي</th><th className="text-right px-3 py-2">إجراءات</th></tr></thead>
-                            <tbody>
-                                {filteredTasks.map((task) => (
-                                    <tr key={task.id} className={cn('border-t border-slate-800 hover:bg-slate-900/50 cursor-pointer', selectedTaskId === task.id && 'bg-cyan-500/10')} onClick={() => setSelectedTaskId(task.id)}>
-                                        <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-                                            <input
-                                                type="checkbox"
-                                                checked={selectedTaskIds.includes(task.id)}
-                                                onChange={(e) => toggleTaskSelection(task.id, e.target.checked)}
-                                            />
-                                        </td>
-                                        <td className="px-3 py-2">
-                                            <div className="text-white font-medium">{task.title}</div>
-                                            <div className="text-xs text-slate-500 mt-1">{task.brief || 'بدون وصف'}</div>
-                                            <div className="text-[11px] text-slate-500 mt-1">{task.task_type} {task.owner_username ? `• ${task.owner_username}` : ''}</div>
-                                            {actionDeskItems.get(task.id)?.why_now && (
-                                                <div className="text-[11px] text-cyan-300/80 mt-1">{actionDeskItems.get(task.id)?.why_now}</div>
-                                            )}
-                                        </td>
-                                        <td className="px-3 py-2 text-slate-300">{channelLabel(task.channel)}</td>
-                                        <td className="px-3 py-2"><span className={cn('inline-flex px-2 py-0.5 rounded-lg border text-xs', taskStatusClass(task.status))}>{taskStatusLabel(task.status)}</span></td>
-                                        <td className="px-3 py-2 text-slate-300">{task.due_at ? <div><div>{formatDate(task.due_at)}</div><div className="text-xs text-slate-500">{formatRelativeTime(task.due_at)}</div></div> : '—'}</td>
-                                        <td className="px-3 py-2">
-                                            {actionDeskItems.get(task.id) ? (
-                                                <div className="space-y-1">
-                                                    <span className={cn('inline-flex px-2 py-0.5 rounded-lg border text-xs', actionCodeClass(actionDeskItems.get(task.id)?.next_best_action_code || ''))}>
-                                                        {actionDeskItems.get(task.id)?.next_best_action || '—'}
-                                                    </span>
-                                                    {!!actionDeskItems.get(task.id)?.risk_flags?.length && (
-                                                        <div className="text-[11px] text-rose-300">{actionDeskItems.get(task.id)?.risk_flags.join('، ')}</div>
+                    <div className="grid grid-cols-1 xl:grid-cols-[1.15fr_0.85fr] gap-4">
+                        <section className="rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
+                            <div className="flex items-center justify-between gap-2">
+                                <div>
+                                    <h2 className="text-sm font-semibold text-slate-200">Task Queue</h2>
+                                    <p className="text-xs text-slate-400 mt-1">ترتيب ذكي حسب الاستعجال والمخاطر والنافذة الزمنية.</p>
+                                </div>
+                                <div className="text-xs text-slate-500">{executeQueue.length} مهام</div>
+                            </div>
+                            {canWrite && (
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <button onClick={() => setSelectedTaskIds(executeQueue.map((item) => item.task.id))} className="h-8 px-2 rounded-lg border border-slate-600 bg-slate-800/60 text-slate-200 text-xs">تحديد الكل</button>
+                                    <button onClick={() => setSelectedTaskIds([])} className="h-8 px-2 rounded-lg border border-slate-600 bg-slate-800/60 text-slate-200 text-xs">إلغاء التحديد</button>
+                                    <button onClick={() => bulkTaskStatusMutation.mutate('review')} disabled={!selectedTaskIds.length || bulkTaskStatusMutation.isPending} className="h-8 px-2 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-200 text-xs disabled:opacity-50">Move to Review</button>
+                                    <button onClick={() => bulkTaskStatusMutation.mutate('done')} disabled={!selectedTaskIds.length || bulkTaskStatusMutation.isPending} className="h-8 px-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-xs disabled:opacity-50">Close Selected</button>
+                                    <div className="text-xs text-slate-400">المحدد: {selectedTaskIds.length}</div>
+                                </div>
+                            )}
+                            <div className="space-y-3 max-h-[720px] overflow-auto pr-1">
+                                {executeQueue.map((item) => {
+                                    const task = item.task;
+                                    return (
+                                        <div key={task.id} className={cn('rounded-2xl border p-3 transition-colors', selectedTaskId === task.id ? 'border-cyan-500/30 bg-cyan-500/10' : 'border-slate-800 bg-slate-900/50')}>
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="space-y-2 flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2">
+                                                        <input type="checkbox" checked={selectedTaskIds.includes(task.id)} onChange={(e) => toggleTaskSelection(task.id, e.target.checked)} />
+                                                        <button onClick={() => setSelectedTaskId(task.id)} className="text-right text-sm font-medium text-white hover:text-cyan-200">{task.title}</button>
+                                                    </div>
+                                                    <div className="text-xs text-cyan-200">{item.why_now}</div>
+                                                    <div className="text-xs text-slate-400 line-clamp-2">{task.brief || 'بدون brief تحريري.'}</div>
+                                                    <div className="flex flex-wrap gap-2 text-[11px]">
+                                                        <span className="rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-1 text-slate-300">{channelLabel(task.channel)}</span>
+                                                        <span className={cn('rounded-lg border px-2 py-1', taskStatusClass(task.status))}>{taskStatusLabel(task.status)}</span>
+                                                        <span className={cn('rounded-lg border px-2 py-1', actionCodeClass(item.next_best_action_code))}>{item.next_best_action}</span>
+                                                        {task.owner_username && <span className="rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-1 text-slate-300">{task.owner_username}</span>}
+                                                        {task.due_at && <span className="rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-1 text-slate-300">{formatRelativeTime(task.due_at)}</span>}
+                                                    </div>
+                                                    {!!item.risk_flags?.length && (
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {item.risk_flags.map((flag) => (
+                                                                <span key={flag} className="rounded-md border border-rose-500/30 bg-rose-500/10 px-1.5 py-0.5 text-[10px] text-rose-200">{flag}</span>
+                                                            ))}
+                                                        </div>
                                                     )}
                                                 </div>
-                                            ) : (
-                                                <span className="text-xs text-slate-500">—</span>
-                                            )}
-                                        </td>
-                                        <td className="px-3 py-2">
-                                            {canWrite && <div className="flex gap-1 flex-wrap">
-                                                {actionDeskItems.get(task.id) && (
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); runNextActionMutation.mutate(actionDeskItems.get(task.id) as DigitalTaskActionItem); }}
-                                                        className="text-xs px-2 py-1 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-200"
-                                                    >
-                                                        التالي
-                                                    </button>
-                                                )}
-                                                {user?.id && task.owner_user_id !== user.id && <button onClick={(e) => { e.stopPropagation(); claimTaskMutation.mutate(task.id); }} className="text-xs px-2 py-1 rounded-lg border border-slate-500/30 bg-slate-500/10 text-slate-200">استلام</button>}
-                                                {task.status !== 'in_progress' && <button onClick={(e) => { e.stopPropagation(); updateTaskMutation.mutate({ taskId: task.id, nextStatus: 'in_progress' }); }} className="text-xs px-2 py-1 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-200">بدء</button>}
-                                                {task.status !== 'review' && task.status !== 'done' && <button onClick={(e) => { e.stopPropagation(); updateTaskMutation.mutate({ taskId: task.id, nextStatus: 'review' }); }} className="text-xs px-2 py-1 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-200">مراجعة</button>}
-                                                {task.status !== 'done' && <button onClick={(e) => { e.stopPropagation(); updateTaskMutation.mutate({ taskId: task.id, nextStatus: 'done' }); }} className="text-xs px-2 py-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-200">إغلاق</button>}
-                                            </div>}
-                                        </td>
-                                    </tr>
-                                ))}
-                                {!filteredTasks.length && <tr><td colSpan={7} className="px-3 py-8 text-center text-slate-500">لا توجد مهام مطابقة للفلاتر.</td></tr>}
-                            </tbody>
-                        </table>
-                    </div>
-                </section>
-
-                <section className="rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
-                    <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2"><PlusCircle className="w-4 h-4 text-cyan-300" />إضافة مهمة</h2>
-                    <input value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} placeholder="عنوان المهمة" className="h-10 w-full rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white" />
-                    <textarea value={taskBrief} onChange={(e) => setTaskBrief(e.target.value)} placeholder="وصف مختصر" rows={3} className="w-full rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-white" />
-                    <div className="grid grid-cols-2 gap-2">
-                        <select value={taskChannel} onChange={(e) => setTaskChannel(e.target.value as DigitalChannel)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white"><option value="news">الشروق نيوز</option><option value="tv">الشروق تي في</option></select>
-                        <input type="datetime-local" value={taskDueAt} onChange={(e) => setTaskDueAt(e.target.value)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white" />
-                    </div>
-                    <button onClick={() => createTaskMutation.mutate()} disabled={!canWrite || !taskTitle.trim()} className="h-10 w-full rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-sm disabled:opacity-50">حفظ المهمة</button>
-                    <div className="pt-3 border-t border-slate-800">
-                        <h3 className="text-sm text-slate-200 mb-2 flex items-center gap-1"><CalendarDays className="w-4 h-4 text-indigo-300" />روزنامة 7 أيام</h3>
-                        <div className="space-y-2 max-h-48 overflow-auto">
-                            {(calendarQuery.data?.data?.items || []).slice(0, 12).map((item, idx) => (
-                                <div key={`${item.item_type}-${item.reference_id}-${idx}`} className="rounded-lg border border-slate-800 bg-slate-900/50 p-2 text-xs text-slate-300">
-                                    <div>{item.title}</div><div className="text-slate-500 mt-1">{formatDate(item.starts_at)} • {channelLabel(item.channel)}</div>
+                                                <div className="flex flex-col gap-2 shrink-0">
+                                                    <button onClick={() => { setSelectedTaskId(task.id); setDeskMode('compose'); }} className="h-8 px-2 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-200 text-xs">Workspace</button>
+                                                    {canWrite && <button onClick={() => runNextActionMutation.mutate(item)} disabled={runNextActionMutation.isPending} className="h-8 px-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-xs disabled:opacity-50">نفّذ الآن</button>}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                                {!executeQueue.length && <div className="text-sm text-slate-500">لا توجد مهام تشغيلية حالياً.</div>}
+                            </div>
+                        </section>
+                        <section className="rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
+                            <div className="flex items-center justify-between gap-2">
+                                <div>
+                                    <h2 className="text-sm font-semibold text-slate-200">Quick Compose</h2>
+                                    <p className="text-xs text-slate-400 mt-1">مساحة خفيفة للتنفيذ السريع قبل الدخول إلى Workspace الكامل.</p>
                                 </div>
-                            ))}
-                        </div>
+                                {selectedTask && <button onClick={() => setDeskMode('compose')} className="h-8 px-2 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-200 text-xs">فتح Compose</button>}
+                            </div>
+                            {!selectedTask && <div className="text-sm text-slate-400">اختر مهمة من Task Queue لبدء التنفيذ السريع.</div>}
+                            {selectedTask && (
+                                <div className="space-y-3">
+                                    <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-3">
+                                        <div className="text-sm text-white font-medium">{selectedTask.title}</div>
+                                        <div className="text-xs text-slate-400 mt-1">{selectedTask.brief || 'بدون brief تحريري.'}</div>
+                                    </div>
+                                    {selectedTaskAction && (
+                                        <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-3 space-y-2">
+                                            <div className="text-xs text-slate-300">Why now?</div>
+                                            <div className="text-sm text-white">{selectedTaskAction.why_now}</div>
+                                            <div className="grid grid-cols-2 gap-2 text-xs">
+                                                <div className="rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-1 text-slate-300">المصدر: {selectedTaskAction.source_type || 'task'}</div>
+                                                <div className="rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-1 text-slate-300">النافذة: {selectedTaskAction.trigger_window || '—'}</div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                        <select value={postPlatform} onChange={(e) => setPostPlatform(e.target.value)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white"><option value="facebook">facebook</option><option value="x">x</option><option value="youtube">youtube</option><option value="tiktok">tiktok</option><option value="instagram">instagram</option></select>
+                                        <select value={postStatus} onChange={(e) => setPostStatus(e.target.value as DigitalPostStatus)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white"><option value="draft">مسودة</option><option value="ready">جاهز</option><option value="approved">معتمد</option><option value="scheduled">مجدول</option></select>
+                                    </div>
+                                    <input value={postHashtags} onChange={(e) => setPostHashtags(e.target.value)} placeholder="وسوم" className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white" />
+                                    {canWrite && (
+                                        <div className="flex gap-2">
+                                            <button onClick={() => composePostMutation.mutate()} disabled={composePostMutation.isPending} className="h-10 flex-1 rounded-xl border border-indigo-500/30 bg-indigo-500/10 text-indigo-200 text-sm disabled:opacity-50">صياغة سريعة</button>
+                                            {selectedTaskAction && <button onClick={() => runNextActionMutation.mutate(selectedTaskAction)} disabled={runNextActionMutation.isPending} className="h-10 flex-1 rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-sm disabled:opacity-50">{selectedTaskAction.next_best_action}</button>}
+                                        </div>
+                                    )}
+                                    <textarea value={postContent} onChange={(e) => setPostContent(e.target.value)} rows={4} placeholder="نص المنشور" className="w-full rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-white" />
+                                    <div className={cn('text-xs', postDraftLength.over ? 'text-rose-300' : 'text-slate-400')}>طول النص: {postDraftLength.count}/{postDraftLength.limit}</div>
+                                    <button onClick={() => createPostMutation.mutate()} disabled={!canWrite || !postContent.trim() || postDraftLength.over} className="h-10 w-full rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-sm disabled:opacity-50">حفظ المادة</button>
+                                    <div className="space-y-2">
+                                        {posts.slice(0, 3).map((post) => (
+                                            <div key={post.id} className="rounded-xl border border-slate-800 bg-slate-900/50 p-3">
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <div className="text-sm text-white">{post.platform}</div>
+                                                    <span className={cn('inline-flex px-2 py-0.5 rounded-lg border text-xs', postStatusClass(post.status))}>{postStatusLabel(post.status)}</span>
+                                                </div>
+                                                <div className="text-xs text-slate-300 mt-2 line-clamp-3">{post.content_text}</div>
+                                            </div>
+                                        ))}
+                                        {!posts.length && <div className="text-xs text-slate-500">لا توجد مواد بعد لهذه المهمة.</div>}
+                                    </div>
+                                </div>
+                            )}
+                        </section>
                     </div>
-                </section>
-            </div>
+                </>
+            )}
 
+            {deskMode === 'planning' && (
             <section className="rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
                 <h2 className="text-sm font-semibold text-slate-200">مولّد منشورات البرامج/المسلسلات</h2>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
@@ -1164,7 +1394,9 @@ export default function DigitalPage() {
                     </div>
                 )}
             </section>
+            )}
 
+            {deskMode === 'compose' && (
             <section className="rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
                 <h2 className="text-sm font-semibold text-slate-200">مواد السوشيال للمهمة المحددة</h2>
                 {!selectedTask && <div className="text-sm text-slate-400">اختر مهمة من الجدول.</div>}
@@ -1338,7 +1570,10 @@ export default function DigitalPage() {
                     </div>
                 )}
             </section>
+            )}
 
+            {deskMode === 'planning' && (
+                <>
             {canManage && (
                 <section className="rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
                     <h2 className="text-sm font-semibold text-slate-200">صلاحيات فريق الديجيتال</h2>
@@ -1399,6 +1634,8 @@ export default function DigitalPage() {
                     ))}
                 </div>
             </section>
+                </>
+            )}
         </div>
     );
 }
