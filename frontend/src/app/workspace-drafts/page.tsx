@@ -2732,28 +2732,82 @@ function WorkspaceDraftsPageContent() {
                     />
                 )}
 
-                {showWriterMinimal && (
-                    <div className="mb-3 rounded-xl border border-emerald-500/20 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-100" dir="rtl">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div>
-                                <p className="font-medium">أنت الآن في وضع كتابة هادئ.</p>
-                                <p className="mt-1 text-[12px] text-emerald-100/80">
-                                    اكتب النص أولًا. إذا احتجت التحقق أو الأدوات، افتح اللوحة المساعدة فقط عند الحاجة.
-                                </p>
+                {isWritingStage ? (
+                    <div className="space-y-3" dir="rtl">
+                        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+                            <div className="space-y-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-100">
+                                        مرحلة الكتابة
+                                    </span>
+                                    <span className="text-[11px] text-gray-400">{saveNode}</span>
+                                </div>
+                                <p className="text-sm text-white">اكتب العنوان والمتن فقط. سنفتح أدوات المراجعة بعد أن تضغط «أنهيت الكتابة».</p>
                             </div>
-                            <button type="button" onClick={openWelcomeGuide} className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
-                                كيف يعمل؟
-                            </button>
-                        </div>
-                    </div>
-                )}
 
+                            <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                    disabled={autosave.isPending}
+                                    onClick={() => {
+                                        trackUiAction('workspace_drafts', 'حفظ', surfaceDetails);
+                                        runWithGuide('save', () => {
+                                            setSaveState('saving');
+                                            autosave.mutate();
+                                        });
+                                    }}
+                                    className="min-h-10 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-slate-200 disabled:opacity-60"
+                                >
+                                    حفظ
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={enterReviewStage}
+                                    className="min-h-10 rounded-xl border border-cyan-500/30 bg-cyan-500/15 px-4 py-2 text-xs font-medium text-cyan-100"
+                                >
+                                    أنهيت الكتابة
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setHeaderToolsOpen((prev) => !prev)}
+                                    className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-slate-200"
+                                >
+                                    {headerToolsOpen ? 'إغلاق' : 'المزيد'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {headerToolsOpen && (
+                            <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                                <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                                    <button
+                                        onClick={openWelcomeGuide}
+                                        className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-200"
+                                    >
+                                        <CircleHelp className="w-4 h-4" />
+                                        كيف يعمل؟
+                                    </button>
+                                    <button
+                                        onClick={() => runWithGuide('manual_draft', () => setNewDraftOpen(true))}
+                                        className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200"
+                                    >
+                                        مسودة جديدة
+                                    </button>
+                                    <NextLink
+                                        href="/services/multimedia"
+                                        className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-xs text-violet-200"
+                                    >
+                                        أدوات الوسائط
+                                    </NextLink>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                ) : (
+                <>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                         <h1 className="text-xl font-semibold text-white">المحرر الذكي لغرفة الشروق</h1>
-                        <p className="text-xs text-gray-400">
-                            {showWriterMinimal ? 'اكتب الآن، واترك المراجعة والأدوات لوقت الحاجة.' : 'واجهة كتابة مبسطة: خطوة رئيسية واضحة، والأدوات الثقيلة عند الطلب فقط.'}
-                        </p>
+                        <p className="text-xs text-gray-400">واجهة كتابة مبسطة: خطوة رئيسية واضحة، والأدوات الثقيلة عند الطلب فقط.</p>
                     </div>
                     <div className="flex w-full sm:w-auto flex-wrap items-center justify-start sm:justify-end gap-2">
                         <div className="text-xs">{saveNode}</div>
@@ -2793,35 +2847,6 @@ function WorkspaceDraftsPageContent() {
                     </div>
                 )}
 
-                {isWritingStage ? (
-                    <div className="mt-4 space-y-3">
-                        <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-4" dir="rtl">
-                            <div className="flex flex-wrap items-center justify-between gap-3">
-                                <div className="space-y-1">
-                                    <p className="text-sm font-medium text-white">مرحلة الكتابة</p>
-                                    <p className="text-[12px] text-slate-400">ركّز على العنوان والمتن فقط. عندما تنتهي، انتقل إلى المراجعة قبل الإرسال.</p>
-                                </div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={enterReviewStage}
-                                        className="min-h-10 rounded-xl border border-cyan-500/30 bg-cyan-500/15 px-4 py-2 text-xs font-medium text-cyan-100"
-                                    >
-                                        أنهيت الكتابة
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setDetailsOpen(true)}
-                                        className="min-h-10 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-slate-200"
-                                    >
-                                        أحتاج مساعدة
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                ) : (
-                <>
                 {(!isWriterRole || detailsOpen) && (
                     <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] text-gray-300">
                         {workflowSteps.map((step, idx) => (
@@ -3378,15 +3403,23 @@ function WorkspaceDraftsPageContent() {
                     <div className="rounded-2xl border border-white/10 bg-gray-900/50 overflow-hidden">
                         <div className="border-b border-white/10 p-4">
                             <input value={title} onChange={(e) => { setTitle(cleanText(e.target.value)); setSaveState('unsaved'); }} className="w-full rounded-xl bg-white/5 border border-white/15 px-3 py-2 text-white text-lg" dir="rtl" />
-                            <p className="text-xs text-gray-500 mt-2">معرف العمل: {workId} • الإصدار v{baseVersion}</p>
+                            {isWritingStage ? (
+                                <p className="mt-2 text-[11px] text-gray-500">ابدأ بالعنوان ثم اكتب المتن مباشرة. ستظهر أدوات المراجعة بعد الانتقال إلى المرحلة التالية.</p>
+                            ) : (
+                                <p className="text-xs text-gray-500 mt-2">معرف العمل: {workId} • الإصدار v{baseVersion}</p>
+                            )}
                         </div>
                         {editor && (
                             <BubbleMenu editor={editor}>
                                 <div className="relative rounded-xl bg-gray-950/95 border border-white/20 p-1 flex gap-1 text-xs">
                                     <button onClick={() => editor.chain().focus().toggleBold().run()} className="px-2 py-1 rounded bg-white/10">عريض</button>
-                                    <button onClick={() => editor.chain().focus().toggleItalic().run()} className="px-2 py-1 rounded bg-white/10">مائل</button>
-                                    <button onClick={() => editor.chain().focus().toggleHighlight().run()} className="px-2 py-1 rounded bg-white/10">تمييز</button>
-                                    <span className="w-px bg-white/10 mx-1" />
+                                    {!isWritingStage && (
+                                        <>
+                                            <button onClick={() => editor.chain().focus().toggleItalic().run()} className="px-2 py-1 rounded bg-white/10">مائل</button>
+                                            <button onClick={() => editor.chain().focus().toggleHighlight().run()} className="px-2 py-1 rounded bg-white/10">تمييز</button>
+                                            <span className="w-px bg-white/10 mx-1" />
+                                        </>
+                                    )}
                                     <button onClick={() => { setInlineAiOpen((v) => !v); setInlineSourceOpen(false); }} className="px-2 py-1 rounded bg-emerald-500/20 text-emerald-100">AI</button>
 
                                     {inlineAiOpen && (
@@ -3395,19 +3428,23 @@ function WorkspaceDraftsPageContent() {
                                             <button onClick={() => handleInlineAiAction('shorten')} className="w-full text-right px-2 py-1 rounded bg-white/10">اختصار</button>
                                             <button onClick={() => handleInlineAiAction('expand')} className="w-full text-right px-2 py-1 rounded bg-white/10">توسيع</button>
                                             <button onClick={() => handleInlineAiAction('clarify')} className="w-full text-right px-2 py-1 rounded bg-white/10">توضيح</button>
-                                            <button onClick={() => setInlineSourceOpen((v) => !v)} className="w-full text-right px-2 py-1 rounded bg-white/10">إضافة مصدر</button>
-                                            {inlineSourceOpen && (
-                                                <div className="mt-1 max-h-40 overflow-auto rounded-lg border border-white/10 bg-black/30 p-1 space-y-1">
-                                                    {(sources || []).slice(0, 10).map((source) => (
-                                                        <button
-                                                            key={`source-inline-${source.id}`}
-                                                            onClick={() => insertSourceInline(source)}
-                                                            className="w-full text-right px-2 py-1 rounded bg-white/10 text-[10px]"
-                                                        >
-                                                            {cleanText(source.name || source.url)}
-                                                        </button>
-                                                    ))}
-                                                </div>
+                                            {!isWritingStage && (
+                                                <>
+                                                    <button onClick={() => setInlineSourceOpen((v) => !v)} className="w-full text-right px-2 py-1 rounded bg-white/10">إضافة مصدر</button>
+                                                    {inlineSourceOpen && (
+                                                        <div className="mt-1 max-h-40 overflow-auto rounded-lg border border-white/10 bg-black/30 p-1 space-y-1">
+                                                            {(sources || []).slice(0, 10).map((source) => (
+                                                                <button
+                                                                    key={`source-inline-${source.id}`}
+                                                                    onClick={() => insertSourceInline(source)}
+                                                                    className="w-full text-right px-2 py-1 rounded bg-white/10 text-[10px]"
+                                                                >
+                                                                    {cleanText(source.name || source.url)}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </>
                                             )}
                                             {inlineAiError && <p className="text-[10px] text-red-300">{inlineAiError}</p>}
                                         </div>
