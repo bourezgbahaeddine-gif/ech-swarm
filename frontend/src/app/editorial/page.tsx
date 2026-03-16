@@ -1,13 +1,22 @@
+﻿
 'use client';
 
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { isAxiosError } from 'axios';
-import { editorialApi, newsApi, type ArticleBrief, type ChiefPendingItem, type SocialApprovedItem } from '@/lib/api';
-import { formatRelativeTime, getCategoryLabel, truncate } from '@/lib/utils';
+import {
+    editorialApi,
+    newsApi,
+    type ArticleBrief,
+    type ChiefPendingItem,
+    type SocialApprovedItem,
+} from '@/lib/api';
+import { formatRelativeTime, getCategoryLabel, getStatusColor, truncate } from '@/lib/utils';
 import { useAuth } from '@/lib/auth';
-import { CheckCircle2, RotateCcw, Send, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, RotateCcw, Send, ShieldCheck } from 'lucide-react';
+
+type EditorialTabKey = 'pending' | 'returned' | 'reservations' | 'manual';
 
 function normalizeStatus(status: string | null | undefined): string {
     return (status || '').toLowerCase();
@@ -33,6 +42,47 @@ function getApiErrorMessage(error: unknown, fallback: string): string {
     return fallback;
 }
 
+function getArticleReason(article: ArticleBrief): string {
+    const status = normalizeStatus(article.status);
+    if (article.is_breaking) return 'ظهر هنا لأنه خبر عاجل يحتاج متابعة تحريرية سريعة.';
+    if (status === 'draft_generated') return 'ظهر هنا لأنه عاد إلى مسار التحرير ويحتاج استكمالًا أو إعادة إرسال.';
+    if (status === 'approval_request_with_reservations') return 'ظهر هنا لأن المادة تحتوي تحفظات أو ملاحظات قبل الاعتماد النهائي.';
+    if (status === 'ready_for_manual_publish') return 'ظهر هنا لأنه اجتاز الاعتماد وأصبح جاهزًا للنشر اليدوي أو النسخ الرقمية.';
+    return 'ظهر هنا لأنه دخل نطاق التحرير اليوم ويحتاج خطوة تشغيلية تالية.';
+}
+
+function getArticlePrimaryAction(article: ArticleBrief): { label: string; href?: string } {
+    const status = normalizeStatus(article.status);
+    if (status === 'ready_for_manual_publish') return { label: 'افتح الجاهز للنشر', href: `/news?status=ready_for_manual_publish` };
+    if (status === 'approval_request_with_reservations') return { label: 'راجع التحفظات', href: `/workspace-drafts?article_id=${article.id}` };
+    if (status === 'draft_generated') return { label: 'أكمل التحرير', href: `/workspace-drafts?article_id=${article.id}` };
+    return { label: 'افتح في المحرر', href: `/workspace-drafts?article_id=${article.id}` };
+}
+
+function getChiefReason(item: ChiefPendingItem): string {
+    const status = normalizeStatus(item.status);
+    if (status === 'approval_request_with_reservations') return 'ظهرت لك لأن وكيل السياسة اعتمد المادة بتحفظات وتنتظر قرارك النهائي.';
+    if (item.is_breaking) return 'ظهرت لك لأنها مادة عاجلة وصلت إلى بوابة الاعتماد النهائي.';
+    return 'ظهرت لك لأنها جاهزة لقرار رئيس التحرير قبل السماح بالنشر اليدوي.';
+}
+
+function EmptyState({ message }: { message: string }) {
+    return <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-6 text-center text-gray-400">{message}</div>;
+}
+
+function QueueTabButton({ active, label, count, onClick }: { active: boolean; label: string; count: number; onClick: () => void }) {
+    return (
+        <button
+            onClick={onClick}
+            className={`rounded-2xl border px-4 py-3 text-right transition ${active ? 'border-cyan-400/40 bg-cyan-500/15 text-white' : 'border-white/10 bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white'}`}
+            dir="rtl"
+        >
+            <div className="text-sm font-semibold">{label}</div>
+            <div className="mt-1 text-xs text-gray-400">{count} عنصر</div>
+        </button>
+    );
+}
+
 export default function EditorialPage() {
     const queryClient = useQueryClient();
     const { user } = useAuth();
@@ -43,6 +93,7 @@ export default function EditorialPage() {
     const isSocial = role === 'social_media';
     const canNominate = role === 'journalist' || role === 'social_media' || role === 'director' || role === 'editor_chief';
 
+    const [activeTab, setActiveTab] = useState<EditorialTabKey>('pending');
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
     const [notesMap, setNotesMap] = useState<Record<number, string>>({});
@@ -54,6 +105,7 @@ export default function EditorialPage() {
         reject: true,
         return_for_revision: false,
     };
+
     const decisionLabel: Record<string, string> = {
         approve: 'اعتماد نهائي',
         approve_with_reservations: 'اعتماد بتحفظات',
@@ -76,6 +128,25 @@ export default function EditorialPage() {
         refetchInterval: 30000,
     });
 
+    const draftGeneratedQuery = useQuery({
+        queryKey: ['editorial-draft-generated'],
+        queryFn: async () => (await newsApi.list({ page: 1, per_page: 80, status: 'draft_generated' })).data.items,
+        refetchInterval: 30000,
+    });
+
+    const reservationsQuery = useQuery({
+        queryKey: ['editorial-reservations'],
+        queryFn: async () => (await newsApi.list({ page: 1, per_page: 80, status: 'approval_request_with_reservations' })).data.items,
+        enabled: !isChief,
+        refetchInterval: 30000,
+    });
+
+    const readyForManualQuery = useQuery({
+        queryKey: ['editorial-ready-manual'],
+        queryFn: async () => (await newsApi.list({ page: 1, per_page: 80, status: 'ready_for_manual_publish' })).data.items,
+        refetchInterval: 30000,
+    });
+
     const socialFeedQuery = useQuery({
         queryKey: ['social-approved-feed'],
         queryFn: () => editorialApi.socialApprovedFeed(80),
@@ -90,9 +161,7 @@ export default function EditorialPage() {
             setSuccessMessage('تم ترشيح الخبر وفتحه في المحرر الذكي.');
             setErrorMessage(null);
             queryClient.invalidateQueries({ queryKey: ['pending-candidates-journalist'] });
-            const target = workId
-                ? `/workspace-drafts?article_id=${articleId}&work_id=${workId}`
-                : `/workspace-drafts?article_id=${articleId}`;
+            const target = workId ? `/workspace-drafts?article_id=${articleId}&work_id=${workId}` : `/workspace-drafts?article_id=${articleId}`;
             router.push(target);
         },
         onError: (err: unknown) => {
@@ -102,29 +171,25 @@ export default function EditorialPage() {
     });
 
     const chiefDecisionMutation = useMutation({
-        mutationFn: ({
-            articleId,
-            decision,
-            notes,
-        }: {
-            articleId: number;
-            decision: 'approve' | 'approve_with_reservations' | 'send_back' | 'reject' | 'return_for_revision';
-            notes?: string;
-        }) => editorialApi.chiefFinalDecision(articleId, { decision, notes }),
+        mutationFn: ({ articleId, decision, notes }: { articleId: number; decision: 'approve' | 'approve_with_reservations' | 'send_back' | 'reject' | 'return_for_revision'; notes?: string }) =>
+            editorialApi.chiefFinalDecision(articleId, { decision, notes }),
         onSuccess: (res) => {
-            const message = res.data?.message || 'Decision applied.';
+            const message = res.data?.message || 'تم تطبيق القرار.';
             const overridden = (res.data?.overridden_blockers || []).filter(Boolean);
             if (overridden.length > 0) {
                 const rendered = overridden.slice(0, 5).map((item) => `- ${item}`).join('\n');
-                setSuccessMessage(`${message}\n\nBlockers overridden:\n${rendered}`);
+                setSuccessMessage(`${message}\n\nتم تجاوز العوائق التالية:\n${rendered}`);
             } else {
                 setSuccessMessage(message);
             }
             setErrorMessage(null);
             queryClient.invalidateQueries({ queryKey: ['chief-pending-queue'] });
+            queryClient.invalidateQueries({ queryKey: ['editorial-draft-generated'] });
+            queryClient.invalidateQueries({ queryKey: ['editorial-reservations'] });
+            queryClient.invalidateQueries({ queryKey: ['editorial-ready-manual'] });
         },
         onError: (err: unknown) => {
-            setErrorMessage(getApiErrorMessage(err, 'Failed to apply chief decision.'));
+            setErrorMessage(getApiErrorMessage(err, 'فشل تطبيق قرار رئيس التحرير.'));
             setSuccessMessage(null);
         },
     });
@@ -133,16 +198,11 @@ export default function EditorialPage() {
         mutationFn: (articleId: number) => editorialApi.socialVariantsForArticle(articleId),
         onSuccess: async (res, articleId) => {
             const variants = res.data?.variants || {};
-            const text = [
-                `Facebook: ${variants.facebook || '-'}`,
-                `X: ${variants.x || '-'}`,
-                `Push: ${variants.push || '-'}`,
-                `Breaking: ${variants.breaking_alert || '-'}`,
-            ].join('\n\n');
+            const text = [`Facebook: ${variants.facebook || '-'}`, `X: ${variants.x || '-'}`, `Push: ${variants.push || '-'}`, `Breaking: ${variants.breaking_alert || '-'}`].join('\n\n');
             try {
                 if (typeof navigator !== 'undefined' && navigator.clipboard) {
                     await navigator.clipboard.writeText(text);
-                    setSuccessMessage(`تم نسخ نسخ السوشيال للخبر #${articleId}`);
+                    setSuccessMessage(`تم نسخ النسخ الجاهزة للخبر #${articleId}`);
                     setErrorMessage(null);
                     return;
                 }
@@ -152,237 +212,276 @@ export default function EditorialPage() {
             setSuccessMessage(text);
             setErrorMessage(null);
         },
-        onError: (err: unknown) => setErrorMessage(getApiErrorMessage(err, 'تعذر جلب نسخ السوشيال')),
+        onError: (err: unknown) => setErrorMessage(getApiErrorMessage(err, 'تعذر جلب نسخ السوشيال.')),
     });
-
     const chiefItems = useMemo(() => (chiefQueueQuery.data?.data || []) as ChiefPendingItem[], [chiefQueueQuery.data?.data]);
     const pendingCandidates = useMemo(() => (pendingCandidatesQuery.data?.data || []) as ArticleBrief[], [pendingCandidatesQuery.data?.data]);
+    const draftGeneratedItems = useMemo(() => (draftGeneratedQuery.data || []) as ArticleBrief[], [draftGeneratedQuery.data]);
+    const reservationsItems = useMemo(() => (reservationsQuery.data || []) as ArticleBrief[], [reservationsQuery.data]);
+    const readyForManualItems = useMemo(() => (readyForManualQuery.data || []) as ArticleBrief[], [readyForManualQuery.data]);
     const socialItems = useMemo(() => (socialFeedQuery.data?.data || []) as SocialApprovedItem[], [socialFeedQuery.data?.data]);
 
-    const submitChiefDecision = (
-        item: ChiefPendingItem,
-        decision: 'approve' | 'approve_with_reservations' | 'send_back' | 'reject' | 'return_for_revision',
-    ) => {
+    const chiefPendingItems = useMemo(() => chiefItems.filter((item) => normalizeStatus(item.status) !== 'approval_request_with_reservations'), [chiefItems]);
+    const chiefReservationItems = useMemo(() => chiefItems.filter((item) => normalizeStatus(item.status) === 'approval_request_with_reservations'), [chiefItems]);
+
+    const tabs = useMemo(
+        () => [
+            {
+                key: 'pending' as const,
+                label: isChief ? 'بانتظار الاعتماد' : 'بانتظارك الآن',
+                count: isChief ? chiefPendingItems.length : pendingCandidates.length,
+                helper: isChief ? 'مواد وصلت إلى قرار رئيس التحرير.' : 'مواد دخلت نطاقك وتحتاج بدء العمل.',
+            },
+            {
+                key: 'returned' as const,
+                label: 'عاد للمراجعة',
+                count: draftGeneratedItems.length,
+                helper: 'مواد في مسار التحرير وتحتاج متابعة أو إعادة إرسال.',
+            },
+            {
+                key: 'reservations' as const,
+                label: 'بتحفظات',
+                count: isChief ? chiefReservationItems.length : reservationsItems.length,
+                helper: 'مواد فيها ملاحظات أو تحفظات قبل الإقفال النهائي.',
+            },
+            {
+                key: 'manual' as const,
+                label: 'جاهز للنشر اليدوي',
+                count: readyForManualItems.length,
+                helper: 'مواد اجتازت الاعتماد وأصبحت جاهزة للنشر أو التسليم.',
+            },
+        ],
+        [chiefPendingItems.length, chiefReservationItems.length, draftGeneratedItems.length, isChief, pendingCandidates.length, readyForManualItems.length, reservationsItems.length],
+    );
+
+    const activeTabMeta = tabs.find((tab) => tab.key === activeTab) || tabs[0];
+
+    const submitChiefDecision = (item: ChiefPendingItem, decision: 'approve' | 'approve_with_reservations' | 'send_back' | 'reject' | 'return_for_revision') => {
         const note = (notesMap[item.id] || '').trim();
         if (decisionRequiresReason[decision] && !note) {
-            setErrorMessage(`Decision reason is required for: ${decisionLabel[decision]}`);
+            setErrorMessage(`سبب القرار مطلوب عند اختيار: ${decisionLabel[decision]}`);
             setSuccessMessage(null);
             return;
         }
-        const blockersPreview =
-            decision === 'approve_with_reservations'
-                ? [...(item.decision_card?.quality_issues || []), ...(item.decision_card?.claims_issues || [])].slice(0, 3)
-                : [];
+        const blockersPreview = decision === 'approve_with_reservations'
+            ? [...(item.decision_card?.quality_issues || []), ...(item.decision_card?.claims_issues || [])].slice(0, 3)
+            : [];
         const confirmationMessage = blockersPreview.length
-            ? `Confirm action: ${decisionLabel[decision]}?\n\nBLOCKERS to override:\n- ${blockersPreview.join('\n- ')}`
-            : `Confirm action: ${decisionLabel[decision]}?`;
-        const confirmed = typeof window === 'undefined'
-            ? true
-            : window.confirm(confirmationMessage);
+            ? `تأكيد إجراء: ${decisionLabel[decision]}؟\n\nسيتم تجاوز العوائق التالية:\n- ${blockersPreview.join('\n- ')}`
+            : `تأكيد إجراء: ${decisionLabel[decision]}؟`;
+        const confirmed = typeof window === 'undefined' ? true : window.confirm(confirmationMessage);
         if (!confirmed) return;
 
-        chiefDecisionMutation.mutate({
-            articleId: item.id,
-            decision,
-            notes: note || undefined,
-        });
+        chiefDecisionMutation.mutate({ articleId: item.id, decision, notes: note || undefined });
+    };
+
+    const renderChiefCard = (item: ChiefPendingItem) => {
+        const hasReservations = normalizeStatus(item.status) === 'approval_request_with_reservations';
+        const note = notesMap[item.id] || '';
+
+        return (
+            <div key={item.id} className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3" dir="rtl">
+                    <div>
+                        <h3 className="text-base text-white font-semibold">{item.title_ar || item.original_title}</h3>
+                        <p className="mt-1 text-xs text-gray-400">{item.source_name || 'بدون مصدر'} • {getCategoryLabel(item.category)}</p>
+                        <p className="mt-1 text-xs text-gray-500">آخر تحديث: {formatRelativeTime(item.updated_at)}</p>
+                    </div>
+                    <span className={`rounded-lg border px-2 py-1 text-[11px] ${hasReservations ? 'border-orange-500/40 bg-orange-500/20 text-orange-200' : 'border-cyan-500/40 bg-cyan-500/20 text-cyan-200'}`}>
+                        {hasReservations ? 'تحفظات معلقة' : 'قرار نهائي مطلوب'}
+                    </span>
+                </div>
+
+                <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-200" dir="rtl">
+                    <p className="mb-1 text-gray-400">لماذا تظهر هنا؟</p>
+                    <p>{getChiefReason(item)}</p>
+                </div>
+
+                {!!item.policy?.reasons?.length && (
+                    <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-200" dir="rtl">
+                        <p className="mb-1 text-gray-400">ملاحظات وكيل السياسة</p>
+                        {item.policy.reasons.map((reason, index) => <p key={`${item.id}-reason-${index}`}>- {reason}</p>)}
+                    </div>
+                )}
+
+                {!!item.decision_card && (
+                    <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-200" dir="rtl">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <span className={`rounded-md border px-2 py-1 ${item.decision_card.risk_level === 'high' ? 'border-red-500/40 bg-red-500/10 text-red-200' : item.decision_card.risk_level === 'low' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200' : 'border-amber-500/40 bg-amber-500/10 text-amber-200'}`}>
+                                مستوى المخاطر: {item.decision_card.risk_level}
+                            </span>
+                            <span className="rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-cyan-200">جودة: {item.decision_card.quality_score ?? '-'}</span>
+                            <span className="rounded-md border border-violet-500/30 bg-violet-500/10 px-2 py-1 text-violet-200">ادعاءات: {item.decision_card.claims_score ?? '-'}</span>
+                        </div>
+                    </div>
+                )}
+
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-5">
+                    <a href={item.work_id ? `/workspace-drafts?article_id=${item.id}&work_id=${item.work_id}` : `/workspace-drafts?article_id=${item.id}`} className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-center text-xs text-gray-200 hover:text-white">افتح في المحرر</a>
+                    <button onClick={() => submitChiefDecision(item, 'approve')} disabled={chiefDecisionMutation.isPending} className="flex items-center justify-center gap-1 rounded-xl border border-emerald-500/30 bg-emerald-500/20 px-3 py-2 text-xs text-emerald-200"><CheckCircle2 className="h-4 w-4" /> اعتماد نهائي</button>
+                    <button onClick={() => submitChiefDecision(item, 'approve_with_reservations')} disabled={chiefDecisionMutation.isPending} className="rounded-xl border border-orange-500/30 bg-orange-500/20 px-3 py-2 text-xs text-orange-200">اعتماد بتحفظات</button>
+                    <button onClick={() => submitChiefDecision(item, 'send_back')} disabled={chiefDecisionMutation.isPending} className="flex items-center justify-center gap-1 rounded-xl border border-amber-500/30 bg-amber-500/20 px-3 py-2 text-xs text-amber-200"><RotateCcw className="h-4 w-4" /> إعادة للمراجعة</button>
+                    <button onClick={() => submitChiefDecision(item, 'reject')} disabled={chiefDecisionMutation.isPending} className="rounded-xl border border-red-500/30 bg-red-500/20 px-3 py-2 text-xs text-red-200">رفض</button>
+                </div>
+
+                <input type="text" value={note} onChange={(e) => setNotesMap((prev) => ({ ...prev, [item.id]: e.target.value }))} placeholder="سبب القرار (إلزامي للتحفظات أو الرفض)..." className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white placeholder:text-gray-500" dir="rtl" />
+            </div>
+        );
+    };
+
+    const renderArticleCard = (article: ArticleBrief, options?: { nomination?: boolean; socialCopy?: boolean }) => {
+        const action = getArticlePrimaryAction(article);
+
+        return (
+            <div key={article.id} className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3" dir="rtl">
+                <div>
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                        <span className={`rounded-lg border px-2 py-1 text-[11px] ${getStatusColor(normalizeStatus(article.status))}`}>{article.status}</span>
+                        {article.is_breaking && <span className="rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1 text-[11px] text-red-200">عاجل</span>}
+                    </div>
+                    <h3 className="text-base font-semibold text-white">{article.title_ar || article.original_title}</h3>
+                    <p className="mt-1 text-xs text-gray-400">{article.source_name || 'بدون مصدر'} • {getCategoryLabel(article.category)} • {formatRelativeTime(article.created_at || article.crawled_at)}</p>
+                    {article.summary && <p className="mt-2 text-xs text-gray-300">{truncate(article.summary, 220)}</p>}
+                </div>
+
+                <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-200">
+                    <p className="mb-1 text-gray-400">لماذا يظهر هنا؟</p>
+                    <p>{getArticleReason(article)}</p>
+                </div>
+
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                    {action.href ? <a href={action.href} className="rounded-xl border border-cyan-500/30 bg-cyan-500/20 px-3 py-2 text-center text-xs text-cyan-200">{action.label}</a> : null}
+                    {options?.nomination ? (
+                        <button onClick={() => nominateMutation.mutate(article.id)} disabled={!canNominate || nominateMutation.isPending} className="flex items-center justify-center gap-1 rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-xs text-gray-200 disabled:opacity-50"><Send className="h-4 w-4" /> ترشيح للتحرير</button>
+                    ) : (
+                        <a href={`/news/${article.id}`} className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-center text-xs text-gray-200 hover:text-white">افتح التفاصيل</a>
+                    )}
+                    {options?.socialCopy ? (
+                        <button onClick={() => socialCopyMutation.mutate(article.id)} disabled={socialCopyMutation.isPending} className="rounded-xl border border-emerald-500/30 bg-emerald-500/20 px-3 py-2 text-xs text-emerald-200">نسخ النسخ الجاهزة</button>
+                    ) : (
+                        <a href={article.original_url || '#'} target="_blank" rel="noreferrer" className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-center text-xs text-gray-300 hover:text-white">المصدر</a>
+                    )}
+                </div>
+            </div>
+        );
+    };
+    const renderSocialCard = (item: SocialApprovedItem) => (
+        <div key={item.article_id} className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3" dir="rtl">
+            <div>
+                <h3 className="text-base font-semibold text-white">{item.title}</h3>
+                <p className="mt-1 text-xs text-gray-400">{item.source_name || 'بدون مصدر'} • {formatRelativeTime(item.updated_at)}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-200">
+                <p className="mb-1 text-gray-400">لماذا يظهر هنا؟</p>
+                <p>المادة معتمدة وجاهزة للاستخدام الرقمي أو النسخ لمنصات النشر.</p>
+            </div>
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                <button onClick={() => socialCopyMutation.mutate(item.article_id)} disabled={socialCopyMutation.isPending} className="rounded-xl border border-cyan-500/30 bg-cyan-500/20 px-3 py-2 text-xs text-cyan-200">نسخ النسخ الجاهزة</button>
+                <a href={`/news/${item.article_id}`} className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-center text-xs text-gray-200">افتح المادة</a>
+                <a href={`/digital?article_id=${item.article_id}`} className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-center text-xs text-gray-200">افتح التغطية الرقمية</a>
+            </div>
+        </div>
+    );
+
+    const renderActiveTab = () => {
+        if (isChief) {
+            if (activeTab === 'pending') {
+                if (chiefQueueQuery.isLoading) return <EmptyState message="جاري تحميل طابور الاعتماد..." />;
+                if (!chiefPendingItems.length) return <EmptyState message="لا توجد مواد بانتظار اعتماد رئيس التحرير الآن." />;
+                return <div className="space-y-3">{chiefPendingItems.map(renderChiefCard)}</div>;
+            }
+
+            if (activeTab === 'reservations') {
+                if (chiefQueueQuery.isLoading) return <EmptyState message="جاري تحميل المواد ذات التحفظات..." />;
+                if (!chiefReservationItems.length) return <EmptyState message="لا توجد مواد معلقة بتحفظات الآن." />;
+                return <div className="space-y-3">{chiefReservationItems.map(renderChiefCard)}</div>;
+            }
+
+            if (activeTab === 'returned') {
+                if (draftGeneratedQuery.isLoading) return <EmptyState message="جاري تحميل المواد العائدة للمراجعة..." />;
+                if (!draftGeneratedItems.length) return <EmptyState message="لا توجد مواد في مسار المراجعة الآن." />;
+                return (
+                    <div className="space-y-3">
+                        <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-100" dir="rtl">هذه المواد عادت إلى مسار التحرير وهي تحت المتابعة قبل أن تعود إلى الاعتماد.</div>
+                        {draftGeneratedItems.map((item) => renderArticleCard(item))}
+                    </div>
+                );
+            }
+
+            if (readyForManualQuery.isLoading) return <EmptyState message="جاري تحميل المواد الجاهزة للنشر اليدوي..." />;
+            if (!readyForManualItems.length) return <EmptyState message="لا توجد مواد جاهزة للنشر اليدوي الآن." />;
+            return <div className="space-y-3">{readyForManualItems.map((item) => renderArticleCard(item))}</div>;
+        }
+
+        if (activeTab === 'pending') {
+            if (pendingCandidatesQuery.isLoading) return <EmptyState message="جاري تحميل المواد التي وصلت إلى نطاقك..." />;
+            if (!pendingCandidates.length) return <EmptyState message="لا توجد مواد جديدة بانتظارك الآن." />;
+            return <div className="space-y-3">{pendingCandidates.map((item) => renderArticleCard(item, { nomination: true }))}</div>;
+        }
+
+        if (activeTab === 'returned') {
+            if (draftGeneratedQuery.isLoading) return <EmptyState message="جاري تحميل المواد العائدة للمراجعة..." />;
+            if (!draftGeneratedItems.length) return <EmptyState message="لا توجد مواد عائدة للمراجعة الآن." />;
+            return <div className="space-y-3">{draftGeneratedItems.map((item) => renderArticleCard(item))}</div>;
+        }
+
+        if (activeTab === 'reservations') {
+            if (reservationsQuery.isLoading) return <EmptyState message="جاري تحميل المواد ذات التحفظات..." />;
+            if (!reservationsItems.length) return <EmptyState message="لا توجد مواد بتحفظات الآن." />;
+            return <div className="space-y-3">{reservationsItems.map((item) => renderArticleCard(item))}</div>;
+        }
+
+        if (readyForManualQuery.isLoading || (isSocial && socialFeedQuery.isLoading)) {
+            return <EmptyState message="جاري تحميل المواد الجاهزة للنشر اليدوي..." />;
+        }
+
+        if (isSocial && socialItems.length > 0) {
+            return <div className="space-y-3">{socialItems.map(renderSocialCard)}</div>;
+        }
+
+        if (!readyForManualItems.length) {
+            return <EmptyState message="لا توجد مواد جاهزة للنشر اليدوي الآن." />;
+        }
+
+        return <div className="space-y-3">{readyForManualItems.map((item) => renderArticleCard(item, { socialCopy: isSocial }))}</div>;
     };
 
     return (
         <div className="space-y-6">
             <div>
                 <h1 className="text-2xl font-bold text-white">الاعتماد والمراجعة</h1>
-                <p className="text-sm text-gray-400 mt-1">
+                <p className="mt-1 text-sm text-gray-400">
                     {isChief
-                        ? 'طابور قرار رئيس التحرير: اعتماد نهائي، إرجاع للمراجعة، أو اعتماد بتحفظات.'
+                        ? 'هذه الصفحة أصبحت طابور قرار واضح: ماذا ينتظر اعتمادك، ما عاد للمراجعة، وما أصبح جاهزًا للنشر اليدوي.'
                         : isSocial
-                            ? 'نسخ السوشيال الجاهزة من المواد المعتمدة أو الجاهزة للنشر اليدوي.'
-                            : 'متابعة المواد المرشحة، إرسالها للمحرر، أو مراجعة ما عاد من رئيس التحرير.'}
+                            ? 'هذه الصفحة تجمع لك المواد التي دخلت مسار التحرير، ما عاد للمراجعة، وما أصبح جاهزًا للنشر أو النسخ الرقمية.'
+                            : 'هذه الصفحة تجمع لك ما دخل نطاقك الآن، ما عاد للمراجعة، وما يحتاج الإرسال أو الاستكمال قبل الاعتماد.'}
                 </p>
             </div>
 
             {errorMessage && <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{errorMessage}</div>}
-            {successMessage && <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200 whitespace-pre-wrap">{successMessage}</div>}
+            {successMessage && <div className="whitespace-pre-wrap rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">{successMessage}</div>}
 
-            {isChief ? (
-                <div className="space-y-3">
-                    {chiefQueueQuery.isLoading ? (
-                        <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-6 text-center text-gray-400">جاري تحميل طابور الاعتماد...</div>
-                    ) : chiefItems.length === 0 ? (
-                        <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-6 text-center text-gray-400">لا توجد طلبات اعتماد حالياً.</div>
-                    ) : (
-                        chiefItems.map((item) => {
-                            const hasReservations = normalizeStatus(item.status) === 'approval_request_with_reservations';
-                            const note = notesMap[item.id] || '';
-                            return (
-                                <div key={item.id} className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3">
-                                    <div className="flex items-start justify-between gap-3" dir="rtl">
-                                        <div>
-                                            <h3 className="text-base text-white font-semibold">{item.title_ar || item.original_title}</h3>
-                                            <p className="text-xs text-gray-400 mt-1">{item.source_name || 'بدون مصدر'} • {getCategoryLabel(item.category)}</p>
-                                            <p className="text-xs text-gray-500 mt-1">آخر تحديث: {formatRelativeTime(item.updated_at)}</p>
-                                        </div>
-                                        <span className={`px-2 py-1 rounded-lg text-[11px] border ${hasReservations ? 'border-orange-500/40 bg-orange-500/20 text-orange-200' : 'border-cyan-500/40 bg-cyan-500/20 text-cyan-200'}`}>
-                                            {hasReservations ? 'تحفظات من وكيل السياسة' : 'مقبول من وكيل السياسة'}
-                                        </span>
-                                    </div>
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
+                {tabs.map((tab) => (
+                    <QueueTabButton key={tab.key} active={activeTab === tab.key} label={tab.label} count={tab.count} onClick={() => setActiveTab(tab.key)} />
+                ))}
+            </div>
 
-                                    {!!item.policy?.reasons?.length && (
-                                        <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-200" dir="rtl">
-                                            <p className="text-gray-400 mb-1">أسباب/ملاحظات الوكيل:</p>
-                                            {item.policy.reasons.map((r, idx) => (
-                                                <p key={`${item.id}-r-${idx}`}>- {r}</p>
-                                            ))}
-                                        </div>
-                                    )}
-
-                                    {!!item.decision_card && (
-                                        <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-200" dir="rtl">
-                                            <div className="flex flex-wrap items-center gap-2">
-                                                <span className={`px-2 py-1 rounded-md border ${
-                                                    item.decision_card.risk_level === 'high'
-                                                        ? 'border-red-500/40 bg-red-500/10 text-red-200'
-                                                        : item.decision_card.risk_level === 'low'
-                                                            ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
-                                                            : 'border-amber-500/40 bg-amber-500/10 text-amber-200'
-                                                }`}>
-                                                    مستوى المخاطر: {item.decision_card.risk_level}
-                                                </span>
-                                                <span className="px-2 py-1 rounded-md border border-cyan-500/30 bg-cyan-500/10 text-cyan-200">
-                                                    جودة: {item.decision_card.quality_score ?? '-'}
-                                                </span>
-                                                <span className="px-2 py-1 rounded-md border border-violet-500/30 bg-violet-500/10 text-violet-200">
-                                                    ادعاءات: {item.decision_card.claims_score ?? '-'}
-                                                </span>
-                                            </div>
-                                            {(item.decision_card.quality_issues.length > 0 || item.decision_card.claims_issues.length > 0) && (
-                                                <p className="text-gray-400 mt-2">
-                                                    قضايا الجودة/الادعاءات: {item.decision_card.quality_issues.length + item.decision_card.claims_issues.length}
-                                                </p>
-                                            )}
-                                        </div>
-                                    )}
-
-                                    <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
-                                        <a
-                                            href={item.work_id ? `/workspace-drafts?article_id=${item.id}&work_id=${item.work_id}` : `/workspace-drafts?article_id=${item.id}`}
-                                            className="px-3 py-2 rounded-xl border border-white/20 bg-white/5 text-center text-xs text-gray-200 hover:text-white"
-                                        >
-                                            فتح النسخة في المحرر
-                                        </a>
-                                        <button
-                                            onClick={() => submitChiefDecision(item, 'approve')}
-                                            disabled={chiefDecisionMutation.isPending}
-                                            className="px-3 py-2 rounded-xl border border-emerald-500/30 bg-emerald-500/20 text-xs text-emerald-200 flex items-center justify-center gap-1"
-                                        >
-                                            <CheckCircle2 className="w-4 h-4" /> اعتماد نهائي
-                                        </button>
-                                        <button
-                                            onClick={() => submitChiefDecision(item, 'approve_with_reservations')}
-                                            disabled={chiefDecisionMutation.isPending}
-                                            className="px-3 py-2 rounded-xl border border-orange-500/30 bg-orange-500/20 text-xs text-orange-200 flex items-center justify-center gap-1"
-                                        >
-                                            اعتماد بتحفظات
-                                        </button>
-                                        <button
-                                            onClick={() => submitChiefDecision(item, 'send_back')}
-                                            disabled={chiefDecisionMutation.isPending}
-                                            className="px-3 py-2 rounded-xl border border-amber-500/30 bg-amber-500/20 text-xs text-amber-200 flex items-center justify-center gap-1"
-                                        >
-                                            <RotateCcw className="w-4 h-4" /> إعادة للمراجعة
-                                        </button>
-                                        <button
-                                            onClick={() => submitChiefDecision(item, 'reject')}
-                                            disabled={chiefDecisionMutation.isPending}
-                                            className="px-3 py-2 rounded-xl border border-red-500/30 bg-red-500/20 text-xs text-red-200 flex items-center justify-center gap-1"
-                                        >
-                                            رفض
-                                        </button>
-                                    </div>
-
-                                    <input
-                                        type="text"
-                                        value={note}
-                                        onChange={(e) => setNotesMap((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                                        placeholder="سبب القرار (إلزامي للتحفظات/الرفض)..."
-                                        className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2 text-xs text-white placeholder:text-gray-500"
-                                        dir="rtl"
-                                    />
-                                </div>
-                            );
-                        })
-                    )}
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-4" dir="rtl">
+                <div className="flex items-start gap-3">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 text-cyan-300" />
+                    <div className="text-xs text-gray-300">
+                        <p className="font-semibold text-white">{activeTabMeta.label}</p>
+                        <p className="mt-1 text-gray-400">{activeTabMeta.helper}</p>
+                    </div>
                 </div>
-            ) : (
-                <div className="space-y-3">
-                    {pendingCandidatesQuery.isLoading ? (
-                        <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-6 text-center text-gray-400">جاري تحميل الأخبار المرشحة...</div>
-                    ) : pendingCandidates.length === 0 ? (
-                        <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-6 text-center text-gray-400">لا توجد أخبار مرشحة حالياً.</div>
-                    ) : (
-                        pendingCandidates.map((article) => (
-                            <div key={article.id} className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3" dir="rtl">
-                                <div>
-                                    <h3 className="text-base text-white font-semibold">{article.title_ar || article.original_title}</h3>
-                                    <p className="text-xs text-gray-400 mt-1">{article.source_name || 'بدون مصدر'} • {getCategoryLabel(article.category)} • {formatRelativeTime(article.created_at || article.crawled_at)}</p>
-                                    {article.summary && <p className="text-xs text-gray-300 mt-2">{truncate(article.summary, 220)}</p>}
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                                    <a
-                                        href={`/workspace-drafts?article_id=${article.id}`}
-                                        className="px-3 py-2 rounded-xl border border-white/20 bg-white/5 text-center text-xs text-gray-200 hover:text-white"
-                                    >
-                                        فتح في المحرر
-                                    </a>
-                                    <button
-                                        onClick={() => nominateMutation.mutate(article.id)}
-                                        disabled={!canNominate || nominateMutation.isPending}
-                                        className="px-3 py-2 rounded-xl border border-cyan-500/30 bg-cyan-500/20 text-xs text-cyan-200 flex items-center justify-center gap-1 disabled:opacity-50"
-                                    >
-                                        <Send className="w-4 h-4" /> ترشيح للتحرير
-                                    </button>
-                                    <a
-                                        href={article.original_url || '#'}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="px-3 py-2 rounded-xl border border-white/20 bg-white/5 text-center text-xs text-gray-300 hover:text-white"
-                                    >
-                                        المصدر
-                                    </a>
-                                </div>
-                            </div>
-                        ))
-                    )}
-                </div>
-            )}
+            </div>
 
-            {isSocial && (
-                <div className="space-y-3">
-                    <h2 className="text-sm font-semibold text-white">نسخ السوشيال من الأخبار المعتمدة</h2>
-                    {socialFeedQuery.isLoading ? (
-                        <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-6 text-center text-gray-400">جاري تحميل الأخبار المعتمدة...</div>
-                    ) : socialItems.length === 0 ? (
-                        <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-6 text-center text-gray-400">لا توجد أخبار معتمدة حالياً.</div>
-                    ) : (
-                        socialItems.map((item) => (
-                            <div key={item.article_id} className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-2" dir="rtl">
-                                <h3 className="text-base text-white font-semibold">{item.title}</h3>
-                                <p className="text-xs text-gray-400">{item.source_name || 'بدون مصدر'} • {formatRelativeTime(item.updated_at)}</p>
-                                <button
-                                    onClick={() => socialCopyMutation.mutate(item.article_id)}
-                                    disabled={socialCopyMutation.isPending}
-                                    className="px-3 py-2 rounded-xl border border-cyan-500/30 bg-cyan-500/20 text-xs text-cyan-200"
-                                >
-                                    نسخ النسخ الجاهزة
-                                </button>
-                            </div>
-                        ))
-                    )}
-                </div>
-            )}
+            {renderActiveTab()}
 
             <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 text-xs text-gray-300" dir="rtl">
-                <p className="flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-emerald-300" /> السياسة التشغيلية: لا نشر تلقائي. كل خبر يمر على وكيل السياسة ثم اعتماد رئيس التحرير.</p>
+                <p className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-emerald-300" /> السياسة التشغيلية: لا يوجد نشر تلقائي. كل مادة تمر عبر الاعتماد التحريري ثم تصبح جاهزة للنشر اليدوي فقط بعد اجتياز البوابة.</p>
             </div>
         </div>
     );
