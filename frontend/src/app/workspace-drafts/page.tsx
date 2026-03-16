@@ -2148,6 +2148,7 @@ function WorkspaceDraftsPageContent() {
 
     const showSidePanels = detailsOpen && !focusMode;
     const mainSpanClass = showSidePanels ? 'xl:col-span-8' : 'xl:col-span-12';
+    const showWriterMinimal = isWriterRole && focusMode && !detailsOpen;
 
     useEffect(() => {
         if (leftTab !== 'archive') return;
@@ -2688,41 +2689,39 @@ function WorkspaceDraftsPageContent() {
     return (
         <div className="space-y-4">
             <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4">
-                <RoleOnboardingBanner
-                    storageKey={`ech_workspace_onboarding_v1_${(user?.role || 'guest').toLowerCase()}`}
-                    title="كيف تبدأ داخل المحرر؟"
-                    description="المحرر الآن يعمل بثلاثة أوضاع بسيطة. ابدأ بوضع الكتابة، ثم افتح التحسين أو التحليل فقط إذا احتجت ذلك."
-                    steps={[
-                        {
-                            title: 'اكتب وأنهِ',
-                            description: 'اكتب النص، شغّل الفحص السريع، ثم أرسل لاعتماد رئيس التحرير.',
-                        },
-                        {
-                            title: 'حسّن أكثر',
-                            description: 'افتح أدوات التحقق، التدقيق، الجودة، SEO، والسوشيال عندما تحتاج رفع النسخة.',
-                        },
-                        {
-                            title: 'تحليل متقدم',
-                            description: 'استخدم المحاكي وMSI وزوايا المنافسين فقط عند الحاجة إلى مراجعة أعمق.',
-                        },
-                    ]}
-                />
+                {!isWriterRole && (
+                    <RoleOnboardingBanner
+                        storageKey={`ech_workspace_onboarding_v1_${(user?.role || 'guest').toLowerCase()}`}
+                        title="كيف تبدأ داخل المحرر؟"
+                        description="المحرر الآن يعمل بثلاثة أوضاع بسيطة. ابدأ بوضع الكتابة، ثم افتح التحسين أو التحليل فقط إذا احتجت ذلك."
+                        steps={[
+                            {
+                                title: 'اكتب وأنهِ',
+                                description: 'اكتب النص، شغّل الفحص السريع، ثم أرسل لاعتماد رئيس التحرير.',
+                            },
+                            {
+                                title: 'حسّن أكثر',
+                                description: 'افتح أدوات التحقق، التدقيق، الجودة، SEO، والسوشيال عندما تحتاج رفع النسخة.',
+                            },
+                            {
+                                title: 'تحليل متقدم',
+                                description: 'استخدم المحاكي وMSI وزوايا المنافسين فقط عند الحاجة إلى مراجعة أعمق.',
+                            },
+                        ]}
+                    />
+                )}
 
-                {isWriterRole && focusMode && !detailsOpen && (
-                    <div className="mb-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-100" dir="rtl">
+                {showWriterMinimal && (
+                    <div className="mb-3 rounded-xl border border-emerald-500/20 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-100" dir="rtl">
                         <div className="flex flex-wrap items-center justify-between gap-3">
                             <div>
                                 <p className="font-medium">أنت الآن في وضع كتابة هادئ.</p>
                                 <p className="mt-1 text-[12px] text-emerald-100/80">
-                                    ركّز على النص فقط. إذا احتجت المساعدة أو الأدوات، افتح اللوحة المساعدة من الزر المجاور.
+                                    اكتب النص أولًا. إذا احتجت التحقق أو الأدوات، افتح اللوحة المساعدة فقط عند الحاجة.
                                 </p>
                             </div>
-                            <button
-                                type="button"
-                                onClick={() => setDetailsOpen(true)}
-                                className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100"
-                            >
-                                افتح اللوحة المساعدة
+                            <button type="button" onClick={openWelcomeGuide} className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
+                                كيف يعمل؟
                             </button>
                         </div>
                     </div>
@@ -2731,7 +2730,9 @@ function WorkspaceDraftsPageContent() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                         <h1 className="text-xl font-semibold text-white">المحرر الذكي لغرفة الشروق</h1>
-                        <p className="text-xs text-gray-400">واجهة كتابة مبسطة: خطوة رئيسية واضحة، والأدوات الثقيلة عند الطلب فقط.</p>
+                        <p className="text-xs text-gray-400">
+                            {showWriterMinimal ? 'اكتب الآن، واترك المراجعة والأدوات لوقت الحاجة.' : 'واجهة كتابة مبسطة: خطوة رئيسية واضحة، والأدوات الثقيلة عند الطلب فقط.'}
+                        </p>
                     </div>
                     <div className="flex w-full sm:w-auto flex-wrap items-center justify-start sm:justify-end gap-2">
                         <div className="text-xs">{saveNode}</div>
@@ -2799,7 +2800,13 @@ function WorkspaceDraftsPageContent() {
                 )}
 
                 <div className="mt-3 space-y-3">
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                            {showWriterMinimal && (
+                                <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-1 text-[11px] text-cyan-100">
+                                    الخطوة الآن: {nextAction.label}
+                                </span>
+                            )}
                         <button
                             onClick={() => {
                                 trackNextAction('workspace_drafts', nextAction.label, surfaceDetails);
@@ -2838,6 +2845,17 @@ function WorkspaceDraftsPageContent() {
                             </button>
                         )}
                         <div className="mr-auto flex items-center gap-2">
+                            {showWriterMinimal ? (
+                                <button
+                                    type="button"
+                                    onClick={() => setDetailsOpen(true)}
+                                    className="min-h-10 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-slate-200"
+                                >
+                                    أحتاج مساعدة
+                                </button>
+                            ) : null}
+                            {!showWriterMinimal && (
+                            <>
                             <label className="text-[11px] text-slate-400">الوضع</label>
                             <select
                                 value={viewMode}
@@ -2848,8 +2866,22 @@ function WorkspaceDraftsPageContent() {
                                 <option value="improve">حسّن أكثر</option>
                                 <option value="advanced">تحليل متقدم</option>
                             </select>
+                            </>
+                            )}
                         </div>
+                        </div>
+                        {showWriterMinimal && (
+                            <p className="mt-2 text-[11px] text-slate-400">
+                                المطلوب الآن ببساطة: اكتب النص، ثم اضغط الزر الرئيسي عندما تنتهي.
+                            </p>
+                        )}
+                        {!showWriterMinimal && (
+                            <p className="mt-2 text-[11px] text-slate-400">
+                                {nextAction.description || 'لا توجد خطوة عاجلة حالياً.'}
+                            </p>
+                        )}
                     </div>
+                    {!showWriterMinimal && (
                     <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-[11px] text-gray-300" dir="rtl">
                         {isWriteMode
                             ? 'هذا الوضع مخصص للصحفي: اكتب النص، شغّل الفحص السريع، ثم أرسل لاعتماد رئيس التحرير.'
@@ -2857,6 +2889,7 @@ function WorkspaceDraftsPageContent() {
                                 ? 'هذا الوضع يفتح أدوات التحسين العملية: التحقق، التدقيق، الجودة، SEO، والسوشيال.'
                                 : 'هذا الوضع مخصص للمراجعة العميقة: التفسير، محاكاة التفاعل، MSI، وزوايا المنافسين.'}
                     </div>
+                    )}
                     {detailsOpen ? (
                     <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-4 space-y-4" dir="rtl">
                         <div className="flex flex-wrap items-start justify-between gap-3">
