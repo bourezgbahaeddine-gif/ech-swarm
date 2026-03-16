@@ -342,6 +342,43 @@ export interface UxTelemetryEventPayload {
     details?: Record<string, unknown>;
 }
 
+export interface UxTelemetrySummary {
+    days: number;
+    total_events: number;
+    unique_users: number;
+    surface_views: number;
+    next_action_clicks: number;
+    ui_actions: number;
+    by_surface: Array<{
+        surface: string;
+        total_events: number;
+        surface_views: number;
+        next_action_clicks: number;
+        ui_actions: number;
+    }>;
+    by_role: Array<{
+        role: string;
+        total_events: number;
+        surface_views: number;
+        next_action_clicks: number;
+    }>;
+    top_actions: Array<{
+        action_label: string;
+        total: number;
+    }>;
+}
+
+export interface UxTelemetryRecentItem {
+    id: number;
+    created_at: string | null;
+    actor_username: string | null;
+    actor_role: string | null;
+    event_name: string | null;
+    surface: string | null;
+    action_label: string | null;
+    page_path: string | null;
+}
+
 export interface PublishedMonitorItem {
     title: string;
     url: string;
@@ -2456,6 +2493,8 @@ export const competitorXrayApi = {
 export const telemetryApi = {
     logUxEvent: (payload: UxTelemetryEventPayload) =>
         api.post<{ logged: boolean; surface: string; event_name: string }>('/telemetry/ux', payload),
+    summary: (days = 7) => api.get<UxTelemetrySummary>('/telemetry/ux/summary', { params: { days } }),
+    recent: (limit = 30) => api.get<UxTelemetryRecentItem[]>('/telemetry/ux/recent', { params: { limit } }),
 };
 
 api.interceptors.response.use(

@@ -25,6 +25,7 @@ import {
     Megaphone,
     MessagesSquare,
     Mic2,
+    MousePointerClick,
     Newspaper,
     Radar,
     Rss,
@@ -230,6 +231,13 @@ const navItems: NavItem[] = [
         icon: Radar,
         roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
         section: 'tools',
+    },
+    {
+        href: '/ux-insights',
+        label: '???? ?????????',
+        icon: MousePointerClick,
+        roles: ['director', 'editor_chief'],
+        section: 'ops',
     },
     {
         href: '/team',
