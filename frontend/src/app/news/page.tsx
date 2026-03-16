@@ -657,7 +657,7 @@ function NewsPageContent() {
                                             <div className="flex flex-wrap items-center gap-2 mb-2">
                                                 {freshBreaking && (
                                                     <span className="px-2 py-0.5 rounded-full bg-red-500 text-[10px] font-bold text-white flex items-center gap-1 animate-pulse">
-                                                        <Zap className="w-3 h-3" /> Ø¹Ø§Ø¬Ù
+                                                        <Zap className="w-3 h-3" /> عاجل
                                                     </span>
                                                 )}
                                                 <span className={cn('px-2 py-0.5 rounded-md text-[10px] font-medium border', getStatusColor(normalizedStatus))}>
@@ -668,12 +668,12 @@ function NewsPageContent() {
                                                 </span>
                                                 {(insight?.cluster_size || 0) > 1 && (
                                                     <span className="px-2 py-0.5 rounded-md text-[10px] font-medium border border-cyan-500/30 text-cyan-300 bg-cyan-500/10">
-                                                        Ø­Ø¯Ø« ÙÙØ­ÙØ¯: {insight?.cluster_size}
+                                                        حدث موحّد: {insight?.cluster_size}
                                                     </span>
                                                 )}
                                                 {(insight?.relation_count || 0) > 0 && (
                                                     <span className="px-2 py-0.5 rounded-md text-[10px] font-medium border border-fuchsia-500/30 text-fuchsia-300 bg-fuchsia-500/10">
-                                                        Ø¹ÙØ§ÙØ§Øª: {insight?.relation_count}
+                                                        علاقات: {insight?.relation_count}
                                                     </span>
                                                 )}
                                                 <span className="text-[10px] text-gray-500 mr-auto flex items-center gap-1">
@@ -698,7 +698,7 @@ function NewsPageContent() {
                                                         {article.title_ar || article.original_title}
                                                     </h3>
                                                     <p className="text-xs text-slate-400 mt-1">
-                                                        {article.source_name || 'â'}
+                                                        {article.source_name || '—'}
                                                     </p>
                                                     {article.summary && (
                                                         <p className="text-sm mt-2 leading-7 text-slate-300" dir="rtl">
@@ -706,10 +706,10 @@ function NewsPageContent() {
                                                         </p>
                                                     )}
                                                     <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-sm text-cyan-100" dir="rtl">
-                                                        ÙÙØ§Ø°Ø§ ÙØ¸ÙØ± ÙÙØ§Ø {reason}
+                                                        لماذا يظهر هنا؟ {reason}
                                                     </div>
                                                     <div className="mt-2 text-sm text-emerald-200" dir="rtl">
-                                                        Ø§ÙØ¥Ø¬Ø±Ø§Ø¡ Ø§ÙØªØ§ÙÙ: <span className="font-semibold">{nextAction.label}</span>
+                                                        الإجراء التالي: <span className="font-semibold">{nextAction.label}</span>
                                                     </div>
                                                 </div>
                                             </div>
@@ -736,13 +736,13 @@ function NewsPageContent() {
                                                     )}
                                                 >
                                                     <ExternalLink className="w-4 h-4" />
-                                                    Ø§ÙÙØµØ¯Ø±
+                                                    المصدر
                                                 </a>
                                                 <Link
                                                     href={`/news/${article.id}`}
                                                     className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-gray-300 hover:text-white hover:border-white/20 transition-colors flex items-center justify-center"
                                                 >
-                                                    Ø§ÙØªÙØ§ØµÙÙ
+                                                    التفاصيل
                                                 </Link>
                                             </div>
                                             {isSocialRole && ['ready_for_manual_publish', 'published'].includes(normalizedStatus) && (
@@ -751,7 +751,7 @@ function NewsPageContent() {
                                                     disabled={socialVariantsMutation.isPending}
                                                     className="w-full px-3 py-2 rounded-xl bg-cyan-500/15 border border-cyan-500/30 text-xs text-cyan-200 hover:bg-cyan-500/25 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                                                 >
-                                                    <Copy className="w-3.5 h-3.5" /> ÙØ³Ø® Ø§ÙØ³ÙØ´ÙØ§Ù
+                                                    <Copy className="w-3.5 h-3.5" /> نسخ السوشيال
                                                 </button>
                                             )}
                                             {canUseMultimedia && (
@@ -759,7 +759,7 @@ function NewsPageContent() {
                                                     href="/services/multimedia"
                                                     className="block w-full px-3 py-2 rounded-xl bg-violet-500/15 border border-violet-500/30 text-xs text-violet-200 hover:bg-violet-500/25 transition-colors text-center"
                                                 >
-                                                    ØªÙÙÙØ¯ ÙØ³Ø§Ø¦Ø·
+                                                    توليد وسائط
                                                 </Link>
                                             )}
                                         </div>
@@ -767,14 +767,14 @@ function NewsPageContent() {
 
                                     <details className="mt-4 rounded-xl border border-white/10 bg-black/10 p-3">
                                         <summary className="cursor-pointer text-xs text-slate-300 hover:text-white">
-                                            Ø¥Ø¬Ø±Ø§Ø¡Ø§Øª Ø¥Ø¶Ø§ÙÙØ©
+                                            إجراءات إضافية
                                         </summary>
 
                                         <div className="mt-3 space-y-3">
                                             <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                                                 <button
                                                     onClick={() => {
-                                                        if (typeof window !== 'undefined' && !window.confirm('ØªØ£ÙÙØ¯ Ø§ÙÙÙØ§ÙÙØ© Ø¹ÙÙ Ø§ÙØ®Ø¨Ø±Ø')) {
+                                                        if (typeof window !== 'undefined' && !window.confirm('تأكيد الموافقة على الخبر؟')) {
                                                             return;
                                                         }
                                                         decideMutation.mutate(
@@ -797,11 +797,11 @@ function NewsPageContent() {
                                                             : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed',
                                                     )}
                                                 >
-                                                    <CheckCircle className="w-3 h-3" /> ÙÙØ§ÙÙØ©
+                                                    <CheckCircle className="w-3 h-3" /> موافقة
                                                 </button>
                                                 <button
                                                     onClick={() => {
-                                                        if (typeof window !== 'undefined' && !window.confirm('ØªØ£ÙÙØ¯ Ø¥Ø±Ø³Ø§Ù Ø§ÙØ®Ø¨Ø± ÙØ¥Ø¹Ø§Ø¯Ø© Ø§ÙØµÙØ§ØºØ©Ø')) {
+                                                        if (typeof window !== 'undefined' && !window.confirm('تأكيد إرسال الخبر لإعادة الصياغة؟')) {
                                                             return;
                                                         }
                                                         decideMutation.mutate({ articleId: article.id, decision: 'rewrite' });
@@ -814,7 +814,7 @@ function NewsPageContent() {
                                                             : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed',
                                                     )}
                                                 >
-                                                    <RotateCw className="w-3 h-3" /> Ø¥Ø¹Ø§Ø¯Ø©
+                                                    <RotateCw className="w-3 h-3" /> إعادة
                                                 </button>
                                                 <button
                                                     onClick={() => setSelectedArticle(article.id)}
@@ -826,7 +826,7 @@ function NewsPageContent() {
                                                             : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed',
                                                     )}
                                                 >
-                                                    <XCircle className="w-3 h-3" /> Ø±ÙØ¶
+                                                    <XCircle className="w-3 h-3" /> رفض
                                                 </button>
                                             </div>
 
@@ -836,7 +836,7 @@ function NewsPageContent() {
                                                         type="text"
                                                         value={rejectReason}
                                                         onChange={(e) => setRejectReason(e.target.value)}
-                                                        placeholder="Ø³Ø¨Ø¨ Ø§ÙØ±ÙØ¶ (Ø¥ÙØ²Ø§ÙÙ)..."
+                                                        placeholder="سبب الرفض (إلزامي)..."
                                                         className="flex-1 h-10 px-3 rounded-xl bg-white/5 border border-white/5 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-red-500/40"
                                                         dir="rtl"
                                                     />
@@ -844,10 +844,10 @@ function NewsPageContent() {
                                                         onClick={() => {
                                                             const reason = rejectReason.trim();
                                                             if (!reason) {
-                                                                setErrorMessage('Ø³Ø¨Ø¨ Ø§ÙØ±ÙØ¶ ÙØ·ÙÙØ¨');
+                                                                setErrorMessage('سبب الرفض مطلوب');
                                                                 return;
                                                             }
-                                                            if (typeof window !== 'undefined' && !window.confirm('ØªØ£ÙÙØ¯ Ø±ÙØ¶ Ø§ÙØ®Ø¨Ø±Ø')) {
+                                                            if (typeof window !== 'undefined' && !window.confirm('تأكيد رفض الخبر؟')) {
                                                                 return;
                                                             }
                                                             decideMutation.mutate({ articleId: article.id, decision: 'reject', reason });
@@ -855,7 +855,7 @@ function NewsPageContent() {
                                                         disabled={decideMutation.isPending || !rejectReason.trim()}
                                                         className="px-4 py-2 rounded-xl bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors text-xs font-medium"
                                                     >
-                                                        ØªØ£ÙÙØ¯ Ø§ÙØ±ÙØ¶
+                                                        تأكيد الرفض
                                                     </button>
                                                 </div>
                                             )}
@@ -871,7 +871,7 @@ function NewsPageContent() {
                                                             : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed',
                                                     )}
                                                 >
-                                                    ØªÙØ®ÙØµ
+                                                    تلخيص
                                                 </button>
                                                 <button
                                                     onClick={() => processMutation.mutate({ articleId: article.id, action: 'translate' })}
@@ -883,7 +883,7 @@ function NewsPageContent() {
                                                             : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed',
                                                     )}
                                                 >
-                                                    ØªØ±Ø¬ÙØ©
+                                                    ترجمة
                                                 </button>
                                                 <button
                                                     onClick={() => processMutation.mutate({ articleId: article.id, action: 'fact_check' })}
@@ -895,7 +895,7 @@ function NewsPageContent() {
                                                             : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed',
                                                     )}
                                                 >
-                                                    ØªØ­ÙÙ
+                                                    تحقق
                                                 </button>
                                             </div>
                                         </div>
@@ -910,11 +910,11 @@ function NewsPageContent() {
                             <table className="min-w-full text-sm">
                                 <thead className="bg-white/5 text-slate-300">
                                     <tr>
-                                        <th className="px-4 py-3 text-right font-medium">Ø§ÙØ¹ÙÙØ§Ù</th>
-                                        <th className="px-4 py-3 text-right font-medium">Ø§ÙØ­Ø§ÙØ©</th>
-                                        <th className="px-4 py-3 text-right font-medium">Ø§ÙÙØµØ¯Ø±</th>
-                                        <th className="px-4 py-3 text-right font-medium">Ø³Ø¨Ø¨ Ø§ÙØ¸ÙÙØ±</th>
-                                        <th className="px-4 py-3 text-right font-medium">Ø§ÙØ¥Ø¬Ø±Ø§Ø¡ Ø§ÙØªØ§ÙÙ</th>
+                                        <th className="px-4 py-3 text-right font-medium">العنوان</th>
+                                        <th className="px-4 py-3 text-right font-medium">الحالة</th>
+                                        <th className="px-4 py-3 text-right font-medium">المصدر</th>
+                                        <th className="px-4 py-3 text-right font-medium">سبب الظهور</th>
+                                        <th className="px-4 py-3 text-right font-medium">الإجراء التالي</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -932,7 +932,7 @@ function NewsPageContent() {
                                                     </span>
                                                 </td>
                                                 <td className="px-4 py-3 align-top text-xs text-slate-300">
-                                                    {article.source_name || 'â'}
+                                                    {article.source_name || '—'}
                                                 </td>
                                                 <td className="px-4 py-3 align-top text-xs text-slate-300 max-w-[360px]">
                                                     {truncate(getReasonForArticle(article), 120)}
@@ -956,7 +956,7 @@ function NewsPageContent() {
                 )
             ) : (
                 <div className="col-span-full text-center py-16 rounded-2xl bg-gray-800/20 border border-white/5">
-                    ÙØ§ ØªÙØ¬Ø¯ Ø£Ø®Ø¨Ø§Ø± Ø­Ø§ÙÙØ§Ù
+                    لا توجد أخبار حاليًا
                 </div>
             )}
             {totalPages > 1 && (
