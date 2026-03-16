@@ -827,6 +827,7 @@ function WorkspaceDraftsPageContent() {
     const [blockersOpen, setBlockersOpen] = useState(false);
     const [decisionDetailOpen, setDecisionDetailOpen] = useState(false);
     const [copilotExpanded, setCopilotExpanded] = useState(false);
+    const [copilotOpen, setCopilotOpen] = useState(false);
     const [detailsOpen, setDetailsOpen] = useState(false);
     const [focusMode, setFocusMode] = useState(false);
     const [headerToolsOpen, setHeaderToolsOpen] = useState(false);
@@ -2146,6 +2147,7 @@ function WorkspaceDraftsPageContent() {
         setDetailsOpen(false);
         setToolsExpanded(false);
         setHeaderToolsOpen(false);
+        setCopilotOpen(false);
         setFocusMode(true);
     }, [articleId, isWriterRole, workId]);
 
@@ -2576,6 +2578,7 @@ function WorkspaceDraftsPageContent() {
         setDetailsOpen(true);
         setToolsExpanded(false);
         setHeaderToolsOpen(false);
+        setCopilotOpen(false);
         setFocusMode(false);
     }
 
@@ -2585,6 +2588,7 @@ function WorkspaceDraftsPageContent() {
         setDetailsOpen(false);
         setToolsExpanded(false);
         setHeaderToolsOpen(false);
+        setCopilotOpen(false);
         setFocusMode(true);
     }
 
@@ -2709,6 +2713,76 @@ function WorkspaceDraftsPageContent() {
 
     return (
         <div className="space-y-4">
+            {isWritingStage ? (
+                <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-3" dir="rtl">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="space-y-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-100">
+                                    مساحة كتابة هادئة
+                                </span>
+                                <span className="text-[11px] text-gray-400">{saveNode}</span>
+                            </div>
+                            <p className="text-[12px] text-slate-300">اكتب فقط. بعد أن تنتهي اضغط «أنهيت الكتابة» لنفتح المراجعة والأدوات.</p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button
+                                disabled={autosave.isPending}
+                                onClick={() => {
+                                    trackUiAction('workspace_drafts', 'حفظ', surfaceDetails);
+                                    runWithGuide('save', () => {
+                                        setSaveState('saving');
+                                        autosave.mutate();
+                                    });
+                                }}
+                                className="min-h-10 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-slate-200 disabled:opacity-60"
+                            >
+                                حفظ
+                            </button>
+                            <button
+                                type="button"
+                                onClick={enterReviewStage}
+                                className="min-h-10 rounded-xl border border-cyan-500/30 bg-cyan-500/15 px-4 py-2 text-xs font-medium text-cyan-100"
+                            >
+                                أنهيت الكتابة
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setHeaderToolsOpen((prev) => !prev)}
+                                className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-slate-200"
+                            >
+                                {headerToolsOpen ? 'إغلاق' : 'المزيد'}
+                            </button>
+                        </div>
+                    </div>
+
+                    {headerToolsOpen && (
+                        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
+                            <button
+                                onClick={openWelcomeGuide}
+                                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-200"
+                            >
+                                <CircleHelp className="w-4 h-4" />
+                                كيف يعمل؟
+                            </button>
+                            <button
+                                onClick={() => runWithGuide('manual_draft', () => setNewDraftOpen(true))}
+                                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200"
+                            >
+                                مسودة جديدة
+                            </button>
+                            <NextLink
+                                href="/services/multimedia"
+                                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-xs text-violet-200"
+                            >
+                                أدوات الوسائط
+                            </NextLink>
+                        </div>
+                    )}
+
+                    {(err || ok) && <div className={cn('mt-3 rounded-xl px-3 py-2 text-xs', err ? 'bg-red-500/15 text-red-200 border border-red-500/30' : 'bg-emerald-500/15 text-emerald-200 border border-emerald-500/30')}>{err || ok}</div>}
+                </div>
+            ) : (
             <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4">
                 {!isWriterRole && (
                     <RoleOnboardingBanner
@@ -2897,6 +2971,15 @@ function WorkspaceDraftsPageContent() {
                         >
                             {detailsOpen ? 'إخفاء اللوحة المساعدة' : 'إظهار اللوحة المساعدة'}
                         </button>
+                        {detailsOpen && (
+                            <button
+                                type="button"
+                                onClick={() => setCopilotOpen(true)}
+                                className="min-h-10 px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-slate-200 text-xs"
+                            >
+                                مساعد التحرير
+                            </button>
+                        )}
                         <button
                             disabled={autosave.isPending}
                             onClick={() => {
@@ -3137,6 +3220,7 @@ function WorkspaceDraftsPageContent() {
 
                 {(err || ok) && <div className={cn('mt-3 rounded-xl px-3 py-2 text-xs', err ? 'bg-red-500/15 text-red-200 border border-red-500/30' : 'bg-emerald-500/15 text-emerald-200 border border-emerald-500/30')}>{err || ok}</div>}
             </div>
+            )}
 
             {detailsOpen && (
             <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-4">
@@ -3620,8 +3704,22 @@ function WorkspaceDraftsPageContent() {
                 </aside>
                 )}
 
-                {showSidePanels && (
-                <aside className="order-3 xl:order-3 xl:col-span-2 space-y-4 xl:sticky xl:top-24 self-start max-h-[calc(100vh-140px)] overflow-auto pr-1">
+                {detailsOpen && copilotOpen && (
+                <div className="fixed inset-0 z-[88] bg-black/60 backdrop-blur-sm flex justify-end">
+                    <div className="h-full w-full max-w-md overflow-auto border-l border-white/10 bg-gray-950 p-4 space-y-4" dir="rtl">
+                        <div className="flex items-center justify-between gap-3">
+                            <div>
+                                <h2 className="text-sm font-semibold text-white">مساعد التحرير</h2>
+                                <p className="text-[11px] text-gray-400">أدوات المراجعة العميقة في درج مستقل حتى لا تزاحم الكتابة.</p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setCopilotOpen(false)}
+                                className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-gray-200"
+                            >
+                                إغلاق
+                            </button>
+                        </div>
                     <Panel title="مساعد التحرير (Copilot)">
                         <div className="space-y-3 text-xs text-gray-200">
                             <div className="rounded-lg border border-white/10 bg-black/20 p-2 space-y-2">
@@ -4216,7 +4314,8 @@ function WorkspaceDraftsPageContent() {
                             </div>
                         </Panel>
                     )}
-                </aside>
+                    </div>
+                </div>
                 )}
             </div>
 

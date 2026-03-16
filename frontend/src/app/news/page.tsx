@@ -435,6 +435,27 @@ function NewsPageContent() {
         return { label: 'افتح المادة', href: `/news/${article.id}` };
     };
 
+    const getImportanceTone = (article: ArticleBrief) => {
+        if (article.is_breaking) return 'danger' as const;
+        if (article.importance_score >= 8) return 'danger' as const;
+        if (article.importance_score >= 6) return 'warn' as const;
+        if (article.importance_score <= 3) return 'success' as const;
+        return 'default' as const;
+    };
+
+    const getImportanceChip = (article: ArticleBrief) => {
+        if (article.is_breaking) {
+            return { label: 'أولوية عاجلة', className: 'border-rose-500/30 bg-rose-500/10 text-rose-200' };
+        }
+        if (article.importance_score >= 8) {
+            return { label: 'أولوية عالية', className: 'border-amber-500/30 bg-amber-500/10 text-amber-200' };
+        }
+        if (article.importance_score >= 6) {
+            return { label: 'أولوية متوسطة', className: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200' };
+        }
+        return { label: 'أولوية عادية', className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200' };
+    };
+
     return (
         <div className="space-y-6">
             {errorMessage && (
@@ -651,7 +672,7 @@ function NewsPageContent() {
                 </div>
             ) : visibleArticles.length > 0 ? (
                 viewMode === 'queue' ? (
-                    <div className="space-y-4">
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                         {visibleArticles.map((article: ArticleBrief) => {
                             const normalizedStatus = (article.status || '').toLowerCase();
                             const canReview = normalizedStatus === 'candidate' || normalizedStatus === 'classified';
@@ -659,15 +680,18 @@ function NewsPageContent() {
                             const insight = insightsMap.get(article.id);
                             const reason = getReasonForArticle(article);
                             const nextAction = getNextActionForArticle(article);
+                            const editHref = `/workspace-drafts?article_id=${article.id}`;
+                            const importanceChip = getImportanceChip(article);
 
                             return (
-                                <div key={article.id} className={cn(freshBreaking && 'ring-1 ring-red-500/30 rounded-2xl')}>
+                                <div key={article.id} className="h-full">
                                     <WorkflowCard
                                         title={article.title_ar || article.original_title}
-                                        subtitle={`${article.source_name || '—'} • ${getCategoryLabel(article.category)} • أولوية ${article.importance_score}`}
+                                        subtitle={`${article.source_name || '—'} • ${getCategoryLabel(article.category)}`}
                                         statusLabel={getWorkflowStatusLabel(article.status) || getStatusLabel(article.status)}
                                         chips={[
                                             ...(freshBreaking ? [{ label: 'عاجل', className: 'border-red-500/30 bg-red-500/10 text-red-200' }] : []),
+                                            importanceChip,
                                             { label: getCategoryLabel(article.category), className: categoryColor(article.category) },
                                             ...((insight?.cluster_size || 0) > 1 ? [{ label: `حدث موحّد: ${insight?.cluster_size}`, className: 'border-cyan-500/30 text-cyan-300 bg-cyan-500/10' }] : []),
                                             ...((insight?.relation_count || 0) > 0 ? [{ label: `علاقات: ${insight?.relation_count}`, className: 'border-fuchsia-500/30 text-fuchsia-300 bg-fuchsia-500/10' }] : []),
@@ -675,33 +699,22 @@ function NewsPageContent() {
                                         reason={reason}
                                         nextActionLabel={nextAction.label}
                                         timestamp={article.created_at || article.crawled_at}
-                                        tone={freshBreaking ? 'danger' : article.importance_score >= 8 ? 'warn' : 'default'}
-                                        primaryAction={{
-                                            label: nextAction.label,
-                                            href: nextAction.href,
-                                            onClick: () =>
-                                                trackNextAction('news', nextAction.label, {
-                                                    ...surfaceDetails,
-                                                    queue_view: 'queue',
-                                                    article_id: article.id,
-                                                    article_status: article.status,
-                                                    target_href: nextAction.href,
-                                                }),
-                                        }}
+                                        tone={getImportanceTone(article)}
+                                        compact
                                         actions={
                                             <div className="space-y-3">
                                                 {article.summary && (
-                                                    <p className="text-sm leading-7 text-slate-300" dir="rtl">
-                                                        {truncate(article.summary, 180)}
+                                                    <p className="text-[12px] leading-6 text-slate-300 line-clamp-3" dir="rtl">
+                                                        {truncate(article.summary, 120)}
                                                     </p>
                                                 )}
-                                                <div className="grid grid-cols-2 gap-2 xl:max-w-[240px]">
+                                                <div className="grid grid-cols-3 gap-2">
                                                     <a
                                                         href={article.original_url || '#'}
                                                         target="_blank"
                                                         rel="noreferrer"
                                                         className={cn(
-                                                            'px-3 py-2 rounded-xl border text-xs transition-colors flex items-center justify-center gap-2',
+                                                            'px-3 py-2 rounded-xl border text-[11px] transition-colors flex items-center justify-center gap-2',
                                                             article.original_url
                                                                 ? 'bg-white/5 border-white/10 text-gray-200 hover:text-white hover:border-white/20'
                                                                 : 'bg-white/5 border-white/5 text-gray-500 cursor-not-allowed',
@@ -712,16 +725,31 @@ function NewsPageContent() {
                                                     </a>
                                                     <Link
                                                         href={`/news/${article.id}`}
-                                                        className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-gray-300 hover:text-white hover:border-white/20 transition-colors flex items-center justify-center"
+                                                        className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-[11px] text-gray-300 hover:text-white hover:border-white/20 transition-colors flex items-center justify-center"
                                                     >
                                                         التفاصيل
+                                                    </Link>
+                                                    <Link
+                                                        href={editHref}
+                                                        onClick={() =>
+                                                            trackNextAction('news', 'تحرير', {
+                                                                ...surfaceDetails,
+                                                                queue_view: 'queue',
+                                                                article_id: article.id,
+                                                                article_status: article.status,
+                                                                target_href: editHref,
+                                                            })
+                                                        }
+                                                        className="px-3 py-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-[11px] text-cyan-100 hover:bg-cyan-500/20 transition-colors flex items-center justify-center"
+                                                    >
+                                                        التحرير
                                                     </Link>
                                                 </div>
                                                 {isSocialRole && ['ready_for_manual_publish', 'published'].includes(normalizedStatus) && (
                                                     <button
                                                         onClick={() => socialVariantsMutation.mutate(article.id)}
                                                         disabled={socialVariantsMutation.isPending}
-                                                        className="w-full xl:max-w-[240px] px-3 py-2 rounded-xl bg-cyan-500/15 border border-cyan-500/30 text-xs text-cyan-200 hover:bg-cyan-500/25 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                                                        className="w-full px-3 py-2 rounded-xl bg-cyan-500/15 border border-cyan-500/30 text-[11px] text-cyan-200 hover:bg-cyan-500/25 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                                                     >
                                                         <Copy className="w-3.5 h-3.5" /> نسخ السوشيال
                                                     </button>
@@ -729,7 +757,7 @@ function NewsPageContent() {
                                                 {canUseMultimedia && (
                                                     <Link
                                                         href="/services/multimedia"
-                                                        className="block w-full xl:max-w-[240px] px-3 py-2 rounded-xl bg-violet-500/15 border border-violet-500/30 text-xs text-violet-200 hover:bg-violet-500/25 transition-colors text-center"
+                                                        className="block w-full px-3 py-2 rounded-xl bg-violet-500/15 border border-violet-500/30 text-[11px] text-violet-200 hover:bg-violet-500/25 transition-colors text-center"
                                                     >
                                                         توليد وسائط
                                                     </Link>
