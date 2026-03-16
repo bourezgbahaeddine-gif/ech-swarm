@@ -1,5 +1,6 @@
 ﻿'use client';
 
+import Link from 'next/link';
 import { Suspense, useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -12,6 +13,7 @@ import {
     Clock, ChevronLeft, ChevronRight, Star,
     RefreshCw,
     CheckCircle, XCircle, RotateCw, Copy,
+    Rows3, TableProperties, ArrowLeft,
 } from 'lucide-react';
 
 function getApiErrorMessage(error: unknown, fallback: string): string {
@@ -52,6 +54,7 @@ function NewsPageContent() {
         if (initialBreakingParam === 'false') return false;
         return null;
     });
+    const [viewMode, setViewMode] = useState<'queue' | 'table'>('queue');
     const [selectedArticle, setSelectedArticle] = useState<number | null>(null);
     const [rejectReason, setRejectReason] = useState('');
     const [draftEditor, setDraftEditor] = useState<{
@@ -358,6 +361,63 @@ function NewsPageContent() {
     const isSocialRole = role === 'social_media';
     const canUseMultimedia = ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'].includes(role);
 
+    const getReasonForArticle = (article: ArticleBrief) => {
+        const normalizedStatus = (article.status || '').toLowerCase();
+        if (article.is_breaking) {
+            return 'ظهرت كمادة عاجلة وتحتاج حسمًا سريعًا داخل غرفة الأخبار.';
+        }
+        if (normalizedStatus === 'candidate' || normalizedStatus === 'classified') {
+            return 'دخلت طابور الأخبار وتنتظر بدء العمل التحريري أو التوجيه إلى المسودة.';
+        }
+        if (normalizedStatus === 'approved_handoff' || normalizedStatus === 'draft_generated') {
+            return 'وصلت إلى مرحلة المسودة وتحتاج تحريرًا أو مراجعة قبل الإرسال للاعتماد.';
+        }
+        if (normalizedStatus === 'ready_for_chief_approval') {
+            return canApproveReject
+                ? 'وصلت إليك لأن النسخة أصبحت جاهزة لقرار رئيس التحرير.'
+                : 'هذه المادة بانتظار قرار رئيس التحرير بعد انتهاء التحرير.';
+        }
+        if (normalizedStatus === 'approval_request_with_reservations') {
+            return canApproveReject
+                ? 'هذه المادة تحمل تحفظات أو ملاحظات وتحتاج قرارًا واضحًا.'
+                : 'عادت هذه المادة بتحفظات أو ملاحظات وتحتاج تحديثًا ثم إعادة الإرسال.';
+        }
+        if (normalizedStatus === 'ready_for_manual_publish') {
+            return 'اجتازت مسار الاعتماد وأصبحت جاهزة للنشر اليدوي أو التسليم للنشر.';
+        }
+        if (normalizedStatus === 'published') {
+            return 'هذه المادة منشورة ويمكن الرجوع إلى تفاصيلها أو استثمارها في السوشيال.';
+        }
+        if (normalizedStatus === 'rejected') {
+            return 'تم رفض هذه المادة وتحتاج مراجعة السبب قبل إعادة العمل عليها.';
+        }
+        return 'هذه المادة موجودة في المسار التحريري ويمكن فتحها لمعرفة تفاصيل أكثر.';
+    };
+
+    const getNextActionForArticle = (article: ArticleBrief) => {
+        const normalizedStatus = (article.status || '').toLowerCase();
+        if (normalizedStatus === 'candidate' || normalizedStatus === 'classified') {
+            return { label: 'ابدأ التحرير', href: `/workspace-drafts?article_id=${article.id}` };
+        }
+        if (normalizedStatus === 'approved_handoff' || normalizedStatus === 'draft_generated') {
+            return { label: 'أكمل المسودة', href: `/workspace-drafts?article_id=${article.id}` };
+        }
+        if (normalizedStatus === 'ready_for_chief_approval' || normalizedStatus === 'approval_request_with_reservations') {
+            return canApproveReject
+                ? { label: 'افتح طابور الاعتماد', href: '/editorial' }
+                : { label: 'راجع في المحرر', href: `/workspace-drafts?article_id=${article.id}` };
+        }
+        if (normalizedStatus === 'ready_for_manual_publish') {
+            return isSocialRole
+                ? { label: 'راجع الجاهز للنشر', href: '/editorial' }
+                : { label: 'افتح التفاصيل', href: `/news/${article.id}` };
+        }
+        if (normalizedStatus === 'published') {
+            return { label: 'افتح التفاصيل', href: `/news/${article.id}` };
+        }
+        return { label: 'افتح المادة', href: `/news/${article.id}` };
+    };
+
     return (
         <div className="space-y-6">
             {errorMessage && (
@@ -481,6 +541,35 @@ function NewsPageContent() {
                             <option key={c} value={c}>{getCategoryLabel(c)}</option>
                         ))}
                     </select>
+
+                    <div className="inline-flex items-center rounded-xl border border-white/10 bg-white/5 p-1">
+                        <button
+                            type="button"
+                            onClick={() => setViewMode('queue')}
+                            className={cn(
+                                'inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs transition-colors',
+                                viewMode === 'queue'
+                                    ? 'bg-emerald-500/20 text-emerald-200'
+                                    : 'text-gray-300 hover:text-white',
+                            )}
+                        >
+                            <Rows3 className="w-3.5 h-3.5" />
+                            طابور العمل
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setViewMode('table')}
+                            className={cn(
+                                'inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs transition-colors',
+                                viewMode === 'table'
+                                    ? 'bg-cyan-500/20 text-cyan-200'
+                                    : 'text-gray-300 hover:text-white',
+                            )}
+                        >
+                            <TableProperties className="w-3.5 h-3.5" />
+                            عرض تفصيلي
+                        </button>
+                    </div>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
@@ -537,278 +626,339 @@ function NewsPageContent() {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                {isLoading ? (
-                    Array.from({ length: 9 }).map((_, i) => (
-                        <div key={i} className="h-56 rounded-2xl bg-gray-800/30 border border-white/5 animate-pulse" />
-                    ))
-                ) : visibleArticles.length > 0 ? (
-                    visibleArticles.map((article: ArticleBrief) => {
-                        const normalizedStatus = (article.status || '').toLowerCase();
-                        const canReview = normalizedStatus === 'candidate' || normalizedStatus === 'classified';
-                        const freshBreaking = isFreshBreaking(article.is_breaking, article.crawled_at);
-                        const insight = insightsMap.get(article.id);
+            {isLoading ? (
+                <div className={cn(viewMode === 'queue' ? 'space-y-4' : 'rounded-2xl border border-white/10 bg-gray-900/35 p-4')}>
+                    {Array.from({ length: viewMode === 'queue' ? 6 : 1 }).map((_, i) => (
+                        <div key={i} className={cn(viewMode === 'queue' ? 'h-44 rounded-2xl bg-gray-800/30 border border-white/5 animate-pulse' : 'h-72 rounded-2xl bg-gray-800/30 animate-pulse')} />
+                    ))}
+                </div>
+            ) : visibleArticles.length > 0 ? (
+                viewMode === 'queue' ? (
+                    <div className="space-y-4">
+                        {visibleArticles.map((article: ArticleBrief) => {
+                            const normalizedStatus = (article.status || '').toLowerCase();
+                            const canReview = normalizedStatus === 'candidate' || normalizedStatus === 'classified';
+                            const freshBreaking = isFreshBreaking(article.is_breaking, article.crawled_at);
+                            const insight = insightsMap.get(article.id);
+                            const reason = getReasonForArticle(article);
+                            const nextAction = getNextActionForArticle(article);
 
-                        return (
-                            <div
-                                key={article.id}
-                                className={cn(
-                                    'rounded-2xl border app-surface p-5 transition-all',
-                                    'hover:border-gray-400/70 hover:shadow-md',
-                                    freshBreaking && 'ring-1 ring-red-500/30'
-                                )}
-                            >
-                                <div className="flex items-start gap-3">
-                                    <div className={cn(
-                                        'w-12 h-12 rounded-xl flex flex-col items-center justify-center flex-shrink-0',
-                                        article.importance_score >= 8 ? 'bg-red-500/20 text-red-400' :
-                                            article.importance_score >= 6 ? 'bg-amber-500/20 text-amber-400' :
-                                                'bg-gray-500/20 text-gray-400',
-                                    )}>
-                                        <Star className="w-4 h-4 mb-0.5" />
-                                        <span className="text-lg font-bold">{article.importance_score}</span>
-                                    </div>
-
-                                    <div className="flex-1">
-                                        <h3 className="text-[1.38rem] font-extrabold leading-9 line-clamp-3 tracking-tight" style={{ color: 'var(--text-primary)' }} dir="rtl">
-                                            {article.title_ar || article.original_title}
-                                        </h3>
-
-                                        <div className="flex items-center gap-2 mt-2 mb-1">
-                                            {freshBreaking && (
-                                                <span className="px-2 py-0.5 rounded-full bg-red-500 text-[10px] font-bold text-white flex items-center gap-1 animate-pulse">
-                                                    <Zap className="w-3 h-3" /> عاجل
+                            return (
+                                <div
+                                    key={article.id}
+                                    className={cn(
+                                        'rounded-2xl border app-surface p-5 transition-all',
+                                        'hover:border-gray-400/70 hover:shadow-md',
+                                        freshBreaking && 'ring-1 ring-red-500/30',
+                                    )}
+                                >
+                                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex flex-wrap items-center gap-2 mb-2">
+                                                {freshBreaking && (
+                                                    <span className="px-2 py-0.5 rounded-full bg-red-500 text-[10px] font-bold text-white flex items-center gap-1 animate-pulse">
+                                                        <Zap className="w-3 h-3" /> Ø¹Ø§Ø¬Ù
+                                                    </span>
+                                                )}
+                                                <span className={cn('px-2 py-0.5 rounded-md text-[10px] font-medium border', getStatusColor(normalizedStatus))}>
+                                                    {getStatusLabel(article.status)}
                                                 </span>
-                                            )}
-                                            <span className="text-[10px] app-text-muted">{article.source_name || '—'}</span>
-                                            <span className="text-[10px] text-gray-500 mr-auto flex items-center gap-1">
-                                                <Clock className="w-3 h-3" />
-                                                {formatRelativeTime(article.created_at || article.crawled_at)}
-                                            </span>
+                                                <span className={cn('px-2 py-0.5 rounded-md text-[10px] font-medium border', categoryColor(article.category))}>
+                                                    {getCategoryLabel(article.category)}
+                                                </span>
+                                                {(insight?.cluster_size || 0) > 1 && (
+                                                    <span className="px-2 py-0.5 rounded-md text-[10px] font-medium border border-cyan-500/30 text-cyan-300 bg-cyan-500/10">
+                                                        Ø­Ø¯Ø« ÙÙØ­ÙØ¯: {insight?.cluster_size}
+                                                    </span>
+                                                )}
+                                                {(insight?.relation_count || 0) > 0 && (
+                                                    <span className="px-2 py-0.5 rounded-md text-[10px] font-medium border border-fuchsia-500/30 text-fuchsia-300 bg-fuchsia-500/10">
+                                                        Ø¹ÙØ§ÙØ§Øª: {insight?.relation_count}
+                                                    </span>
+                                                )}
+                                                <span className="text-[10px] text-gray-500 mr-auto flex items-center gap-1">
+                                                    <Clock className="w-3 h-3" />
+                                                    {formatRelativeTime(article.created_at || article.crawled_at)}
+                                                </span>
+                                            </div>
+
+                                            <div className="flex items-start gap-3">
+                                                <div className={cn(
+                                                    'w-12 h-12 rounded-xl flex flex-col items-center justify-center flex-shrink-0',
+                                                    article.importance_score >= 8 ? 'bg-red-500/20 text-red-400' :
+                                                        article.importance_score >= 6 ? 'bg-amber-500/20 text-amber-400' :
+                                                            'bg-gray-500/20 text-gray-400',
+                                                )}>
+                                                    <Star className="w-4 h-4 mb-0.5" />
+                                                    <span className="text-lg font-bold">{article.importance_score}</span>
+                                                </div>
+
+                                                <div className="min-w-0 flex-1">
+                                                    <h3 className="text-xl font-extrabold leading-8 tracking-tight text-white" dir="rtl">
+                                                        {article.title_ar || article.original_title}
+                                                    </h3>
+                                                    <p className="text-xs text-slate-400 mt-1">
+                                                        {article.source_name || 'â'}
+                                                    </p>
+                                                    {article.summary && (
+                                                        <p className="text-sm mt-2 leading-7 text-slate-300" dir="rtl">
+                                                            {truncate(article.summary, 180)}
+                                                        </p>
+                                                    )}
+                                                    <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-sm text-cyan-100" dir="rtl">
+                                                        ÙÙØ§Ø°Ø§ ÙØ¸ÙØ± ÙÙØ§Ø {reason}
+                                                    </div>
+                                                    <div className="mt-2 text-sm text-emerald-200" dir="rtl">
+                                                        Ø§ÙØ¥Ø¬Ø±Ø§Ø¡ Ø§ÙØªØ§ÙÙ: <span className="font-semibold">{nextAction.label}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
 
-                                        {article.summary && (
-                                            <p className="text-sm mt-2 line-clamp-2 leading-7" style={{ color: 'var(--text-muted)' }} dir="rtl">
-                                                {truncate(article.summary, 140)}
-                                            </p>
-                                        )}
+                                        <div className="xl:w-[240px] shrink-0 space-y-2">
+                                            <Link
+                                                href={nextAction.href}
+                                                className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-sm text-emerald-300 hover:bg-emerald-500/25 transition-colors"
+                                            >
+                                                {nextAction.label}
+                                                <ArrowLeft className="w-4 h-4" />
+                                            </Link>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <a
+                                                    href={article.original_url || '#'}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className={cn(
+                                                        'px-3 py-2 rounded-xl border text-xs transition-colors flex items-center justify-center gap-2',
+                                                        article.original_url
+                                                            ? 'bg-white/5 border-white/10 text-gray-200 hover:text-white hover:border-white/20'
+                                                            : 'bg-white/5 border-white/5 text-gray-500 cursor-not-allowed',
+                                                    )}
+                                                >
+                                                    <ExternalLink className="w-4 h-4" />
+                                                    Ø§ÙÙØµØ¯Ø±
+                                                </a>
+                                                <Link
+                                                    href={`/news/${article.id}`}
+                                                    className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-gray-300 hover:text-white hover:border-white/20 transition-colors flex items-center justify-center"
+                                                >
+                                                    Ø§ÙØªÙØ§ØµÙÙ
+                                                </Link>
+                                            </div>
+                                            {isSocialRole && ['ready_for_manual_publish', 'published'].includes(normalizedStatus) && (
+                                                <button
+                                                    onClick={() => socialVariantsMutation.mutate(article.id)}
+                                                    disabled={socialVariantsMutation.isPending}
+                                                    className="w-full px-3 py-2 rounded-xl bg-cyan-500/15 border border-cyan-500/30 text-xs text-cyan-200 hover:bg-cyan-500/25 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                                                >
+                                                    <Copy className="w-3.5 h-3.5" /> ÙØ³Ø® Ø§ÙØ³ÙØ´ÙØ§Ù
+                                                </button>
+                                            )}
+                                            {canUseMultimedia && (
+                                                <Link
+                                                    href="/services/multimedia"
+                                                    className="block w-full px-3 py-2 rounded-xl bg-violet-500/15 border border-violet-500/30 text-xs text-violet-200 hover:bg-violet-500/25 transition-colors text-center"
+                                                >
+                                                    ØªÙÙÙØ¯ ÙØ³Ø§Ø¦Ø·
+                                                </Link>
+                                            )}
+                                        </div>
                                     </div>
-                                </div>
 
-                                <div className="mt-4 flex flex-wrap items-center gap-2">
-                                    <span className={cn('px-2 py-0.5 rounded-md text-[10px] font-medium border', getStatusColor((article.status || '').toLowerCase()))}>
-                                        {getStatusLabel(article.status)}
-                                    </span>
-                                    <span className={cn('px-2 py-0.5 rounded-md text-[10px] font-medium border', categoryColor(article.category))}>
-                                        {getCategoryLabel(article.category)}
-                                    </span>
-                                    {(insight?.cluster_size || 0) > 1 && (
-                                        <span className="px-2 py-0.5 rounded-md text-[10px] font-medium border border-cyan-500/30 text-cyan-300 bg-cyan-500/10">
-                                            حدث موحّد: {insight?.cluster_size}
-                                        </span>
-                                    )}
-                                    {(insight?.relation_count || 0) > 0 && (
-                                        <span className="px-2 py-0.5 rounded-md text-[10px] font-medium border border-fuchsia-500/30 text-fuchsia-300 bg-fuchsia-500/10">
-                                            علاقات: {insight?.relation_count}
-                                        </span>
-                                    )}
-                                </div>
+                                    <details className="mt-4 rounded-xl border border-white/10 bg-black/10 p-3">
+                                        <summary className="cursor-pointer text-xs text-slate-300 hover:text-white">
+                                            Ø¥Ø¬Ø±Ø§Ø¡Ø§Øª Ø¥Ø¶Ø§ÙÙØ©
+                                        </summary>
 
-                                <div className="mt-4 grid grid-cols-2 gap-2">
-                                    <a
-                                        href={article.original_url || '#'}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className={cn(
-                                            'px-3 py-2 rounded-xl border text-xs transition-colors flex items-center justify-center gap-2',
-                                            article.original_url
-                                                ? 'bg-white/5 border-white/10 text-gray-200 hover:text-white hover:border-white/20'
-                                                : 'bg-white/5 border-white/5 text-gray-500 cursor-not-allowed'
-                                        )}
-                                    >
-                                        <ExternalLink className="w-4 h-4" />
-                                        المصدر
-                                    </a>
-                                    <a
-                                        href={`/news/${article.id}`}
-                                        className="px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-xs text-emerald-300 hover:bg-emerald-500/25 transition-colors flex items-center justify-center"
-                                    >
-                                        التفاصيل
-                                    </a>
-                                </div>
-                                <div className="mt-2">
-                                    <a
-                                        href={`/workspace-drafts?article_id=${article.id}`}
-                                        className="block w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-gray-300 hover:text-white hover:border-white/20 transition-colors text-center"
-                                    >
-                                        فتح في Workspace
-                                    </a>
-                                </div>
-                                {canUseMultimedia && (
-                                    <div className="mt-2">
-                                        <a
-                                            href="/services/multimedia"
-                                            className="block w-full px-3 py-2 rounded-xl bg-violet-500/15 border border-violet-500/30 text-xs text-violet-200 hover:bg-violet-500/25 transition-colors text-center"
-                                        >
-                                            توليد وسائط الخبر
-                                        </a>
-                                    </div>
-                                )}
+                                        <div className="mt-3 space-y-3">
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                                                <button
+                                                    onClick={() => {
+                                                        if (typeof window !== 'undefined' && !window.confirm('ØªØ£ÙÙØ¯ Ø§ÙÙÙØ§ÙÙØ© Ø¹ÙÙ Ø§ÙØ®Ø¨Ø±Ø')) {
+                                                            return;
+                                                        }
+                                                        decideMutation.mutate(
+                                                            { articleId: article.id, decision: 'approve' },
+                                                            {
+                                                                onSuccess: (result) => {
+                                                                    const target = result?.workId
+                                                                        ? `/workspace-drafts?article_id=${article.id}&work_id=${result.workId}`
+                                                                        : `/workspace-drafts?article_id=${article.id}`;
+                                                                    router.push(target);
+                                                                },
+                                                            },
+                                                        );
+                                                    }}
+                                                    disabled={decideMutation.isPending || !canReview || !canApproveReject}
+                                                    className={cn(
+                                                        'px-2 py-2 rounded-xl border text-[10px] flex items-center justify-center gap-1 transition-colors',
+                                                        canReview && canApproveReject
+                                                            ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25'
+                                                            : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed',
+                                                    )}
+                                                >
+                                                    <CheckCircle className="w-3 h-3" /> ÙÙØ§ÙÙØ©
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        if (typeof window !== 'undefined' && !window.confirm('ØªØ£ÙÙØ¯ Ø¥Ø±Ø³Ø§Ù Ø§ÙØ®Ø¨Ø± ÙØ¥Ø¹Ø§Ø¯Ø© Ø§ÙØµÙØ§ØºØ©Ø')) {
+                                                            return;
+                                                        }
+                                                        decideMutation.mutate({ articleId: article.id, decision: 'rewrite' });
+                                                    }}
+                                                    disabled={decideMutation.isPending || !canReview || !canRewrite}
+                                                    className={cn(
+                                                        'px-2 py-2 rounded-xl border text-[10px] flex items-center justify-center gap-1 transition-colors',
+                                                        canReview && canRewrite
+                                                            ? 'bg-amber-500/15 border-amber-500/30 text-amber-300 hover:bg-amber-500/25'
+                                                            : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed',
+                                                    )}
+                                                >
+                                                    <RotateCw className="w-3 h-3" /> Ø¥Ø¹Ø§Ø¯Ø©
+                                                </button>
+                                                <button
+                                                    onClick={() => setSelectedArticle(article.id)}
+                                                    disabled={!canReview || !canApproveReject}
+                                                    className={cn(
+                                                        'px-2 py-2 rounded-xl border text-[10px] flex items-center justify-center gap-1 transition-colors',
+                                                        canReview && canApproveReject
+                                                            ? 'bg-red-500/15 border-red-500/30 text-red-300 hover:bg-red-500/25'
+                                                            : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed',
+                                                    )}
+                                                >
+                                                    <XCircle className="w-3 h-3" /> Ø±ÙØ¶
+                                                </button>
+                                            </div>
 
-                                {isSocialRole && ['ready_for_manual_publish', 'published'].includes(normalizedStatus) && (
-                                    <div className="mt-2">
-                                        <button
-                                            onClick={() => socialVariantsMutation.mutate(article.id)}
-                                            disabled={socialVariantsMutation.isPending}
-                                            className="w-full px-3 py-2 rounded-xl bg-cyan-500/15 border border-cyan-500/30 text-xs text-cyan-200 hover:bg-cyan-500/25 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-                                        >
-                                            <Copy className="w-3.5 h-3.5" /> نسخ نسخ السوشيال الجاهزة
-                                        </button>
-                                    </div>
-                                )}
+                                            {selectedArticle === article.id && canReview && (
+                                                <div className="flex items-center gap-2">
+                                                    <input
+                                                        type="text"
+                                                        value={rejectReason}
+                                                        onChange={(e) => setRejectReason(e.target.value)}
+                                                        placeholder="Ø³Ø¨Ø¨ Ø§ÙØ±ÙØ¶ (Ø¥ÙØ²Ø§ÙÙ)..."
+                                                        className="flex-1 h-10 px-3 rounded-xl bg-white/5 border border-white/5 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-red-500/40"
+                                                        dir="rtl"
+                                                    />
+                                                    <button
+                                                        onClick={() => {
+                                                            const reason = rejectReason.trim();
+                                                            if (!reason) {
+                                                                setErrorMessage('Ø³Ø¨Ø¨ Ø§ÙØ±ÙØ¶ ÙØ·ÙÙØ¨');
+                                                                return;
+                                                            }
+                                                            if (typeof window !== 'undefined' && !window.confirm('ØªØ£ÙÙØ¯ Ø±ÙØ¶ Ø§ÙØ®Ø¨Ø±Ø')) {
+                                                                return;
+                                                            }
+                                                            decideMutation.mutate({ articleId: article.id, decision: 'reject', reason });
+                                                        }}
+                                                        disabled={decideMutation.isPending || !rejectReason.trim()}
+                                                        className="px-4 py-2 rounded-xl bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors text-xs font-medium"
+                                                    >
+                                                        ØªØ£ÙÙØ¯ Ø§ÙØ±ÙØ¶
+                                                    </button>
+                                                </div>
+                                            )}
 
-                                <div className="mt-3 grid grid-cols-3 gap-2">
-                                    <button
-                                        onClick={() =>
-                                            {
-                                                if (typeof window !== 'undefined' && !window.confirm('تأكيد الموافقة على الخبر؟')) {
-                                                    return;
-                                                }
-                                                decideMutation.mutate(
-                                                    {
-                                                        articleId: article.id,
-                                                        decision: 'approve',
-                                                    },
-                                                    {
-                                                        onSuccess: (result) => {
-                                                            const target = result?.workId
-                                                                ? `/workspace-drafts?article_id=${article.id}&work_id=${result.workId}`
-                                                                : `/workspace-drafts?article_id=${article.id}`;
-                                                            router.push(target);
-                                                        },
-                                                    },
-                                                );
-                                            }
-                                        }
-                                        disabled={decideMutation.isPending || !canReview || !canApproveReject}
-                                        className={cn(
-                                            'px-2 py-2 rounded-xl border text-[10px] flex items-center justify-center gap-1 transition-colors',
-                                            canReview && canApproveReject
-                                                ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25'
-                                                : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed'
-                                        )}
-                                    >
-                                        <CheckCircle className="w-3 h-3" /> موافقة
-                                    </button>
-                                    <button
-                                        onClick={() => {
-                                            if (typeof window !== 'undefined' && !window.confirm('تأكيد إرسال الخبر لإعادة الصياغة؟')) {
-                                                return;
-                                            }
-                                            decideMutation.mutate({ articleId: article.id, decision: 'rewrite' });
-                                        }}
-                                        disabled={decideMutation.isPending || !canReview || !canRewrite}
-                                        className={cn(
-                                            'px-2 py-2 rounded-xl border text-[10px] flex items-center justify-center gap-1 transition-colors',
-                                            canReview && canRewrite
-                                                ? 'bg-amber-500/15 border-amber-500/30 text-amber-300 hover:bg-amber-500/25'
-                                                : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed'
-                                        )}
-                                    >
-                                        <RotateCw className="w-3 h-3" /> إعادة
-                                    </button>
-                                    <button
-                                        onClick={() => setSelectedArticle(article.id)}
-                                        disabled={!canReview || !canApproveReject}
-                                        className={cn(
-                                            'px-2 py-2 rounded-xl border text-[10px] flex items-center justify-center gap-1 transition-colors',
-                                            canReview && canApproveReject
-                                                ? 'bg-red-500/15 border-red-500/30 text-red-300 hover:bg-red-500/25'
-                                                : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed'
-                                        )}
-                                    >
-                                        <XCircle className="w-3 h-3" /> رفض
-                                    </button>
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                                                <button
+                                                    onClick={() => processMutation.mutate({ articleId: article.id, action: 'summarize' })}
+                                                    disabled={processMutation.isPending || !canProcess}
+                                                    className={cn(
+                                                        'px-2 py-2 rounded-xl border text-[10px] transition-colors',
+                                                        canProcess
+                                                            ? 'bg-sky-500/15 border-sky-500/30 text-sky-300 hover:bg-sky-500/25'
+                                                            : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed',
+                                                    )}
+                                                >
+                                                    ØªÙØ®ÙØµ
+                                                </button>
+                                                <button
+                                                    onClick={() => processMutation.mutate({ articleId: article.id, action: 'translate' })}
+                                                    disabled={processMutation.isPending || !canProcess}
+                                                    className={cn(
+                                                        'px-2 py-2 rounded-xl border text-[10px] transition-colors',
+                                                        canProcess
+                                                            ? 'bg-violet-500/15 border-violet-500/30 text-violet-300 hover:bg-violet-500/25'
+                                                            : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed',
+                                                    )}
+                                                >
+                                                    ØªØ±Ø¬ÙØ©
+                                                </button>
+                                                <button
+                                                    onClick={() => processMutation.mutate({ articleId: article.id, action: 'fact_check' })}
+                                                    disabled={processMutation.isPending || !canProcess}
+                                                    className={cn(
+                                                        'px-2 py-2 rounded-xl border text-[10px] transition-colors',
+                                                        canProcess
+                                                            ? 'bg-fuchsia-500/15 border-fuchsia-500/30 text-fuchsia-300 hover:bg-fuchsia-500/25'
+                                                            : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed',
+                                                    )}
+                                                >
+                                                    ØªØ­ÙÙ
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </details>
                                 </div>
-
-                                {selectedArticle === article.id && canReview && (
-                                    <div className="mt-3 flex items-center gap-2">
-                                        <input
-                                            type="text"
-                                            value={rejectReason}
-                                            onChange={(e) => setRejectReason(e.target.value)}
-                                            placeholder="سبب الرفض (إلزامي)..."
-                                            className="flex-1 h-10 px-3 rounded-xl bg-white/5 border border-white/5 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-red-500/40"
-                                            dir="rtl"
-                                        />
-                                        <button
-                                            onClick={() => {
-                                                const reason = rejectReason.trim();
-                                                if (!reason) {
-                                                    setErrorMessage('سبب الرفض مطلوب');
-                                                    return;
-                                                }
-                                                if (typeof window !== 'undefined' && !window.confirm('تأكيد رفض الخبر؟')) {
-                                                    return;
-                                                }
-                                                decideMutation.mutate({ articleId: article.id, decision: 'reject', reason });
-                                            }}
-                                            disabled={decideMutation.isPending || !rejectReason.trim()}
-                                            className="px-4 py-2 rounded-xl bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors text-xs font-medium"
-                                        >
-                                            تأكيد الرفض
-                                        </button>
-                                    </div>
-                                )}
-
-                                <div className="mt-2 grid grid-cols-3 gap-2">
-                                    <button
-                                        onClick={() => processMutation.mutate({ articleId: article.id, action: 'summarize' })}
-                                        disabled={processMutation.isPending || !canProcess}
-                                        className={cn(
-                                            'px-2 py-2 rounded-xl border text-[10px] transition-colors',
-                                            canProcess
-                                                ? 'bg-sky-500/15 border-sky-500/30 text-sky-300 hover:bg-sky-500/25'
-                                                : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed'
-                                        )}
-                                    >
-                                        تلخيص
-                                    </button>
-                                    <button
-                                        onClick={() => processMutation.mutate({ articleId: article.id, action: 'translate' })}
-                                        disabled={processMutation.isPending || !canProcess}
-                                        className={cn(
-                                            'px-2 py-2 rounded-xl border text-[10px] transition-colors',
-                                            canProcess
-                                                ? 'bg-violet-500/15 border-violet-500/30 text-violet-300 hover:bg-violet-500/25'
-                                                : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed'
-                                        )}
-                                    >
-                                        ترجمة
-                                    </button>
-                                    <button
-                                        onClick={() => processMutation.mutate({ articleId: article.id, action: 'fact_check' })}
-                                        disabled={processMutation.isPending || !canProcess}
-                                        className={cn(
-                                            'px-2 py-2 rounded-xl border text-[10px] transition-colors',
-                                            canProcess
-                                                ? 'bg-fuchsia-500/15 border-fuchsia-500/30 text-fuchsia-300 hover:bg-fuchsia-500/25'
-                                                : 'bg-white/5 border-white/10 text-gray-500 cursor-not-allowed'
-                                        )}
-                                    >
-                                        تحقق
-                                    </button>
-                                </div>
-                            </div>
-                        );
-                    })
-                ) : (
-                    <div className="col-span-full text-center py-16 rounded-2xl bg-gray-800/20 border border-white/5">
-                        لا توجد أخبار حالياً
+                            );
+                        })}
                     </div>
-                )}
-            </div>
-
+                ) : (
+                    <div className="overflow-hidden rounded-2xl border border-white/10 bg-gray-900/35">
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full text-sm">
+                                <thead className="bg-white/5 text-slate-300">
+                                    <tr>
+                                        <th className="px-4 py-3 text-right font-medium">Ø§ÙØ¹ÙÙØ§Ù</th>
+                                        <th className="px-4 py-3 text-right font-medium">Ø§ÙØ­Ø§ÙØ©</th>
+                                        <th className="px-4 py-3 text-right font-medium">Ø§ÙÙØµØ¯Ø±</th>
+                                        <th className="px-4 py-3 text-right font-medium">Ø³Ø¨Ø¨ Ø§ÙØ¸ÙÙØ±</th>
+                                        <th className="px-4 py-3 text-right font-medium">Ø§ÙØ¥Ø¬Ø±Ø§Ø¡ Ø§ÙØªØ§ÙÙ</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {visibleArticles.map((article) => {
+                                        const nextAction = getNextActionForArticle(article);
+                                        return (
+                                            <tr key={article.id} className="border-t border-white/5 text-slate-200">
+                                                <td className="px-4 py-3 align-top">
+                                                    <div className="font-semibold text-white">{truncate(article.title_ar || article.original_title, 90)}</div>
+                                                    <div className="mt-1 text-[11px] text-slate-500">{formatRelativeTime(article.created_at || article.crawled_at)}</div>
+                                                </td>
+                                                <td className="px-4 py-3 align-top">
+                                                    <span className={cn('px-2 py-0.5 rounded-md text-[10px] font-medium border', getStatusColor((article.status || '').toLowerCase()))}>
+                                                        {getStatusLabel(article.status)}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3 align-top text-xs text-slate-300">
+                                                    {article.source_name || 'â'}
+                                                </td>
+                                                <td className="px-4 py-3 align-top text-xs text-slate-300 max-w-[360px]">
+                                                    {truncate(getReasonForArticle(article), 120)}
+                                                </td>
+                                                <td className="px-4 py-3 align-top">
+                                                    <Link
+                                                        href={nextAction.href}
+                                                        className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100 hover:bg-cyan-500/20"
+                                                    >
+                                                        {nextAction.label}
+                                                        <ArrowLeft className="w-3.5 h-3.5" />
+                                                    </Link>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                )
+            ) : (
+                <div className="col-span-full text-center py-16 rounded-2xl bg-gray-800/20 border border-white/5">
+                    ÙØ§ ØªÙØ¬Ø¯ Ø£Ø®Ø¨Ø§Ø± Ø­Ø§ÙÙØ§Ù
+                </div>
+            )}
             {totalPages > 1 && (
                 <div className="flex items-center justify-center gap-2 px-4 py-3 border-t border-white/5">
                     <button
