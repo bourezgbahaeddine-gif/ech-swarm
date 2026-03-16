@@ -81,7 +81,7 @@ function articleTitle(article: ArticleBrief): string {
 }
 
 function articleTimestamp(article: ArticleBrief): string | null {
-    return article.updated_at || article.created_at || article.crawled_at || null;
+    return article.created_at || article.crawled_at || null;
 }
 
 function ageInHours(value?: string | null): number {
