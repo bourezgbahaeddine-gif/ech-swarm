@@ -1,7 +1,7 @@
 ﻿'use client';
-/* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
+/* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps, react-hooks/refs */
 
-import { Suspense, type MutableRefObject, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import NextLink from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'next/navigation';
@@ -51,7 +51,7 @@ type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
 type RightTab = 'evidence' | 'proofread' | 'quality' | 'seo' | 'social' | 'context' | 'msi' | 'simulator' | 'xray';
 type GuideType = 'welcome' | 'action';
 type ActionId = 'quick_check' | 'verify' | 'proofread' | 'improve' | 'headlines' | 'seo' | 'links' | 'social' | 'quality' | 'publish_gate' | 'apply' | 'save' | 'manual_draft' | 'audience_test';
-type ViewMode = 'speed' | 'deep';
+type ViewMode = 'write' | 'improve' | 'advanced';
 type LeftTab = 'drafts' | 'source' | 'archive';
 type ClaimOverrideDraft = {
     evidenceLinksRaw: string;
@@ -518,7 +518,7 @@ function impactBySeverity(sev: DecisionSeverity): string {
     }
 }
 
-function createSmartHighlightExtension(enabledRef: MutableRefObject<boolean>) {
+function createSmartHighlightExtension(isEnabled: () => boolean) {
     return Extension.create({
         name: 'smartHighlight',
         addProseMirrorPlugins() {
@@ -530,7 +530,7 @@ function createSmartHighlightExtension(enabledRef: MutableRefObject<boolean>) {
                 new Plugin({
                     props: {
                         decorations(state) {
-                            if (!enabledRef.current) return DecorationSet.empty;
+                            if (!isEnabled()) return DecorationSet.empty;
                             const decorations: Decoration[] = [];
                             state.doc.descendants((node, pos) => {
                                 if (!node.isText) return;
@@ -688,7 +688,7 @@ function WorkspaceDraftsPageContent() {
     const [baseVersion, setBaseVersion] = useState(1);
     const [saveState, setSaveState] = useState<SaveState>('saved');
     const [activeTab, setActiveTab] = useState<RightTab>('evidence');
-    const [viewMode, setViewMode] = useState<ViewMode>('speed');
+    const [viewMode, setViewMode] = useState<ViewMode>('write');
     const [err, setErr] = useState<string | null>(null);
     const [ok, setOk] = useState<string | null>(null);
     const [claims, setClaims] = useState<FactCheckClaim[]>([]);
@@ -728,7 +728,6 @@ function WorkspaceDraftsPageContent() {
     const [reviewOpen, setReviewOpen] = useState(false);
     const [explainOpen, setExplainOpen] = useState(false);
     const [toolsExpanded, setToolsExpanded] = useState(false);
-    const [showAdvancedTabs, setShowAdvancedTabs] = useState(false);
     const [showUrgentAll, setShowUrgentAll] = useState(false);
     const [showImproveAll, setShowImproveAll] = useState(false);
     const [showExtraAll, setShowExtraAll] = useState(false);
@@ -738,7 +737,6 @@ function WorkspaceDraftsPageContent() {
     const [detailsOpen, setDetailsOpen] = useState(false);
     const [focusMode, setFocusMode] = useState(false);
     const [smartHighlightEnabled, setSmartHighlightEnabled] = useState(true);
-    const smartHighlightRef = useRef(true);
     const [inlineAiOpen, setInlineAiOpen] = useState(false);
     const [inlineSourceOpen, setInlineSourceOpen] = useState(false);
     const [inlineAiError, setInlineAiError] = useState<string | null>(null);
@@ -753,11 +751,17 @@ function WorkspaceDraftsPageContent() {
     const [overrideOpen, setOverrideOpen] = useState(false);
     const [overrideNote, setOverrideNote] = useState('');
     const lastSavedRef = useRef<{ title: string; body: string }>({ title: '', body: '' });
+    const isWriteMode = viewMode === 'write';
+    const isImproveMode = viewMode === 'improve';
+    const isAdvancedMode = viewMode === 'advanced';
     const allowedTabs = useMemo(() => TABS.filter((tab) => (tab.id === 'msi' ? isDirector : true)), [isDirector]);
     const visibleTabs = useMemo(() => {
-        const coreIds = new Set<RightTab>(['evidence', 'proofread', 'quality', 'seo']);
-        return allowedTabs.filter((tab) => showAdvancedTabs || coreIds.has(tab.id));
-    }, [allowedTabs, showAdvancedTabs]);
+        const writeIds = new Set<RightTab>(['evidence', 'proofread', 'quality']);
+        const improveIds = new Set<RightTab>(['evidence', 'proofread', 'quality', 'seo', 'social', 'context']);
+        if (isAdvancedMode) return allowedTabs;
+        if (isImproveMode) return allowedTabs.filter((tab) => improveIds.has(tab.id));
+        return allowedTabs.filter((tab) => writeIds.has(tab.id));
+    }, [allowedTabs, isAdvancedMode, isImproveMode]);
 
     const setClaimOverrideDraftField = (claimId: string, patch: Partial<ClaimOverrideDraft>) => {
         setClaimOverrideDrafts((prev) => {
@@ -814,9 +818,9 @@ function WorkspaceDraftsPageContent() {
         if (!isDirector && activeTab === 'msi') setActiveTab('evidence');
     }, [isDirector, activeTab]);
     useEffect(() => {
-        const core = new Set<RightTab>(['evidence', 'proofread', 'quality', 'seo']);
-        if (!showAdvancedTabs && !core.has(activeTab)) setActiveTab('evidence');
-    }, [activeTab, showAdvancedTabs]);
+        const allowed = new Set(visibleTabs.map((tab) => tab.id));
+        if (!allowed.has(activeTab)) setActiveTab(visibleTabs[0]?.id || 'evidence');
+    }, [activeTab, visibleTabs]);
 
     useEffect(() => {
         autoCreateAttemptRef.current = false;
@@ -914,7 +918,7 @@ function WorkspaceDraftsPageContent() {
         onSuccess: () => queryClient.invalidateQueries({ queryKey: ['smart-editor-xray-latest'] }),
     });
 
-    const smartHighlightExtension = useMemo(() => createSmartHighlightExtension(smartHighlightRef), []);
+    const smartHighlightExtension = useMemo(() => createSmartHighlightExtension(() => smartHighlightEnabled), [smartHighlightEnabled]);
 
     const editor = useEditor({
         extensions: [
@@ -936,7 +940,6 @@ function WorkspaceDraftsPageContent() {
     });
 
     useEffect(() => {
-        smartHighlightRef.current = smartHighlightEnabled;
         if (editor) editor.view.dispatch(editor.state.tr);
     }, [smartHighlightEnabled, editor]);
 
@@ -1679,77 +1682,6 @@ function WorkspaceDraftsPageContent() {
         return localStoryGaps;
     }, [storyCenter?.gaps, localStoryGaps]);
     const storyTopSources = useMemo(() => storyTimelineSorted.slice(0, 5), [storyTimelineSorted]);
-    const storyQuickActions = useMemo(() => {
-        return storyGaps.slice(0, 3).map((gap) => {
-            let actionLabel = 'معالجة';
-            let handler: () => void = () => setDetailsOpen(true);
-            if (gap.action && decisionActionHandlers[gap.action]) {
-                const runner = decisionActionHandlers[gap.action];
-                actionLabel = ACTION_SOURCE_LABELS[gap.action] || 'تشغيل';
-                handler = () => {
-                    runner();
-                    setStoryOpen(false);
-                };
-            } else {
-                const task = mapGapToStoryTask(gap.title, gap.hint, gap.id);
-                actionLabel = storyTaskLabel(task);
-                if (task === 'source') {
-                    handler = () => {
-                        setDetailsOpen(true);
-                        setLeftTab('archive');
-                        setStoryOpen(false);
-                    };
-                } else if (task === 'background') {
-                    handler = () => {
-                        insertAutoTimeline();
-                        setStoryOpen(false);
-                    };
-                } else {
-                    handler = () => {
-                        createStoryDraft.mutate(task);
-                    };
-                }
-            }
-            return { ...gap, actionLabel, handler };
-        });
-    }, [storyGaps, decisionActionHandlers, setStoryOpen, setDetailsOpen, setLeftTab, insertAutoTimeline]);
-    const nextBestAction = useMemo(() => {
-        if (storyQuickActions.length > 0) return storyQuickActions[0];
-        return {
-            id: 'story_pack',
-            title: 'ابدأ من باقة القصة',
-            hint: 'أدرج القالب والخلفية والتسلسل الزمني مباشرة في المسودة.',
-            severity: 'low' as DecisionSeverity,
-            actionLabel: 'إدراج الباقة',
-            handler: () => {
-                insertStoryStarterPack();
-                setStoryOpen(false);
-            },
-        };
-    }, [storyQuickActions, insertStoryStarterPack, setStoryOpen]);
-
-    const storyType = useMemo(() => {
-        const latestTs = storyItemTimestamp(storyTimelineSorted[0] || {});
-        const recentHours = latestTs ? (Date.now() - latestTs) / 3_600_000 : 999;
-        const coverage = storyHub.coverageScore ?? 0;
-        if (recentHours <= 6 && storyHub.timelineCount <= 5) return 'breaking_expansion';
-        if (storyHub.timelineCount >= 6 && coverage >= 60) return 'running_story';
-        if (coverage < 50) return 'background_file';
-        return 'issue_tracking';
-    }, [storyTimelineSorted, storyHub.coverageScore, storyHub.timelineCount]);
-
-    const storyTypeLabel = useMemo(() => {
-        switch (storyType) {
-            case 'breaking_expansion':
-                return 'خبر عاجل يتوسع';
-            case 'running_story':
-                return 'قصة متابعة مستمرة';
-            case 'background_file':
-                return 'ملف خلفية';
-            default:
-                return 'قضية ممتدة';
-        }
-    }, [storyType]);
 
     const [storyLastSeenAt, setStoryLastSeenAt] = useState<string | null>(null);
     useEffect(() => {
@@ -2198,15 +2130,20 @@ function WorkspaceDraftsPageContent() {
         return () => window.removeEventListener('keydown', handler);
     }, [paletteOpen, filteredPaletteItems, paletteIndex]);
 
-    const decisionSections = viewMode === 'deep'
+    const decisionSections = isAdvancedMode
         ? [
             { key: 'urgent', title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد موانع حرجة حالياً.', showAll: showUrgentAll, toggle: () => setShowUrgentAll((v) => !v) },
             { key: 'improve', title: 'يحسّن الجودة', items: decisionModel.improve, empty: 'لا توجد تحسينات عاجلة للجودة.', showAll: showImproveAll, toggle: () => setShowImproveAll((v) => !v) },
             { key: 'extra', title: 'تحسينات إضافية', items: decisionModel.extra, empty: 'لا توجد تحسينات إضافية الآن.', showAll: showExtraAll, toggle: () => setShowExtraAll((v) => !v) },
         ]
-        : [
-            { key: 'urgent', title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد موانع حرجة حالياً.', showAll: showUrgentAll, toggle: () => setShowUrgentAll((v) => !v) },
-        ];
+        : isImproveMode
+            ? [
+                { key: 'urgent', title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد موانع حرجة حالياً.', showAll: showUrgentAll, toggle: () => setShowUrgentAll((v) => !v) },
+                { key: 'improve', title: 'يحسّن الجودة', items: decisionModel.improve, empty: 'لا توجد تحسينات عاجلة للجودة.', showAll: showImproveAll, toggle: () => setShowImproveAll((v) => !v) },
+            ]
+            : [
+                { key: 'urgent', title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد موانع حرجة حالياً.', showAll: showUrgentAll, toggle: () => setShowUrgentAll((v) => !v) },
+            ];
 
     const decisionSectionsForView = useMemo(() => {
         if (blockerSummary.count > 0) {
@@ -2229,15 +2166,6 @@ function WorkspaceDraftsPageContent() {
         const urlLine = cleanText(item.url || '');
         const label = dateLabel ? `${titleLine} (${dateLabel})` : titleLine;
         const html = `<p>مصدر من الأرشيف: ${label}</p>${urlLine ? `<p>${urlLine}</p>` : ''}`;
-        editor.chain().focus().insertContent(html).run();
-        setSaveState('unsaved');
-    }
-
-    function insertStoryItem(item: StoryContextItem) {
-        if (!editor) return;
-        const titleLine = cleanText(item.title || 'عنصر سياقي');
-        const urlLine = cleanText(item.url || '');
-        const html = `<p>سياق مرتبط: ${titleLine}</p>${urlLine ? `<p>${urlLine}</p>` : ''}`;
         editor.chain().focus().insertContent(html).run();
         setSaveState('unsaved');
     }
@@ -2301,10 +2229,60 @@ function WorkspaceDraftsPageContent() {
             }
             setOk('تم فتح خبر القصة في تبويب جديد.');
             setErr(null);
-        } catch (e) {
+        } catch {
             setErr('تعذر فتح خبر القصة في المحرر.');
         }
     }
+
+    const storyQuickActions = useMemo(() => {
+        return storyGaps.slice(0, 3).map((gap) => {
+            let actionLabel = 'معالجة';
+            let handler: () => void = () => setDetailsOpen(true);
+            if (gap.action && decisionActionHandlers[gap.action]) {
+                const runner = decisionActionHandlers[gap.action];
+                actionLabel = ACTION_SOURCE_LABELS[gap.action] || 'تشغيل';
+                handler = () => {
+                    runner();
+                    setStoryOpen(false);
+                };
+            } else {
+                const task = mapGapToStoryTask(gap.title, gap.hint, gap.id);
+                actionLabel = storyTaskLabel(task);
+                if (task === 'source') {
+                    handler = () => {
+                        setDetailsOpen(true);
+                        setLeftTab('archive');
+                        setStoryOpen(false);
+                    };
+                } else if (task === 'background') {
+                    handler = () => {
+                        insertAutoTimeline();
+                        setStoryOpen(false);
+                    };
+                } else {
+                    handler = () => {
+                        createStoryDraft.mutate(task);
+                    };
+                }
+            }
+            return { ...gap, actionLabel, handler };
+        });
+    }, [storyGaps, decisionActionHandlers, createStoryDraft, setStoryOpen, setDetailsOpen, setLeftTab, insertAutoTimeline]);
+
+    const nextBestAction = useMemo(() => {
+        if (storyQuickActions.length > 0) return storyQuickActions[0];
+        return {
+            id: 'story_pack',
+            title: 'ابدأ من باقة القصة',
+            hint: 'أدرج القالب والخلفية والتسلسل الزمني مباشرة في المسودة.',
+            severity: 'low' as DecisionSeverity,
+            actionLabel: 'إدراج الباقة',
+            handler: () => {
+                insertStoryStarterPack();
+                setStoryOpen(false);
+            },
+        };
+    }, [storyQuickActions, insertStoryStarterPack, setStoryOpen]);
 
     function handleInlineAiAction(action: 'rewrite' | 'shorten' | 'expand' | 'clarify') {
         setInlineAiError(null);
@@ -2602,29 +2580,53 @@ function WorkspaceDraftsPageContent() {
                                 {smartHighlightEnabled ? 'إيقاف التظليل' : 'تفعيل التظليل'}
                             </button>
                         )}
-                        {detailsOpen && (
-                            <div className="ml-auto flex items-center gap-2">
-                                <button
-                                    disabled={autosave.isPending}
-                                    onClick={() => runWithGuide('save', () => { setSaveState('saving'); autosave.mutate(); })}
-                                    className="min-h-8 px-2 py-1 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-[10px] flex items-center gap-2 disabled:opacity-60"
-                                >
-                                    <Save className="w-4 h-4" />حفظ
-                                </button>
-                                <button
-                                    onClick={() => setViewMode('speed')}
-                                    className={cn('min-h-8 px-2 py-1 rounded-xl border text-[10px]', viewMode === 'speed' ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-100' : 'bg-white/5 border-white/15 text-gray-300')}
-                                >
-                                    وضع السرعة
-                                </button>
-                                <button
-                                    onClick={() => setViewMode('deep')}
-                                    className={cn('min-h-8 px-2 py-1 rounded-xl border text-[10px]', viewMode === 'deep' ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-100' : 'bg-white/5 border-white/15 text-gray-300')}
-                                >
-                                    وضع العمق
-                                </button>
-                            </div>
-                        )}
+                        <div className="ml-auto flex items-center gap-2">
+                            <button
+                                disabled={autosave.isPending}
+                                onClick={() => runWithGuide('save', () => { setSaveState('saving'); autosave.mutate(); })}
+                                className="min-h-8 px-2 py-1 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-[10px] flex items-center gap-2 disabled:opacity-60"
+                            >
+                                <Save className="w-4 h-4" />حفظ
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setViewMode('write');
+                                    setDetailsOpen(false);
+                                    setToolsExpanded(false);
+                                    setFocusMode(false);
+                                }}
+                                className={cn('min-h-8 px-2 py-1 rounded-xl border text-[10px]', isWriteMode ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-100' : 'bg-white/5 border-white/15 text-gray-300')}
+                            >
+                                اكتب وأنهِ
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setViewMode('improve');
+                                    setDetailsOpen(true);
+                                    setToolsExpanded(true);
+                                }}
+                                className={cn('min-h-8 px-2 py-1 rounded-xl border text-[10px]', isImproveMode ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-100' : 'bg-white/5 border-white/15 text-gray-300')}
+                            >
+                                حسّن أكثر
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setViewMode('advanced');
+                                    setDetailsOpen(true);
+                                    setToolsExpanded(true);
+                                }}
+                                className={cn('min-h-8 px-2 py-1 rounded-xl border text-[10px]', isAdvancedMode ? 'bg-violet-500/20 border-violet-500/40 text-violet-100' : 'bg-white/5 border-white/15 text-gray-300')}
+                            >
+                                تحليل متقدم
+                            </button>
+                        </div>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-[11px] text-gray-300" dir="rtl">
+                        {isWriteMode
+                            ? 'هذا الوضع مخصص للصحفي: اكتب النص، شغّل الفحص السريع، ثم أرسل لاعتماد رئيس التحرير.'
+                            : isImproveMode
+                                ? 'هذا الوضع يفتح أدوات التحسين العملية: التحقق، التدقيق، الجودة، SEO، والسوشيال.'
+                                : 'هذا الوضع مخصص للمراجعة العميقة: التفسير، محاكاة التفاعل، MSI، وزوايا المنافسين.'}
                     </div>
                     {detailsOpen && nextAction.description && (
                         <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-[11px] text-gray-300">
@@ -2642,15 +2644,17 @@ function WorkspaceDraftsPageContent() {
                             <button disabled={runProofread.isPending} onClick={() => runWithGuide('proofread', () => runProofread.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-lime-500/20 border border-lime-500/30 text-lime-200 text-xs disabled:opacity-60">{runProofread.isPending ? 'جاري التدقيق...' : 'تدقيق لغوي'}</button>
                             <button disabled={runQuality.isPending} onClick={() => runWithGuide('quality', () => runQuality.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs disabled:opacity-60">{runQuality.isPending ? 'جاري التقييم...' : 'جودة'}</button>
                             <button disabled={runReadiness.isPending} onClick={() => runWithGuide('publish_gate', () => runReadiness.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-200 text-xs disabled:opacity-60">{runReadiness.isPending ? 'جاري الفحص...' : 'بوابة النشر'}</button>
-                            {viewMode === 'deep' && (
+                            {!isWriteMode && (
                                 <>
                                     <button disabled={rewrite.isPending} onClick={() => runWithGuide('improve', () => rewrite.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-2 disabled:opacity-60"><Sparkles className="w-4 h-4" />{rewrite.isPending ? 'جاري التحسين...' : 'تحسين'}</button>
                                     <button disabled={runHeadlines.isPending} onClick={() => runWithGuide('headlines', () => runHeadlines.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-200 text-xs disabled:opacity-60">{runHeadlines.isPending ? 'جاري التوليد...' : 'عناوين'}</button>
                                     <button disabled={runSeo.isPending} onClick={() => runWithGuide('seo', () => runSeo.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-200 text-xs disabled:opacity-60">{runSeo.isPending ? 'جاري التحليل...' : 'SEO'}</button>
                                     <button disabled={runLinks.isPending} onClick={() => runWithGuide('links', () => runLinks.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-teal-500/20 border border-teal-500/30 text-teal-200 text-xs disabled:opacity-60">{runLinks.isPending ? 'جاري جلب الروابط...' : 'روابط'}</button>
                                     <button disabled={runSocial.isPending} onClick={() => runWithGuide('social', () => runSocial.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-sky-500/20 border border-sky-500/30 text-sky-200 text-xs disabled:opacity-60">{runSocial.isPending ? 'جاري التوليد...' : 'سوشيال'}</button>
-                                    <button disabled={runAudienceSimulation.isPending} onClick={() => runWithGuide('audience_test', () => runAudienceSimulation.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-100 text-xs disabled:opacity-60">محاكي الجمهور</button>
                                 </>
+                            )}
+                            {isAdvancedMode && (
+                                <button disabled={runAudienceSimulation.isPending} onClick={() => runWithGuide('audience_test', () => runAudienceSimulation.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-100 text-xs disabled:opacity-60">محاكي الجمهور</button>
                             )}
                         </div>
                     )}
@@ -2809,7 +2813,7 @@ function WorkspaceDraftsPageContent() {
                     ))}
                 </div>
 
-                {viewMode === 'deep' && (
+                {isAdvancedMode && (
                     <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-[11px] text-emerald-100 space-y-1">
                         <p className="font-semibold text-emerald-200">أفضل عنوان مقترح</p>
                         <p>{cleanText(decisionModel.bestHeadline.headline || 'لا يوجد عنوان مقترح حالياً.')}</p>
@@ -2824,7 +2828,7 @@ function WorkspaceDraftsPageContent() {
             </div>
             )}
 
-            {detailsOpen && viewMode === 'deep' && (
+            {detailsOpen && isAdvancedMode && (
                 <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3">
                     <div className="flex items-center justify-between gap-2">
                         <div>
@@ -2881,7 +2885,7 @@ function WorkspaceDraftsPageContent() {
                 </div>
             )}
 
-            {detailsOpen && viewMode === 'deep' && (
+            {detailsOpen && isAdvancedMode && (
                 <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3">
                     <div className="flex items-center justify-between gap-2">
                         <div>
@@ -3232,12 +3236,6 @@ function WorkspaceDraftsPageContent() {
                             {visibleTabs.map((t) => (
                                 <button key={t.id} onClick={() => setActiveTab(t.id)} className={cn('shrink-0 min-h-9 px-2 py-1 rounded-lg text-[11px]', activeTab === t.id ? 'bg-emerald-500/20 text-emerald-200' : 'bg-white/10 text-gray-300')}>{t.label}</button>
                             ))}
-                            <button
-                                onClick={() => setShowAdvancedTabs((prev) => !prev)}
-                                className="shrink-0 min-h-9 px-2 py-1 rounded-lg text-[11px] bg-white/5 text-gray-300 border border-white/10"
-                            >
-                                {showAdvancedTabs ? 'إخفاء المتقدم' : 'أدوات متقدمة'}
-                            </button>
                         </div>
                     </div>
                     )}
