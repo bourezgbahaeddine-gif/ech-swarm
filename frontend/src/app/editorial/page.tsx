@@ -12,9 +12,10 @@ import {
     type ChiefPendingItem,
     type SocialApprovedItem,
 } from '@/lib/api';
-import { formatRelativeTime, getCategoryLabel, getStatusColor, truncate } from '@/lib/utils';
+import { formatRelativeTime, getCategoryLabel, truncate } from '@/lib/utils';
 import { useAuth } from '@/lib/auth';
 import { AlertTriangle, CheckCircle2, RotateCcw, Send, ShieldCheck } from 'lucide-react';
+import { WorkflowCard } from '@/components/workflow/WorkflowCard';
 
 type EditorialTabKey = 'pending' | 'returned' | 'reservations' | 'manual';
 
@@ -278,54 +279,55 @@ export default function EditorialPage() {
     const renderChiefCard = (item: ChiefPendingItem) => {
         const hasReservations = normalizeStatus(item.status) === 'approval_request_with_reservations';
         const note = notesMap[item.id] || '';
+        const blockers = [
+            ...(item.policy?.reasons || []),
+            ...(item.decision_card?.quality_issues || []),
+            ...(item.decision_card?.claims_issues || []),
+        ].filter(Boolean);
 
         return (
-            <div key={item.id} className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3">
-                <div className="flex items-start justify-between gap-3" dir="rtl">
-                    <div>
-                        <h3 className="text-base text-white font-semibold">{item.title_ar || item.original_title}</h3>
-                        <p className="mt-1 text-xs text-gray-400">{item.source_name || 'بدون مصدر'} • {getCategoryLabel(item.category)}</p>
-                        <p className="mt-1 text-xs text-gray-500">آخر تحديث: {formatRelativeTime(item.updated_at)}</p>
-                    </div>
-                    <span className={`rounded-lg border px-2 py-1 text-[11px] ${hasReservations ? 'border-orange-500/40 bg-orange-500/20 text-orange-200' : 'border-cyan-500/40 bg-cyan-500/20 text-cyan-200'}`}>
-                        {hasReservations ? 'تحفظات معلقة' : 'قرار نهائي مطلوب'}
-                    </span>
-                </div>
+            <WorkflowCard
+                key={item.id}
+                title={item.title_ar || item.original_title}
+                subtitle={`${item.source_name || 'بدون مصدر'} • ${getCategoryLabel(item.category)}`}
+                statusLabel={item.status || 'ready_for_chief_approval'}
+                chips={[
+                    {
+                        label: hasReservations ? 'تحفظات معلقة' : 'قرار نهائي مطلوب',
+                        className: hasReservations ? 'border-orange-500/40 bg-orange-500/20 text-orange-200' : 'border-cyan-500/40 bg-cyan-500/20 text-cyan-200',
+                    },
+                ]}
+                reason={getChiefReason(item)}
+                nextActionLabel={hasReservations ? 'حسم التحفظات' : 'اتخذ القرار'}
+                timestamp={item.updated_at}
+                blockers={blockers}
+                tone={hasReservations ? 'warn' : item.is_breaking ? 'danger' : 'default'}
+                actions={
+                    <div className="space-y-3">
+                        {!!item.decision_card && (
+                            <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-200" dir="rtl">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <span className={`rounded-md border px-2 py-1 ${item.decision_card.risk_level === 'high' ? 'border-red-500/40 bg-red-500/10 text-red-200' : item.decision_card.risk_level === 'low' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200' : 'border-amber-500/40 bg-amber-500/10 text-amber-200'}`}>
+                                        مستوى المخاطر: {item.decision_card.risk_level}
+                                    </span>
+                                    <span className="rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-cyan-200">جودة: {item.decision_card.quality_score ?? '-'}</span>
+                                    <span className="rounded-md border border-violet-500/30 bg-violet-500/10 px-2 py-1 text-violet-200">ادعاءات: {item.decision_card.claims_score ?? '-'}</span>
+                                </div>
+                            </div>
+                        )}
 
-                <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-200" dir="rtl">
-                    <p className="mb-1 text-gray-400">لماذا تظهر هنا؟</p>
-                    <p>{getChiefReason(item)}</p>
-                </div>
-
-                {!!item.policy?.reasons?.length && (
-                    <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-200" dir="rtl">
-                        <p className="mb-1 text-gray-400">ملاحظات وكيل السياسة</p>
-                        {item.policy.reasons.map((reason, index) => <p key={`${item.id}-reason-${index}`}>- {reason}</p>)}
-                    </div>
-                )}
-
-                {!!item.decision_card && (
-                    <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-200" dir="rtl">
-                        <div className="flex flex-wrap items-center gap-2">
-                            <span className={`rounded-md border px-2 py-1 ${item.decision_card.risk_level === 'high' ? 'border-red-500/40 bg-red-500/10 text-red-200' : item.decision_card.risk_level === 'low' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200' : 'border-amber-500/40 bg-amber-500/10 text-amber-200'}`}>
-                                مستوى المخاطر: {item.decision_card.risk_level}
-                            </span>
-                            <span className="rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-cyan-200">جودة: {item.decision_card.quality_score ?? '-'}</span>
-                            <span className="rounded-md border border-violet-500/30 bg-violet-500/10 px-2 py-1 text-violet-200">ادعاءات: {item.decision_card.claims_score ?? '-'}</span>
+                        <div className="grid grid-cols-1 gap-2 md:grid-cols-5">
+                            <a href={item.work_id ? `/workspace-drafts?article_id=${item.id}&work_id=${item.work_id}` : `/workspace-drafts?article_id=${item.id}`} className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-center text-xs text-gray-200 hover:text-white">افتح في المحرر</a>
+                            <button onClick={() => submitChiefDecision(item, 'approve')} disabled={chiefDecisionMutation.isPending} className="flex items-center justify-center gap-1 rounded-xl border border-emerald-500/30 bg-emerald-500/20 px-3 py-2 text-xs text-emerald-200"><CheckCircle2 className="h-4 w-4" /> اعتماد نهائي</button>
+                            <button onClick={() => submitChiefDecision(item, 'approve_with_reservations')} disabled={chiefDecisionMutation.isPending} className="rounded-xl border border-orange-500/30 bg-orange-500/20 px-3 py-2 text-xs text-orange-200">اعتماد بتحفظات</button>
+                            <button onClick={() => submitChiefDecision(item, 'send_back')} disabled={chiefDecisionMutation.isPending} className="flex items-center justify-center gap-1 rounded-xl border border-amber-500/30 bg-amber-500/20 px-3 py-2 text-xs text-amber-200"><RotateCcw className="h-4 w-4" /> إعادة للمراجعة</button>
+                            <button onClick={() => submitChiefDecision(item, 'reject')} disabled={chiefDecisionMutation.isPending} className="rounded-xl border border-red-500/30 bg-red-500/20 px-3 py-2 text-xs text-red-200">رفض</button>
                         </div>
+
+                        <input type="text" value={note} onChange={(e) => setNotesMap((prev) => ({ ...prev, [item.id]: e.target.value }))} placeholder="سبب القرار (إلزامي للتحفظات أو الرفض)..." className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white placeholder:text-gray-500" dir="rtl" />
                     </div>
-                )}
-
-                <div className="grid grid-cols-1 gap-2 md:grid-cols-5">
-                    <a href={item.work_id ? `/workspace-drafts?article_id=${item.id}&work_id=${item.work_id}` : `/workspace-drafts?article_id=${item.id}`} className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-center text-xs text-gray-200 hover:text-white">افتح في المحرر</a>
-                    <button onClick={() => submitChiefDecision(item, 'approve')} disabled={chiefDecisionMutation.isPending} className="flex items-center justify-center gap-1 rounded-xl border border-emerald-500/30 bg-emerald-500/20 px-3 py-2 text-xs text-emerald-200"><CheckCircle2 className="h-4 w-4" /> اعتماد نهائي</button>
-                    <button onClick={() => submitChiefDecision(item, 'approve_with_reservations')} disabled={chiefDecisionMutation.isPending} className="rounded-xl border border-orange-500/30 bg-orange-500/20 px-3 py-2 text-xs text-orange-200">اعتماد بتحفظات</button>
-                    <button onClick={() => submitChiefDecision(item, 'send_back')} disabled={chiefDecisionMutation.isPending} className="flex items-center justify-center gap-1 rounded-xl border border-amber-500/30 bg-amber-500/20 px-3 py-2 text-xs text-amber-200"><RotateCcw className="h-4 w-4" /> إعادة للمراجعة</button>
-                    <button onClick={() => submitChiefDecision(item, 'reject')} disabled={chiefDecisionMutation.isPending} className="rounded-xl border border-red-500/30 bg-red-500/20 px-3 py-2 text-xs text-red-200">رفض</button>
-                </div>
-
-                <input type="text" value={note} onChange={(e) => setNotesMap((prev) => ({ ...prev, [item.id]: e.target.value }))} placeholder="سبب القرار (إلزامي للتحفظات أو الرفض)..." className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white placeholder:text-gray-500" dir="rtl" />
-            </div>
+                }
+            />
         );
     };
 
@@ -333,54 +335,58 @@ export default function EditorialPage() {
         const action = getArticlePrimaryAction(article);
 
         return (
-            <div key={article.id} className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3" dir="rtl">
-                <div>
-                    <div className="mb-2 flex flex-wrap items-center gap-2">
-                        <span className={`rounded-lg border px-2 py-1 text-[11px] ${getStatusColor(normalizeStatus(article.status))}`}>{article.status}</span>
-                        {article.is_breaking && <span className="rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1 text-[11px] text-red-200">عاجل</span>}
+            <WorkflowCard
+                key={article.id}
+                title={article.title_ar || article.original_title}
+                subtitle={`${article.source_name || 'بدون مصدر'} • ${getCategoryLabel(article.category)} • ${formatRelativeTime(article.created_at || article.crawled_at)}`}
+                statusLabel={article.status}
+                chips={article.is_breaking ? [{ label: 'عاجل', className: 'border-red-500/30 bg-red-500/10 text-red-200' }] : []}
+                reason={getArticleReason(article)}
+                nextActionLabel={action.label}
+                timestamp={article.created_at || article.crawled_at}
+                tone={article.is_breaking ? 'danger' : 'default'}
+                actions={
+                    <div className="space-y-3">
+                        {article.summary && (
+                            <div className="text-xs text-gray-300" dir="rtl">{truncate(article.summary, 220)}</div>
+                        )}
+                        <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                            {action.href ? <a href={action.href} className="rounded-xl border border-cyan-500/30 bg-cyan-500/20 px-3 py-2 text-center text-xs text-cyan-200">{action.label}</a> : null}
+                            {options?.nomination ? (
+                                <button onClick={() => nominateMutation.mutate(article.id)} disabled={!canNominate || nominateMutation.isPending} className="flex items-center justify-center gap-1 rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-xs text-gray-200 disabled:opacity-50"><Send className="h-4 w-4" /> ترشيح للتحرير</button>
+                            ) : (
+                                <a href={`/news/${article.id}`} className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-center text-xs text-gray-200 hover:text-white">افتح التفاصيل</a>
+                            )}
+                            {options?.socialCopy ? (
+                                <button onClick={() => socialCopyMutation.mutate(article.id)} disabled={socialCopyMutation.isPending} className="rounded-xl border border-emerald-500/30 bg-emerald-500/20 px-3 py-2 text-xs text-emerald-200">نسخ النسخ الجاهزة</button>
+                            ) : (
+                                <a href={article.original_url || '#'} target="_blank" rel="noreferrer" className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-center text-xs text-gray-300 hover:text-white">المصدر</a>
+                            )}
+                        </div>
                     </div>
-                    <h3 className="text-base font-semibold text-white">{article.title_ar || article.original_title}</h3>
-                    <p className="mt-1 text-xs text-gray-400">{article.source_name || 'بدون مصدر'} • {getCategoryLabel(article.category)} • {formatRelativeTime(article.created_at || article.crawled_at)}</p>
-                    {article.summary && <p className="mt-2 text-xs text-gray-300">{truncate(article.summary, 220)}</p>}
-                </div>
-
-                <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-200">
-                    <p className="mb-1 text-gray-400">لماذا يظهر هنا؟</p>
-                    <p>{getArticleReason(article)}</p>
-                </div>
-
-                <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-                    {action.href ? <a href={action.href} className="rounded-xl border border-cyan-500/30 bg-cyan-500/20 px-3 py-2 text-center text-xs text-cyan-200">{action.label}</a> : null}
-                    {options?.nomination ? (
-                        <button onClick={() => nominateMutation.mutate(article.id)} disabled={!canNominate || nominateMutation.isPending} className="flex items-center justify-center gap-1 rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-xs text-gray-200 disabled:opacity-50"><Send className="h-4 w-4" /> ترشيح للتحرير</button>
-                    ) : (
-                        <a href={`/news/${article.id}`} className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-center text-xs text-gray-200 hover:text-white">افتح التفاصيل</a>
-                    )}
-                    {options?.socialCopy ? (
-                        <button onClick={() => socialCopyMutation.mutate(article.id)} disabled={socialCopyMutation.isPending} className="rounded-xl border border-emerald-500/30 bg-emerald-500/20 px-3 py-2 text-xs text-emerald-200">نسخ النسخ الجاهزة</button>
-                    ) : (
-                        <a href={article.original_url || '#'} target="_blank" rel="noreferrer" className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-center text-xs text-gray-300 hover:text-white">المصدر</a>
-                    )}
-                </div>
-            </div>
+                }
+            />
         );
     };
     const renderSocialCard = (item: SocialApprovedItem) => (
-        <div key={item.article_id} className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3" dir="rtl">
-            <div>
-                <h3 className="text-base font-semibold text-white">{item.title}</h3>
-                <p className="mt-1 text-xs text-gray-400">{item.source_name || 'بدون مصدر'} • {formatRelativeTime(item.updated_at)}</p>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-200">
-                <p className="mb-1 text-gray-400">لماذا يظهر هنا؟</p>
-                <p>المادة معتمدة وجاهزة للاستخدام الرقمي أو النسخ لمنصات النشر.</p>
-            </div>
-            <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-                <button onClick={() => socialCopyMutation.mutate(item.article_id)} disabled={socialCopyMutation.isPending} className="rounded-xl border border-cyan-500/30 bg-cyan-500/20 px-3 py-2 text-xs text-cyan-200">نسخ النسخ الجاهزة</button>
-                <a href={`/news/${item.article_id}`} className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-center text-xs text-gray-200">افتح المادة</a>
-                <a href={`/digital?article_id=${item.article_id}`} className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-center text-xs text-gray-200">افتح التغطية الرقمية</a>
-            </div>
-        </div>
+        <WorkflowCard
+            key={item.article_id}
+            title={item.title}
+            subtitle={`${item.source_name || 'بدون مصدر'} • ${formatRelativeTime(item.updated_at)}`}
+            statusLabel="ready_for_manual_publish"
+            chips={[{ label: 'جاهز للتغطية الرقمية', className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200' }]}
+            reason="المادة معتمدة وجاهزة للاستخدام الرقمي أو النسخ لمنصات النشر."
+            nextActionLabel="نسخ النسخ الجاهزة"
+            timestamp={item.updated_at}
+            tone="success"
+            actions={
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                    <button onClick={() => socialCopyMutation.mutate(item.article_id)} disabled={socialCopyMutation.isPending} className="rounded-xl border border-cyan-500/30 bg-cyan-500/20 px-3 py-2 text-xs text-cyan-200">نسخ النسخ الجاهزة</button>
+                    <a href={`/news/${item.article_id}`} className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-center text-xs text-gray-200">افتح المادة</a>
+                    <a href={`/digital?article_id=${item.article_id}`} className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-center text-xs text-gray-200">افتح التغطية الرقمية</a>
+                </div>
+            }
+        />
     );
 
     const renderActiveTab = () => {

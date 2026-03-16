@@ -25,6 +25,7 @@ import {
     type StoryRecord,
 } from '@/lib/api';
 import { cn, formatRelativeTime } from '@/lib/utils';
+import { WorkflowCard, WorkflowSection } from '@/components/workflow/WorkflowCard';
 
 export default function StoriesPage() {
     const router = useRouter();
@@ -352,13 +353,14 @@ function StoryQueuesSection({
     );
 
     return (
-        <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-4 space-y-4">
+        <WorkflowSection
+            title="طبقة متابعة القصص"
+            hint="نرى فقط ما يحتاج متابعة فعلية: القصص النشطة، ما يحتاج تحديثًا، ما فقد الزخم، وما يحتاج زاوية جديدة."
+            icon={<ClipboardList className="w-4 h-4 text-cyan-300" />}
+            count={stories.length}
+        >
             <div>
-                <h2 className="text-sm font-semibold text-white inline-flex items-center gap-1.5">
-                    <ClipboardList className="w-4 h-4 text-cyan-300" />
-                    طبقة متابعة القصص
-                </h2>
-                <p className="text-[11px] text-slate-400 mt-1">نرى فقط ما يحتاج متابعة فعلية: القصص النشطة، ما يحتاج تحديثًا، ما فقد الزخم، وما يحتاج زاوية جديدة.</p>
+                <p className="text-[11px] text-slate-400">قرار سريع: ما القصة الأهم الآن، ما الذي ينقصها، وما الإجراء التالي؟</p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-xs">
@@ -472,24 +474,28 @@ function StoryQueuesSection({
                         <p className="text-xs text-slate-300 mb-2">أقرب 5 قصص لإجراء سريع</p>
                         <div className="space-y-2">
                             {quickActionStories.length > 0 ? quickActionStories.map((story) => (
-                                <div
+                                <WorkflowCard
                                     key={`desk-row-${story.id}`}
-                                    className="rounded-lg border border-white/10 bg-white/5 p-2 flex items-center justify-between gap-3"
-                                >
-                                    <div className="min-w-0">
-                                        <p className="text-[11px] text-cyan-300">{story.story_key}</p>
-                                        <p className="text-sm text-white line-clamp-1">{story.title}</p>
-                                        <p className="text-[10px] text-slate-400 line-clamp-1">{storyQueueReason(story)} • {storyNextActionLabel(story)}</p>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => onOpenStory(story.id)}
-                                        className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-cyan-400/40 bg-cyan-500/15 px-2 py-1 text-[10px] text-cyan-100"
-                                    >
-                                        فتح
-                                        <ArrowLeftCircle className="w-3 h-3" />
-                                    </button>
-                                </div>
+                                    title={story.title}
+                                    subtitle={`${story.story_key} • ${story.category || 'غير مصنف'}`}
+                                    statusLabel={story.status}
+                                    chips={[{ label: classifyStoryQueueLabel(story) }]}
+                                    reason={storyQueueReason(story)}
+                                    nextActionLabel={storyNextActionLabel(story)}
+                                    timestamp={story.updated_at || story.created_at || ''}
+                                    actions={
+                                        <div className="flex justify-end">
+                                            <button
+                                                type="button"
+                                                onClick={() => onOpenStory(story.id)}
+                                                className="inline-flex items-center gap-1 rounded-lg border border-cyan-400/40 bg-cyan-500/15 px-2 py-1 text-[10px] text-cyan-100"
+                                            >
+                                                فتح
+                                                <ArrowLeftCircle className="w-3 h-3" />
+                                            </button>
+                                        </div>
+                                    }
+                                />
                             )) : (
                                 <p className="text-[11px] text-emerald-100">لا توجد قصص حرجة حاليًا.</p>
                             )}
@@ -497,7 +503,7 @@ function StoryQueuesSection({
                     </div>
                 </>
             )}
-        </section>
+        </WorkflowSection>
     );
 }
 
@@ -538,26 +544,28 @@ function StoryQueueCard({
             ) : (
                 <div className="space-y-2">
                     {stories.slice(0, 4).map((story) => (
-                        <div key={`${title}-${story.id}`} className="rounded-lg border border-white/10 bg-white/5 p-3">
-                            <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                    <p className="text-[11px] text-cyan-300">{story.story_key}</p>
-                                    <p className="text-sm text-white line-clamp-1">{story.title}</p>
-                                    <p className="text-[11px] text-slate-400 mt-1 line-clamp-2">{storyQueueReason(story)}</p>
-                                    <p className="text-[10px] text-slate-500 mt-2">
-                                        الإجراء التالي: {storyNextActionLabel(story)} • آخر نشاط: {formatRelativeTime(story.updated_at || story.created_at || '')}
-                                    </p>
+                        <WorkflowCard
+                            key={`${title}-${story.id}`}
+                            title={story.title}
+                            subtitle={`${story.story_key} • ${story.category || 'غير مصنف'}`}
+                            statusLabel={story.status}
+                            chips={[{ label: title, className: toneClasses }]}
+                            reason={storyQueueReason(story)}
+                            nextActionLabel={storyNextActionLabel(story)}
+                            timestamp={story.updated_at || story.created_at || ''}
+                            actions={
+                                <div className="flex justify-end">
+                                    <button
+                                        type="button"
+                                        onClick={() => onOpenStory(story.id)}
+                                        className="inline-flex items-center gap-1 rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-[10px] text-slate-200"
+                                    >
+                                        فتح القصة
+                                        <ArrowLeftCircle className="w-3 h-3" />
+                                    </button>
                                 </div>
-                                <button
-                                    type="button"
-                                    onClick={() => onOpenStory(story.id)}
-                                    className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-[10px] text-slate-200"
-                                >
-                                    فتح القصة
-                                    <ArrowLeftCircle className="w-3 h-3" />
-                                </button>
-                            </div>
-                        </div>
+                            }
+                        />
                     ))}
                 </div>
             )}
@@ -1151,6 +1159,14 @@ function classifyStoryQueue(story: StoryRecord): 'active' | 'update' | 'lost_mom
         return 'update';
     }
     return 'active';
+}
+
+function classifyStoryQueueLabel(story: StoryRecord) {
+    const bucket = classifyStoryQueue(story);
+    if (bucket === 'lost_momentum') return 'فقدت الزخم';
+    if (bucket === 'new_angle') return 'تحتاج زاوية جديدة';
+    if (bucket === 'update') return 'تحتاج تحديثًا';
+    return 'قصة نشطة';
 }
 
 function storyActionScore(story: StoryRecord) {

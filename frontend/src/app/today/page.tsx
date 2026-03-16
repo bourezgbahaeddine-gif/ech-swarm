@@ -1,20 +1,9 @@
 ﻿'use client';
 
 import Link from 'next/link';
-import { useMemo, type ComponentType } from 'react';
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import {
-    AlertTriangle,
-    ArrowLeft,
-    CheckCircle2,
-    Clock3,
-    Inbox,
-    LayoutDashboard,
-    RefreshCw,
-    Send,
-    ShieldAlert,
-    Zap,
-} from 'lucide-react';
+import { CheckCircle2, Inbox, LayoutDashboard, RefreshCw, Send, AlertTriangle, ShieldAlert, Zap } from 'lucide-react';
 
 import {
     dashboardApi,
@@ -25,7 +14,8 @@ import {
     type DashboardNotification,
 } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { cn, formatRelativeTime, getStatusColor, truncate } from '@/lib/utils';
+import { cn } from '@/lib/utils';
+import { WorkflowCard, WorkflowSection, type WorkflowTone } from '@/components/workflow/WorkflowCard';
 
 type Role =
     | 'director'
@@ -35,8 +25,6 @@ type Role =
     | 'print_editor'
     | 'fact_checker'
     | 'observer';
-
-type QueueTone = 'default' | 'warn' | 'danger' | 'success';
 
 type QueueItem = {
     id: string;
@@ -49,14 +37,14 @@ type QueueItem = {
     status: string;
     timestamp?: string | null;
     blockers?: string[];
-    tone?: QueueTone;
+    tone?: WorkflowTone;
 };
 
 type SummaryCardData = {
     label: string;
     value: number;
     hint: string;
-    tone?: QueueTone;
+    tone?: WorkflowTone;
 };
 
 function normalizeRole(role: string): Role | null {
@@ -98,7 +86,7 @@ function articleToQueueItem(
         reason: string;
         nextAction: string;
         href: string;
-        tone?: QueueTone;
+        tone?: WorkflowTone;
         blockers?: string[];
     },
 ): QueueItem {
@@ -124,7 +112,7 @@ function chiefItemToQueueItem(
         nextAction?: string;
         href?: string;
         reason?: string;
-        tone?: QueueTone;
+        tone?: WorkflowTone;
     },
 ): QueueItem {
     const blockers = [
@@ -202,106 +190,6 @@ function WorkflowStrip({ items }: { items: Array<{ label: string; count: number;
                     </div>
                 ))}
             </div>
-        </section>
-    );
-}
-
-function QueueSection({
-    title,
-    hint,
-    icon: Icon,
-    items,
-    emptyLabel,
-}: {
-    title: string;
-    hint: string;
-    icon: ComponentType<{ className?: string }>;
-    items: QueueItem[];
-    emptyLabel: string;
-}) {
-    return (
-        <section className="rounded-3xl border border-white/10 bg-[rgba(15,23,42,0.55)] p-4">
-            <div className="flex items-center justify-between gap-3 mb-3">
-                <div>
-                    <div className="flex items-center gap-2 text-white">
-                        <Icon className="w-4 h-4 text-cyan-300" />
-                        <h2 className="text-lg font-semibold">{title}</h2>
-                    </div>
-                    <p className="text-xs text-slate-400 mt-1">{hint}</p>
-                </div>
-                <div className="text-xs text-slate-500">{items.length} عنصر</div>
-            </div>
-
-            {items.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-center text-sm text-slate-400">
-                    {emptyLabel}
-                </div>
-            ) : (
-                <div className="space-y-3">
-                    {items.map((item) => (
-                        <div
-                            key={item.id}
-                            className={cn(
-                                'rounded-2xl border px-4 py-4',
-                                item.tone === 'danger'
-                                    ? 'border-rose-500/25 bg-rose-500/10'
-                                    : item.tone === 'warn'
-                                      ? 'border-amber-500/25 bg-amber-500/10'
-                                      : item.tone === 'success'
-                                        ? 'border-emerald-500/25 bg-emerald-500/10'
-                                        : 'border-white/10 bg-white/5',
-                            )}
-                        >
-                            <div className="flex items-start justify-between gap-4">
-                                <div className="min-w-0">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        <h3 className="text-sm font-semibold text-white leading-6">{item.title}</h3>
-                                        <span className={cn('px-2 py-0.5 rounded-md text-[10px] font-medium border', getStatusColor((item.status || '').toLowerCase()))}>
-                                            {item.status}
-                                        </span>
-                                        <span className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] text-slate-300">
-                                            {item.workflowLabel}
-                                        </span>
-                                    </div>
-                                    <div className="mt-1 text-xs text-slate-400">{item.subtitle}</div>
-                                    <div className="mt-3 text-sm text-slate-200 leading-6">{truncate(item.reason, 180)}</div>
-                                    <div className="mt-2 text-xs text-cyan-200">
-                                        الإجراء التالي: <span className="font-semibold">{item.nextAction}</span>
-                                    </div>
-                                    {item.blockers && item.blockers.length > 0 && (
-                                        <div className="mt-3 flex flex-wrap gap-1.5">
-                                            {item.blockers.slice(0, 2).map((blocker) => (
-                                                <span
-                                                    key={`${item.id}-${blocker}`}
-                                                    className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-100"
-                                                >
-                                                    عائق: {truncate(blocker, 80)}
-                                                </span>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-
-                                <div className="flex shrink-0 flex-col items-end gap-3">
-                                    {item.timestamp && (
-                                        <div className="inline-flex items-center gap-1 text-[11px] text-slate-400">
-                                            <Clock3 className="w-3.5 h-3.5" />
-                                            {formatRelativeTime(item.timestamp)}
-                                        </div>
-                                    )}
-                                    <Link
-                                        href={item.href}
-                                        className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100 hover:bg-cyan-500/20"
-                                    >
-                                        <span>{item.nextAction}</span>
-                                        <ArrowLeft className="w-3.5 h-3.5" />
-                                    </Link>
-                                </div>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
         </section>
     );
 }
@@ -626,29 +514,89 @@ export default function TodayPage() {
                 </div>
             ) : (
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-                    <QueueSection
+                    <WorkflowSection
                         title={isChiefFlow ? 'دخل نطاقك الآن' : 'ابدأ الآن'}
                         hint={isChiefFlow ? 'المواد التي تحتاج قرارًا مباشرًا من رئيس التحرير.' : 'أهم ما دخل نطاقك الآن ويحتاج بدء العمل أو تصحيحًا سريعًا.'}
-                        icon={Zap}
-                        items={isChiefFlow ? chiefNow : journalistNow}
+                        icon={<Zap className="w-4 h-4 text-cyan-300" />}
+                        count={(isChiefFlow ? chiefNow : journalistNow).length}
                         emptyLabel={isChiefFlow ? 'لا توجد مواد حرجة بانتظار القرار الآن.' : 'لا توجد عناصر عاجلة الآن.'}
-                    />
+                    >
+                        {(isChiefFlow ? chiefNow : journalistNow).length === 0 ? undefined : (
+                            <div className="space-y-3">
+                                {(isChiefFlow ? chiefNow : journalistNow).map((item) => (
+                                    <WorkflowCard
+                                        key={item.id}
+                                        title={item.title}
+                                        subtitle={item.subtitle}
+                                        statusLabel={item.status}
+                                        chips={[{ label: item.workflowLabel }]}
+                                        reason={item.reason}
+                                        nextActionLabel={item.nextAction}
+                                        timestamp={item.timestamp}
+                                        blockers={item.blockers}
+                                        tone={item.tone}
+                                        primaryAction={{ label: item.nextAction, href: item.href }}
+                                    />
+                                ))}
+                            </div>
+                        )}
+                    </WorkflowSection>
 
-                    <QueueSection
+                    <WorkflowSection
                         title="الخطوة التالية في المسار"
                         hint={isChiefFlow ? 'العناصر التالية بعد حسم العاجل: جاهز للنشر اليدوي أو يحتاج متابعة بتحفظات.' : 'المواد التالية في مسار الأخبار والتحرير بعد إنهاء العاجل.'}
-                        icon={CheckCircle2}
-                        items={isChiefFlow ? chiefNext : journalistNext}
+                        icon={<CheckCircle2 className="w-4 h-4 text-cyan-300" />}
+                        count={(isChiefFlow ? chiefNext : journalistNext).length}
                         emptyLabel="لا توجد عناصر إضافية في هذه اللحظة."
-                    />
+                    >
+                        {(isChiefFlow ? chiefNext : journalistNext).length === 0 ? undefined : (
+                            <div className="space-y-3">
+                                {(isChiefFlow ? chiefNext : journalistNext).map((item) => (
+                                    <WorkflowCard
+                                        key={item.id}
+                                        title={item.title}
+                                        subtitle={item.subtitle}
+                                        statusLabel={item.status}
+                                        chips={[{ label: item.workflowLabel }]}
+                                        reason={item.reason}
+                                        nextActionLabel={item.nextAction}
+                                        timestamp={item.timestamp}
+                                        blockers={item.blockers}
+                                        tone={item.tone}
+                                        primaryAction={{ label: item.nextAction, href: item.href }}
+                                    />
+                                ))}
+                            </div>
+                        )}
+                    </WorkflowSection>
 
-                    <QueueSection
+                    <WorkflowSection
                         title="ما الذي يعيق التقدم؟"
                         hint={isChiefFlow ? 'مواد متأخرة أو عالية الخطورة قد تعطل الاعتماد.' : 'مواد قد تتأخر أو تنبيهات تستحق الانتباه قبل أن تتعطل.'}
-                        icon={isChiefFlow ? ShieldAlert : AlertTriangle}
-                        items={isChiefFlow ? chiefRisk : journalistRisk}
+                        icon={isChiefFlow ? <ShieldAlert className="w-4 h-4 text-cyan-300" /> : <AlertTriangle className="w-4 h-4 text-cyan-300" />}
+                        count={(isChiefFlow ? chiefRisk : journalistRisk).length}
                         emptyLabel="لا توجد عناصر متعثرة حاليًا."
-                    />
+                    >
+                        {(isChiefFlow ? chiefRisk : journalistRisk).length === 0 ? undefined : (
+                            <div className="space-y-3">
+                                {(isChiefFlow ? chiefRisk : journalistRisk).map((item) => (
+                                    <WorkflowCard
+                                        key={item.id}
+                                        title={item.title}
+                                        subtitle={item.subtitle}
+                                        statusLabel={item.status}
+                                        chips={[{ label: item.workflowLabel }]}
+                                        reason={item.reason}
+                                        nextActionLabel={item.nextAction}
+                                        timestamp={item.timestamp}
+                                        blockers={item.blockers}
+                                        tone={item.tone}
+                                        primaryAction={{ label: item.nextAction, href: item.href }}
+                                    />
+                                ))}
+                            </div>
+                        )}
+                    </WorkflowSection>
                 </div>
             )}
 

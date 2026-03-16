@@ -8,9 +8,10 @@ import { isAxiosError } from 'axios';
 import { newsApi, dashboardApi, editorialApi, type ArticleBrief, type DashboardNotification } from '@/lib/api';
 import { cn, formatRelativeTime, getStatusColor, getCategoryLabel, isFreshBreaking, truncate } from '@/lib/utils';
 import { useAuth } from '@/lib/auth';
+import { WorkflowCard } from '@/components/workflow/WorkflowCard';
 import {
-    Newspaper, Search, Zap, ExternalLink,
-    Clock, ChevronLeft, ChevronRight, Star,
+    Newspaper, Search, ExternalLink,
+    ChevronLeft, ChevronRight,
     RefreshCw,
     CheckCircle, XCircle, RotateCw, Copy,
     Rows3, TableProperties, ArrowLeft,
@@ -644,134 +645,75 @@ function NewsPageContent() {
                             const nextAction = getNextActionForArticle(article);
 
                             return (
-                                <div
-                                    key={article.id}
-                                    className={cn(
-                                        'rounded-2xl border app-surface p-5 transition-all',
-                                        'hover:border-gray-400/70 hover:shadow-md',
-                                        freshBreaking && 'ring-1 ring-red-500/30',
-                                    )}
-                                >
-                                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                                        <div className="min-w-0 flex-1">
-                                            <div className="flex flex-wrap items-center gap-2 mb-2">
-                                                {freshBreaking && (
-                                                    <span className="px-2 py-0.5 rounded-full bg-red-500 text-[10px] font-bold text-white flex items-center gap-1 animate-pulse">
-                                                        <Zap className="w-3 h-3" /> عاجل
-                                                    </span>
-                                                )}
-                                                <span className={cn('px-2 py-0.5 rounded-md text-[10px] font-medium border', getStatusColor(normalizedStatus))}>
-                                                    {getStatusLabel(article.status)}
-                                                </span>
-                                                <span className={cn('px-2 py-0.5 rounded-md text-[10px] font-medium border', categoryColor(article.category))}>
-                                                    {getCategoryLabel(article.category)}
-                                                </span>
-                                                {(insight?.cluster_size || 0) > 1 && (
-                                                    <span className="px-2 py-0.5 rounded-md text-[10px] font-medium border border-cyan-500/30 text-cyan-300 bg-cyan-500/10">
-                                                        حدث موحّد: {insight?.cluster_size}
-                                                    </span>
-                                                )}
-                                                {(insight?.relation_count || 0) > 0 && (
-                                                    <span className="px-2 py-0.5 rounded-md text-[10px] font-medium border border-fuchsia-500/30 text-fuchsia-300 bg-fuchsia-500/10">
-                                                        علاقات: {insight?.relation_count}
-                                                    </span>
-                                                )}
-                                                <span className="text-[10px] text-gray-500 mr-auto flex items-center gap-1">
-                                                    <Clock className="w-3 h-3" />
-                                                    {formatRelativeTime(article.created_at || article.crawled_at)}
-                                                </span>
-                                            </div>
-
-                                            <div className="flex items-start gap-3">
-                                                <div className={cn(
-                                                    'w-12 h-12 rounded-xl flex flex-col items-center justify-center flex-shrink-0',
-                                                    article.importance_score >= 8 ? 'bg-red-500/20 text-red-400' :
-                                                        article.importance_score >= 6 ? 'bg-amber-500/20 text-amber-400' :
-                                                            'bg-gray-500/20 text-gray-400',
-                                                )}>
-                                                    <Star className="w-4 h-4 mb-0.5" />
-                                                    <span className="text-lg font-bold">{article.importance_score}</span>
-                                                </div>
-
-                                                <div className="min-w-0 flex-1">
-                                                    <h3 className="text-xl font-extrabold leading-8 tracking-tight text-white" dir="rtl">
-                                                        {article.title_ar || article.original_title}
-                                                    </h3>
-                                                    <p className="text-xs text-slate-400 mt-1">
-                                                        {article.source_name || '—'}
+                                <div key={article.id} className={cn(freshBreaking && 'ring-1 ring-red-500/30 rounded-2xl')}>
+                                    <WorkflowCard
+                                        title={article.title_ar || article.original_title}
+                                        subtitle={`${article.source_name || '—'} • ${getCategoryLabel(article.category)} • أولوية ${article.importance_score}`}
+                                        statusLabel={getStatusLabel(article.status)}
+                                        chips={[
+                                            ...(freshBreaking ? [{ label: 'عاجل', className: 'border-red-500/30 bg-red-500/10 text-red-200' }] : []),
+                                            { label: getCategoryLabel(article.category), className: categoryColor(article.category) },
+                                            ...((insight?.cluster_size || 0) > 1 ? [{ label: `حدث موحّد: ${insight?.cluster_size}`, className: 'border-cyan-500/30 text-cyan-300 bg-cyan-500/10' }] : []),
+                                            ...((insight?.relation_count || 0) > 0 ? [{ label: `علاقات: ${insight?.relation_count}`, className: 'border-fuchsia-500/30 text-fuchsia-300 bg-fuchsia-500/10' }] : []),
+                                        ]}
+                                        reason={reason}
+                                        nextActionLabel={nextAction.label}
+                                        timestamp={article.created_at || article.crawled_at}
+                                        tone={freshBreaking ? 'danger' : article.importance_score >= 8 ? 'warn' : 'default'}
+                                        primaryAction={{ label: nextAction.label, href: nextAction.href }}
+                                        actions={
+                                            <div className="space-y-3">
+                                                {article.summary && (
+                                                    <p className="text-sm leading-7 text-slate-300" dir="rtl">
+                                                        {truncate(article.summary, 180)}
                                                     </p>
-                                                    {article.summary && (
-                                                        <p className="text-sm mt-2 leading-7 text-slate-300" dir="rtl">
-                                                            {truncate(article.summary, 180)}
-                                                        </p>
-                                                    )}
-                                                    <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-sm text-cyan-100" dir="rtl">
-                                                        لماذا يظهر هنا؟ {reason}
-                                                    </div>
-                                                    <div className="mt-2 text-sm text-emerald-200" dir="rtl">
-                                                        الإجراء التالي: <span className="font-semibold">{nextAction.label}</span>
-                                                    </div>
+                                                )}
+                                                <div className="grid grid-cols-2 gap-2 xl:max-w-[240px]">
+                                                    <a
+                                                        href={article.original_url || '#'}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className={cn(
+                                                            'px-3 py-2 rounded-xl border text-xs transition-colors flex items-center justify-center gap-2',
+                                                            article.original_url
+                                                                ? 'bg-white/5 border-white/10 text-gray-200 hover:text-white hover:border-white/20'
+                                                                : 'bg-white/5 border-white/5 text-gray-500 cursor-not-allowed',
+                                                        )}
+                                                    >
+                                                        <ExternalLink className="w-4 h-4" />
+                                                        المصدر
+                                                    </a>
+                                                    <Link
+                                                        href={`/news/${article.id}`}
+                                                        className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-gray-300 hover:text-white hover:border-white/20 transition-colors flex items-center justify-center"
+                                                    >
+                                                        التفاصيل
+                                                    </Link>
                                                 </div>
-                                            </div>
-                                        </div>
+                                                {isSocialRole && ['ready_for_manual_publish', 'published'].includes(normalizedStatus) && (
+                                                    <button
+                                                        onClick={() => socialVariantsMutation.mutate(article.id)}
+                                                        disabled={socialVariantsMutation.isPending}
+                                                        className="w-full xl:max-w-[240px] px-3 py-2 rounded-xl bg-cyan-500/15 border border-cyan-500/30 text-xs text-cyan-200 hover:bg-cyan-500/25 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                                                    >
+                                                        <Copy className="w-3.5 h-3.5" /> نسخ السوشيال
+                                                    </button>
+                                                )}
+                                                {canUseMultimedia && (
+                                                    <Link
+                                                        href="/services/multimedia"
+                                                        className="block w-full xl:max-w-[240px] px-3 py-2 rounded-xl bg-violet-500/15 border border-violet-500/30 text-xs text-violet-200 hover:bg-violet-500/25 transition-colors text-center"
+                                                    >
+                                                        توليد وسائط
+                                                    </Link>
+                                                )}
+                                                <details className="rounded-xl border border-white/10 bg-black/10 p-3">
+                                                    <summary className="cursor-pointer text-xs text-slate-300 hover:text-white">
+                                                        إجراءات إضافية
+                                                    </summary>
 
-                                        <div className="xl:w-[240px] shrink-0 space-y-2">
-                                            <Link
-                                                href={nextAction.href}
-                                                className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-sm text-emerald-300 hover:bg-emerald-500/25 transition-colors"
-                                            >
-                                                {nextAction.label}
-                                                <ArrowLeft className="w-4 h-4" />
-                                            </Link>
-                                            <div className="grid grid-cols-2 gap-2">
-                                                <a
-                                                    href={article.original_url || '#'}
-                                                    target="_blank"
-                                                    rel="noreferrer"
-                                                    className={cn(
-                                                        'px-3 py-2 rounded-xl border text-xs transition-colors flex items-center justify-center gap-2',
-                                                        article.original_url
-                                                            ? 'bg-white/5 border-white/10 text-gray-200 hover:text-white hover:border-white/20'
-                                                            : 'bg-white/5 border-white/5 text-gray-500 cursor-not-allowed',
-                                                    )}
-                                                >
-                                                    <ExternalLink className="w-4 h-4" />
-                                                    المصدر
-                                                </a>
-                                                <Link
-                                                    href={`/news/${article.id}`}
-                                                    className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-gray-300 hover:text-white hover:border-white/20 transition-colors flex items-center justify-center"
-                                                >
-                                                    التفاصيل
-                                                </Link>
-                                            </div>
-                                            {isSocialRole && ['ready_for_manual_publish', 'published'].includes(normalizedStatus) && (
-                                                <button
-                                                    onClick={() => socialVariantsMutation.mutate(article.id)}
-                                                    disabled={socialVariantsMutation.isPending}
-                                                    className="w-full px-3 py-2 rounded-xl bg-cyan-500/15 border border-cyan-500/30 text-xs text-cyan-200 hover:bg-cyan-500/25 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-                                                >
-                                                    <Copy className="w-3.5 h-3.5" /> نسخ السوشيال
-                                                </button>
-                                            )}
-                                            {canUseMultimedia && (
-                                                <Link
-                                                    href="/services/multimedia"
-                                                    className="block w-full px-3 py-2 rounded-xl bg-violet-500/15 border border-violet-500/30 text-xs text-violet-200 hover:bg-violet-500/25 transition-colors text-center"
-                                                >
-                                                    توليد وسائط
-                                                </Link>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    <details className="mt-4 rounded-xl border border-white/10 bg-black/10 p-3">
-                                        <summary className="cursor-pointer text-xs text-slate-300 hover:text-white">
-                                            إجراءات إضافية
-                                        </summary>
-
-                                        <div className="mt-3 space-y-3">
-                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                                                    <div className="mt-3 space-y-3">
+                                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                                                 <button
                                                     onClick={() => {
                                                         if (typeof window !== 'undefined' && !window.confirm('تأكيد الموافقة على الخبر؟')) {
@@ -860,7 +802,7 @@ function NewsPageContent() {
                                                 </div>
                                             )}
 
-                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                                                 <button
                                                     onClick={() => processMutation.mutate({ articleId: article.id, action: 'summarize' })}
                                                     disabled={processMutation.isPending || !canProcess}
@@ -897,9 +839,12 @@ function NewsPageContent() {
                                                 >
                                                     تحقق
                                                 </button>
+                                                        </div>
+                                                    </div>
+                                                </details>
                                             </div>
-                                        </div>
-                                    </details>
+                                        }
+                                    />
                                 </div>
                             );
                         })}
