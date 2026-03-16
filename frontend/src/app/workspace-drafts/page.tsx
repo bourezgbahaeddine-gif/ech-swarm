@@ -46,6 +46,9 @@ import {
 import { constitutionApi } from '@/lib/constitution-api';
 import { useAuth } from '@/lib/auth';
 import { cn, formatRelativeTime, truncate } from '@/lib/utils';
+import { WorkflowHelpPanel } from '@/components/workflow/WorkflowHelpPanel';
+import { RoleOnboardingBanner } from '@/components/workflow/RoleOnboardingBanner';
+import { workflowText } from '@/lib/workflow-language';
 
 type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
 type RightTab = 'evidence' | 'proofread' | 'quality' | 'seo' | 'social' | 'context' | 'msi' | 'simulator' | 'xray';
@@ -2443,6 +2446,26 @@ function WorkspaceDraftsPageContent() {
     return (
         <div className="space-y-4">
             <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4">
+                <RoleOnboardingBanner
+                    storageKey={`ech_workspace_onboarding_v1_${(user?.role || 'guest').toLowerCase()}`}
+                    title="كيف تبدأ داخل المحرر؟"
+                    description="المحرر الآن يعمل بثلاثة أوضاع بسيطة. ابدأ بوضع الكتابة، ثم افتح التحسين أو التحليل فقط إذا احتجت ذلك."
+                    steps={[
+                        {
+                            title: 'اكتب وأنهِ',
+                            description: 'اكتب النص، شغّل الفحص السريع، ثم أرسل لاعتماد رئيس التحرير.',
+                        },
+                        {
+                            title: 'حسّن أكثر',
+                            description: 'افتح أدوات التحقق، التدقيق، الجودة، SEO، والسوشيال عندما تحتاج رفع النسخة.',
+                        },
+                        {
+                            title: 'تحليل متقدم',
+                            description: 'استخدم المحاكي وMSI وزوايا المنافسين فقط عند الحاجة إلى مراجعة أعمق.',
+                        },
+                    ]}
+                />
+
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                         <h1 className="text-xl font-semibold text-white">المحرر الذكي لغرفة الشروق</h1>
@@ -2628,6 +2651,27 @@ function WorkspaceDraftsPageContent() {
                                 ? 'هذا الوضع يفتح أدوات التحسين العملية: التحقق، التدقيق، الجودة، SEO، والسوشيال.'
                                 : 'هذا الوضع مخصص للمراجعة العميقة: التفسير، محاكاة التفاعل، MSI، وزوايا المنافسين.'}
                     </div>
+                    <WorkflowHelpPanel
+                        title="كيف نستخدم هذا المحرر؟"
+                        items={[
+                            {
+                                title: workflowText.nextActionLabel,
+                                description: 'ابدأ بالزر المقترح في الشريط العلوي؛ هو أقصر طريق للتقدم داخل المسار الحالي.',
+                            },
+                            {
+                                title: 'الوضع الحالي',
+                                description: isWriteMode
+                                    ? 'أنت الآن في وضع تنفيذ سريع: كتابة + فحص + إرسال.'
+                                    : isImproveMode
+                                      ? 'أنت الآن في وضع تحسين: افتح أدوات الجودة والتحقق عند الحاجة.'
+                                      : 'أنت الآن في وضع تحليل متقدم: استخدمه فقط عندما تحتاج فحصًا أعمق.',
+                            },
+                            {
+                                title: workflowText.blockersLabel,
+                                description: 'إذا ظهرت موانع حرجة، عالجها أولًا أو استخدم إرسال بتحفظ فقط عند الضرورة التحريرية.',
+                            },
+                        ]}
+                    />
                     {detailsOpen && nextAction.description && (
                         <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-[11px] text-gray-300">
                             {nextAction.description}

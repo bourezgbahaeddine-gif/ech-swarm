@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import { WorkflowCard, WorkflowSection, type WorkflowTone } from '@/components/workflow/WorkflowCard';
 import { WorkflowHelpPanel } from '@/components/workflow/WorkflowHelpPanel';
 import { getWorkflowStatusLabel } from '@/lib/workflow-language';
+import { RoleOnboardingBanner } from '@/components/workflow/RoleOnboardingBanner';
 
 type Role =
     | 'director'
@@ -477,6 +478,29 @@ export default function TodayPage() {
 
     return (
         <div className="space-y-6" dir="rtl">
+            <RoleOnboardingBanner
+                storageKey={`ech_today_onboarding_v1_${role || 'guest'}`}
+                title={isChiefFlow ? 'ابدأ يومك من هنا كرئيس تحرير' : 'ابدأ يومك من هنا كصحفي'}
+                description={
+                    isChiefFlow
+                        ? 'هذه الصفحة ليست dashboard عامة؛ هي طابور قرارك اليومي. ابدأ من المواد التي دخلت نطاقك الآن ثم تحرك إلى ما يليه.'
+                        : 'هذه الصفحة ليست قائمة لكل شيء؛ هي نقطة البداية اليومية. ابدأ بما دخل نطاقك الآن ثم اتبع الإجراء التالي المقترح.'
+                }
+                steps={
+                    isChiefFlow
+                        ? [
+                              { title: '1. احسم العاجل', description: 'ابدأ بالمواد التي دخلت مرحلة الاعتماد النهائي أو تحمل مخاطر عالية.' },
+                              { title: '2. تابع التحفظات', description: 'راجع ما عاد بتحفظات حتى لا يبقى عالقًا بين التحرير والاعتماد.' },
+                              { title: '3. راجع الجاهز للنشر', description: 'بعد الحسم، انتقل إلى المواد الجاهزة للنشر اليدوي أو التسليم.' },
+                          ]
+                        : [
+                              { title: '1. ابدأ الآن', description: 'خذ المواد التي ظهرت في طابورك الآن، خصوصًا العاجلة أو العائدة من الاعتماد.' },
+                              { title: '2. نفّذ الإجراء التالي', description: 'افتح المحرر أو طابور الأخبار من الزر الرئيسي بدل البحث بين الصفحات.' },
+                              { title: '3. راقب ما يعوق التقدم', description: 'إذا ظهرت مادة متأخرة أو متحفظ عليها، تعامل معها قبل أن تتعطل.' },
+                          ]
+                }
+            />
+
             <div className="flex items-start justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-white inline-flex items-center gap-2">
