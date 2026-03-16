@@ -16,6 +16,8 @@ import {
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 import { WorkflowCard, WorkflowSection, type WorkflowTone } from '@/components/workflow/WorkflowCard';
+import { WorkflowHelpPanel } from '@/components/workflow/WorkflowHelpPanel';
+import { getWorkflowStatusLabel } from '@/lib/workflow-language';
 
 type Role =
     | 'director'
@@ -93,7 +95,7 @@ function articleToQueueItem(
     return {
         id: `article-${article.id}-${article.status}`,
         title: articleTitle(article),
-        subtitle: `${article.source_name || 'بدون مصدر ظاهر'} · ${article.status || 'غير محدد'}`,
+        subtitle: `${article.source_name || 'بدون مصدر ظاهر'} · ${getWorkflowStatusLabel(article.status)}`,
         workflowLabel: config.workflowLabel,
         reason: config.reason,
         nextAction: config.nextAction,
@@ -124,7 +126,7 @@ function chiefItemToQueueItem(
     return {
         id: `chief-${item.id}-${item.status || 'unknown'}`,
         title: item.title_ar || item.original_title || `مادة #${item.id}`,
-        subtitle: `${item.source_name || 'بدون مصدر ظاهر'} · ${item.status || 'بانتظار القرار'}`,
+        subtitle: `${item.source_name || 'بدون مصدر ظاهر'} · ${getWorkflowStatusLabel(item.status || 'ready_for_chief_approval')}`,
         workflowLabel: config?.workflowLabel || 'بانتظار اعتماد رئيس التحرير',
         reason:
             config?.reason ||
@@ -528,7 +530,7 @@ export default function TodayPage() {
                                         key={item.id}
                                         title={item.title}
                                         subtitle={item.subtitle}
-                                        statusLabel={item.status}
+                                        statusLabel={getWorkflowStatusLabel(item.status)}
                                         chips={[{ label: item.workflowLabel }]}
                                         reason={item.reason}
                                         nextActionLabel={item.nextAction}
@@ -556,7 +558,7 @@ export default function TodayPage() {
                                         key={item.id}
                                         title={item.title}
                                         subtitle={item.subtitle}
-                                        statusLabel={item.status}
+                                        statusLabel={getWorkflowStatusLabel(item.status)}
                                         chips={[{ label: item.workflowLabel }]}
                                         reason={item.reason}
                                         nextActionLabel={item.nextAction}
@@ -584,7 +586,7 @@ export default function TodayPage() {
                                         key={item.id}
                                         title={item.title}
                                         subtitle={item.subtitle}
-                                        statusLabel={item.status}
+                                        statusLabel={getWorkflowStatusLabel(item.status)}
                                         chips={[{ label: item.workflowLabel }]}
                                         reason={item.reason}
                                         nextActionLabel={item.nextAction}
@@ -600,23 +602,23 @@ export default function TodayPage() {
                 </div>
             )}
 
-            <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
-                <h2 className="text-sm font-semibold text-white mb-2">كيف نقرأ هذه الصفحة؟</h2>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-300">
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-                        <div className="font-semibold text-white mb-1">ما الذي دخل نطاقي؟</div>
-                        <div>كل بطاقة مرتبطة بحالة حقيقية في الـ workflow مثل draft_generated أو ready_for_manual_publish أو بانتظار الاعتماد.</div>
-                    </div>
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-                        <div className="font-semibold text-white mb-1">لماذا ظهرت لي؟</div>
-                        <div>كل عنصر يشرح سبب ظهوره الآن حتى لا نترك المستخدم يفسّر الحالة بنفسه أو يضيع بين الصفحات.</div>
-                    </div>
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-                        <div className="font-semibold text-white mb-1">ما الذي يمنع التقدم؟</div>
-                        <div>العناصر المتأخرة أو التي تحمل تحفظات أو عوائق تظهر منفصلة حتى لا تضيع داخل القوائم العامة.</div>
-                    </div>
-                </div>
-            </div>
+            <WorkflowHelpPanel
+                title="كيف نقرأ هذه الصفحة؟"
+                items={[
+                    {
+                        title: 'ما الذي دخل نطاقي؟',
+                        description: 'كل بطاقة مرتبطة بحالة حقيقية في المسار مثل مسودة جاهزة للتحرير أو جاهز للنشر اليدوي أو بانتظار الاعتماد.',
+                    },
+                    {
+                        title: 'لماذا ظهرت لي؟',
+                        description: 'كل عنصر يشرح سبب ظهوره الآن حتى لا نترك المستخدم يفسّر الحالة بنفسه أو يضيع بين الصفحات.',
+                    },
+                    {
+                        title: 'ما الذي يمنع التقدم؟',
+                        description: 'العناصر المتأخرة أو التي تحمل تحفظات أو عوائق تظهر منفصلة حتى لا تضيع داخل القوائم العامة.',
+                    },
+                ]}
+            />
         </div>
     );
 }

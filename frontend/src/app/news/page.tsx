@@ -9,6 +9,8 @@ import { newsApi, dashboardApi, editorialApi, type ArticleBrief, type DashboardN
 import { cn, formatRelativeTime, getStatusColor, getCategoryLabel, isFreshBreaking, truncate } from '@/lib/utils';
 import { useAuth } from '@/lib/auth';
 import { WorkflowCard } from '@/components/workflow/WorkflowCard';
+import { WorkflowHelpPanel } from '@/components/workflow/WorkflowHelpPanel';
+import { getWorkflowStatusLabel } from '@/lib/workflow-language';
 import {
     Newspaper, Search, ExternalLink,
     ChevronLeft, ChevronRight,
@@ -649,7 +651,7 @@ function NewsPageContent() {
                                     <WorkflowCard
                                         title={article.title_ar || article.original_title}
                                         subtitle={`${article.source_name || '—'} • ${getCategoryLabel(article.category)} • أولوية ${article.importance_score}`}
-                                        statusLabel={getStatusLabel(article.status)}
+                                        statusLabel={getWorkflowStatusLabel(article.status) || getStatusLabel(article.status)}
                                         chips={[
                                             ...(freshBreaking ? [{ label: 'عاجل', className: 'border-red-500/30 bg-red-500/10 text-red-200' }] : []),
                                             { label: getCategoryLabel(article.category), className: categoryColor(article.category) },
@@ -1001,6 +1003,24 @@ function NewsPageContent() {
                     </div>
                 </div>
             )}
+
+            <WorkflowHelpPanel
+                title="كيف نستخدم طابور الأخبار؟"
+                items={[
+                    {
+                        title: 'لماذا يظهر هنا؟',
+                        description: 'كل خبر يوضح سبب ظهوره في الطابور: عاجل، مرشح جديد، جاهز للاعتماد، أو مرتبط بحدث موحّد.',
+                    },
+                    {
+                        title: 'الإجراء التالي',
+                        description: 'ابدأ دائمًا بالزر الرئيسي المقترح، ثم استخدم الإجراءات الإضافية فقط عند الحاجة.',
+                    },
+                    {
+                        title: 'إجراءات إضافية',
+                        description: 'الترجمة، التلخيص، التحقق، والقرارات التحريرية بقيت موجودة لكنها لا تزاحم السطح الأول.',
+                    },
+                ]}
+            />
         </div>
     );
 }

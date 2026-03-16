@@ -16,6 +16,8 @@ import { formatRelativeTime, getCategoryLabel, truncate } from '@/lib/utils';
 import { useAuth } from '@/lib/auth';
 import { AlertTriangle, CheckCircle2, RotateCcw, Send, ShieldCheck } from 'lucide-react';
 import { WorkflowCard } from '@/components/workflow/WorkflowCard';
+import { WorkflowHelpPanel } from '@/components/workflow/WorkflowHelpPanel';
+import { getWorkflowStatusLabel } from '@/lib/workflow-language';
 
 type EditorialTabKey = 'pending' | 'returned' | 'reservations' | 'manual';
 
@@ -290,7 +292,7 @@ export default function EditorialPage() {
                 key={item.id}
                 title={item.title_ar || item.original_title}
                 subtitle={`${item.source_name || 'بدون مصدر'} • ${getCategoryLabel(item.category)}`}
-                statusLabel={item.status || 'ready_for_chief_approval'}
+                statusLabel={getWorkflowStatusLabel(item.status || 'ready_for_chief_approval')}
                 chips={[
                     {
                         label: hasReservations ? 'تحفظات معلقة' : 'قرار نهائي مطلوب',
@@ -339,7 +341,7 @@ export default function EditorialPage() {
                 key={article.id}
                 title={article.title_ar || article.original_title}
                 subtitle={`${article.source_name || 'بدون مصدر'} • ${getCategoryLabel(article.category)} • ${formatRelativeTime(article.created_at || article.crawled_at)}`}
-                statusLabel={article.status}
+                statusLabel={getWorkflowStatusLabel(article.status)}
                 chips={article.is_breaking ? [{ label: 'عاجل', className: 'border-red-500/30 bg-red-500/10 text-red-200' }] : []}
                 reason={getArticleReason(article)}
                 nextActionLabel={action.label}
@@ -373,7 +375,7 @@ export default function EditorialPage() {
             key={item.article_id}
             title={item.title}
             subtitle={`${item.source_name || 'بدون مصدر'} • ${formatRelativeTime(item.updated_at)}`}
-            statusLabel="ready_for_manual_publish"
+            statusLabel={getWorkflowStatusLabel('ready_for_manual_publish')}
             chips={[{ label: 'جاهز للتغطية الرقمية', className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200' }]}
             reason="المادة معتمدة وجاهزة للاستخدام الرقمي أو النسخ لمنصات النشر."
             nextActionLabel="نسخ النسخ الجاهزة"
@@ -489,6 +491,24 @@ export default function EditorialPage() {
             <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 text-xs text-gray-300" dir="rtl">
                 <p className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-emerald-300" /> السياسة التشغيلية: لا يوجد نشر تلقائي. كل مادة تمر عبر الاعتماد التحريري ثم تصبح جاهزة للنشر اليدوي فقط بعد اجتياز البوابة.</p>
             </div>
+
+            <WorkflowHelpPanel
+                title="كيف نستخدم الاعتماد والمراجعة؟"
+                items={[
+                    {
+                        title: 'بانتظار الاعتماد',
+                        description: 'مواد دخلت القرار النهائي عند رئيس التحرير، ولا تنتقل للنشر إلا بعد الحسم.',
+                    },
+                    {
+                        title: 'عاد للمراجعة',
+                        description: 'مواد رجعت إلى التحرير وتحتاج استكمالًا أو إعادة إرسال قبل العودة للاعتماد.',
+                    },
+                    {
+                        title: 'جاهز للنشر اليدوي',
+                        description: 'مواد اجتازت البوابة التحريرية وأصبحت جاهزة للتسليم أو النشر اليدوي فقط.',
+                    },
+                ]}
+            />
         </div>
     );
 }

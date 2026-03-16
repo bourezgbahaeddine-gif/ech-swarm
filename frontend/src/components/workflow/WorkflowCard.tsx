@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowLeft, Clock3 } from 'lucide-react';
 
 import { cn, formatRelativeTime, getStatusColor, truncate } from '@/lib/utils';
+import { workflowText } from '@/lib/workflow-language';
 
 export type WorkflowTone = 'default' | 'warn' | 'danger' | 'success';
 
@@ -77,7 +78,7 @@ export function WorkflowCard({
 
                     <div className="mt-3 text-sm text-slate-200 leading-6">{truncate(reason, 190)}</div>
                     <div className="mt-2 text-xs text-cyan-200">
-                        الإجراء التالي: <span className="font-semibold">{nextActionLabel}</span>
+                        {workflowText.nextActionLabel}: <span className="font-semibold">{nextActionLabel}</span>
                     </div>
 
                     {blockers.length > 0 && (

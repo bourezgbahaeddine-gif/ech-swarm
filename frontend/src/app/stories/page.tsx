@@ -26,6 +26,8 @@ import {
 } from '@/lib/api';
 import { cn, formatRelativeTime } from '@/lib/utils';
 import { WorkflowCard, WorkflowSection } from '@/components/workflow/WorkflowCard';
+import { WorkflowHelpPanel } from '@/components/workflow/WorkflowHelpPanel';
+import { getWorkflowStatusLabel } from '@/lib/workflow-language';
 
 export default function StoriesPage() {
     const router = useRouter();
@@ -313,6 +315,24 @@ export default function StoriesPage() {
             {selectedStoryId && (
                 <StoryControlCenterDrawer storyId={selectedStoryId} onClose={() => setSelectedStoryId(null)} />
             )}
+
+            <WorkflowHelpPanel
+                title="كيف نستخدم متابعة القصص؟"
+                items={[
+                    {
+                        title: 'قصص نشطة',
+                        description: 'قصة فيها نشاط حديث أو متابعة جارية، وغالبًا تحتاج استمرارًا منظمًا لا إعادة اكتشاف كاملة.',
+                    },
+                    {
+                        title: 'تحتاج تحديثًا',
+                        description: 'قصة دخلت طور المتابعة لكنها تحتاج دفعة جديدة أو سد فجوة قبل أن تبرد.',
+                    },
+                    {
+                        title: 'تحتاج زاوية جديدة',
+                        description: 'القصة جمعت مواد كافية، لكن قيمتها الآن في زاوية جديدة أو معالجة أعمق.',
+                    },
+                ]}
+            />
         </div>
     );
 }
@@ -478,7 +498,7 @@ function StoryQueuesSection({
                                     key={`desk-row-${story.id}`}
                                     title={story.title}
                                     subtitle={`${story.story_key} • ${story.category || 'غير مصنف'}`}
-                                    statusLabel={story.status}
+                                    statusLabel={getWorkflowStatusLabel(story.status)}
                                     chips={[{ label: classifyStoryQueueLabel(story) }]}
                                     reason={storyQueueReason(story)}
                                     nextActionLabel={storyNextActionLabel(story)}
@@ -548,7 +568,7 @@ function StoryQueueCard({
                             key={`${title}-${story.id}`}
                             title={story.title}
                             subtitle={`${story.story_key} • ${story.category || 'غير مصنف'}`}
-                            statusLabel={story.status}
+                            statusLabel={getWorkflowStatusLabel(story.status)}
                             chips={[{ label: title, className: toneClasses }]}
                             reason={storyQueueReason(story)}
                             nextActionLabel={storyNextActionLabel(story)}
