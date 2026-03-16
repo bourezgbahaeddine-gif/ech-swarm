@@ -48,7 +48,6 @@ import { useAuth } from '@/lib/auth';
 import { cn, formatRelativeTime, truncate } from '@/lib/utils';
 import { WorkflowHelpPanel } from '@/components/workflow/WorkflowHelpPanel';
 import { RoleOnboardingBanner } from '@/components/workflow/RoleOnboardingBanner';
-import { workflowText } from '@/lib/workflow-language';
 import { trackNextAction, trackUiAction, useTrackSurfaceView } from '@/lib/ux-telemetry';
 
 type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
@@ -125,21 +124,93 @@ const TABS: Array<{ id: RightTab; label: string }> = [
 const HELP_KEY = 'smart_editor_help_seen_v1';
 const ACTION_HELP_PREFIX = 'smart_editor_action_help_seen_v1_';
 
-const ACTION_HELP: Record<ActionId, { title: string; description: string }> = {
-    quick_check: { title: 'زر الفحص السريع', description: 'يشغل التحقق + الجودة + بوابة النشر دفعة واحدة ليعطيك حالة جاهزية سريعة.' },
-    verify: { title: 'زر التحقق', description: 'يستخرج الادعاءات ويعرض درجة الثقة قبل النشر.' },
-    proofread: { title: 'زر التدقيق اللغوي', description: 'يصحح الإملاء والنحو والترقيم ويعرض الفروقات قبل اعتماد النسخة.' },
-    improve: { title: 'زر التحسين', description: 'يولد اقتراح تحسين كفرق (Diff) قابل للقبول أو الرفض.' },
-    headlines: { title: 'زر العناوين', description: 'يولد 5 عناوين متنوعة للاستخدام التحريري.' },
-    seo: { title: 'زر SEO', description: 'يولد عنوان SEO والوصف والكلمات المفتاحية والوسوم.' },
-    links: { title: 'زر الروابط', description: 'يقترح روابط داخلية وخارجية موثوقة يمكن إدراجها في المسودة بنقرة واحدة.' },
-    social: { title: 'زر السوشيال', description: 'ينشئ نسخ Facebook وX وPush والتنبيه العاجل.' },
-    quality: { title: 'زر الجودة', description: 'يقيم وضوح وبنية وحياد النص مع توصيات عملية.' },
-    publish_gate: { title: 'زر بوابة النشر', description: 'يفحص الجاهزية النهائية ويمنع النشر عند وجود موانع.' },
-    apply: { title: 'زر إرسال الاعتماد', description: 'يرسل النسخة النهائية إلى رئيس التحرير بعد فحص وكيل السياسة التحريرية.' },
-    save: { title: 'زر الحفظ', description: 'يحفظ التعديلات فورياً ويحدّث النسخ.' },
-    manual_draft: { title: 'زر مسودة جديدة', description: 'ينشئ مسودة خاصة لموضوع غير وارد من المصادر الآلية.' },
-    audience_test: { title: 'زر محاكي الجمهور', description: 'يحاكي ردود الجمهور المتوقعة ويعرض مخاطر المحتوى وقابلية الانتشار قبل الاعتماد.' },
+const ACTION_HELP: Record<ActionId, { title: string; description: string; when: string; after: string; caution?: string }> = {
+    quick_check: {
+        title: 'زر الفحص السريع',
+        description: 'يشغل التحقق + الجودة + بوابة النشر دفعة واحدة ليعطيك حالة جاهزية سريعة.',
+        when: 'استخدمه عندما تريد صورة سريعة عمّا ينقص النص قبل الإرسال أو قبل الدخول في تفاصيل كثيرة.',
+        after: 'بعده ستعرف إن كان المطلوب هو تحقق، أو تدقيق، أو معالجة مانع نشر، أو أن النص جاهز للمرحلة التالية.',
+    },
+    verify: {
+        title: 'زر التحقق',
+        description: 'يستخرج الادعاءات ويعرض درجة الثقة قبل النشر.',
+        when: 'استخدمه عندما يحتوي النص على أرقام، اتهامات، تصريحات، أو معلومة قد تسبب خطأ تحريريًا.',
+        after: 'بعده راجع الادعاءات الحرجة أولاً ثم عد إلى الجودة أو الإرسال.',
+        caution: 'لا تعتبر غياب الادعاءات موافقة تلقائية على النشر؛ راجع السياق أيضًا.',
+    },
+    proofread: {
+        title: 'زر التدقيق اللغوي',
+        description: 'يصحح الإملاء والنحو والترقيم ويعرض الفروقات قبل اعتماد النسخة.',
+        when: 'استخدمه قبل الإرسال النهائي أو عندما تشعر أن النص جيد مضمونًا لكنه يحتاج صقلًا لغويًا.',
+        after: 'بعده راجع الفروقات بسرعة ثم احفظ أو أرسل للاعتماد.',
+    },
+    improve: {
+        title: 'زر التحسين',
+        description: 'يولد اقتراح تحسين كفرق (Diff) قابل للقبول أو الرفض.',
+        when: 'استخدمه عندما يكون النص مكتوبًا لكن يحتاج وضوحًا أو اختصارًا أو ترتيبًا أفضل.',
+        after: 'بعده قارن بين قبل/بعد، ثم اعتمد التحسين أو ارفضه وواصل العمل.',
+    },
+    headlines: {
+        title: 'زر العناوين',
+        description: 'يولد 5 عناوين متنوعة للاستخدام التحريري.',
+        when: 'استخدمه عندما يكون المتن جاهزًا نسبيًا وتحتاج عنوانًا أقوى أو أكثر دقة.',
+        after: 'بعده اختر أفضل عنوان وراجعه يدويًا قبل الاعتماد.',
+    },
+    seo: {
+        title: 'زر SEO',
+        description: 'يولد عنوان SEO والوصف والكلمات المفتاحية والوسوم.',
+        when: 'استخدمه عندما تكون النسخة شبه نهائية وتريد تجهيزها للنشر الرقمي ومحركات البحث.',
+        after: 'بعده راجع الملخص والكلمات المفتاحية ثم انتقل إلى الروابط أو السوشيال عند الحاجة.',
+    },
+    links: {
+        title: 'زر الروابط',
+        description: 'يقترح روابط داخلية وخارجية موثوقة يمكن إدراجها في المسودة بنقرة واحدة.',
+        when: 'استخدمه عندما يكون الخبر بحاجة إلى سياق إضافي أو مواد أرشيفية داعمة.',
+        after: 'بعده اختر الروابط الأكثر فائدة ثم احفظ النسخة.',
+    },
+    social: {
+        title: 'زر السوشيال',
+        description: 'ينشئ نسخ Facebook وX وPush والتنبيه العاجل.',
+        when: 'استخدمه عندما تقترب النسخة من الاكتمال وتريد تجهيز التسليم إلى الديجيتال.',
+        after: 'بعده راجع النسخ المقترحة أو انسخها إلى مسار النشر الرقمي.',
+    },
+    quality: {
+        title: 'زر الجودة',
+        description: 'يقيم وضوح وبنية وحياد النص مع توصيات عملية.',
+        when: 'استخدمه عندما تريد معرفة هل النص واضح ومتوازن قبل إرساله أو نشره.',
+        after: 'بعده عالج الملاحظات الأعلى أثرًا ثم أعد الفحص السريع أو التدقيق.',
+    },
+    publish_gate: {
+        title: 'زر بوابة النشر',
+        description: 'يفحص الجاهزية النهائية ويمنع النشر عند وجود موانع.',
+        when: 'استخدمه قبل إرسال النسخة للاعتماد أو عندما تريد التأكد أن لا توجد موانع حرجة.',
+        after: 'إذا أصبح النص جاهزًا فانتقل إلى الإرسال، وإذا ظهرت موانع فابدأ بعلاج أول مانع ظاهر.',
+        caution: 'لا تتجاوز الموانع إلا إذا كانت هناك ضرورة تحريرية واضحة ومعللة.',
+    },
+    apply: {
+        title: 'زر إرسال الاعتماد',
+        description: 'يرسل النسخة النهائية إلى رئيس التحرير بعد فحص وكيل السياسة التحريرية.',
+        when: 'استخدمه عندما تكون النسخة مكتملة ومراجعة، أو عندما قررت إرسالها بتحفظات مبررة.',
+        after: 'بعده تنتقل المادة إلى طابور الاعتماد، ويمكنك العودة إذا طلبت ملاحظات إضافية.',
+    },
+    save: {
+        title: 'زر الحفظ',
+        description: 'يحفظ التعديلات فورياً ويحدّث النسخ.',
+        when: 'استخدمه بعد أي تعديل مهم أو قبل الانتقال بين الأوضاع إذا أردت حفظ النسخة الحالية.',
+        after: 'بعده تبقى النسخة محفوظة ويمكنك المتابعة بأمان أو مقارنة النسخ لاحقًا.',
+    },
+    manual_draft: {
+        title: 'زر مسودة جديدة',
+        description: 'ينشئ مسودة خاصة لموضوع غير وارد من المصادر الآلية.',
+        when: 'استخدمه عندما تريد بدء موضوع خاص من الصفر بدل فتح خبر وارد من النظام.',
+        after: 'بعده ستدخل إلى نفس مسار الكتابة والفحص ثم الإرسال للاعتماد.',
+    },
+    audience_test: {
+        title: 'زر محاكي الجمهور',
+        description: 'يحاكي ردود الجمهور المتوقعة ويعرض مخاطر المحتوى وقابلية الانتشار قبل الاعتماد.',
+        when: 'استخدمه فقط إذا احتجت قراءة أعمق للمخاطر أو التفاعل المتوقع قبل الاعتماد.',
+        after: 'بعده قرر إن كنت تحتاج تعديل العنوان أو النبرة أو زاوية التقديم.',
+    },
 };
 
 const ACTION_SOURCE_LABELS: Record<DecisionActionId, string> = {
@@ -656,6 +727,10 @@ function classifyClaimSource(text: string): { label: string; reason: string; sev
 
 function actionKey(action: ActionId): string {
     return `${ACTION_HELP_PREFIX}${action}`;
+}
+
+function actionLabel(action: ActionId): string {
+    return ACTION_HELP[action].title.replace(/^زر /, '');
 }
 
 function workflowDot(status: 'done' | 'warn' | 'pending'): string {
@@ -1531,6 +1606,7 @@ function WorkspaceDraftsPageContent() {
             return {
                 label: `التالي: ${primary.title}`,
                 description: primary.reason,
+                actionId: primary.action as ActionId,
                 severity: primary.severity,
                 handler: decisionActionHandlers[primary.action],
             };
@@ -1538,6 +1614,7 @@ function WorkspaceDraftsPageContent() {
         return {
             label: 'تشغيل فحص سريع',
             description: 'لا توجد ملاحظات ظاهرة الآن. شغّل الفحص للتأكيد.',
+            actionId: 'quick_check' as ActionId,
             severity: 'low' as DecisionSeverity,
             handler: decisionActionHandlers.quick_check,
         };
@@ -1568,6 +1645,116 @@ function WorkspaceDraftsPageContent() {
     }, [readiness, claims, quality]);
 
     const bodyText = useMemo(() => htmlToReadableText(bodyHtml || ''), [bodyHtml]);
+
+    const nextActionHelp = useMemo(() => ACTION_HELP[nextAction.actionId], [nextAction.actionId]);
+
+    const editorChecklist = useMemo(() => {
+        const hasDraftBody = bodyText.trim().length >= 240;
+        const hasQuickCheckSignal = Boolean(readiness || quality || proofread || claims.length > 0);
+        const isReadyForApproval = Boolean(readiness?.ready_for_publish) && blockerSummary.count === 0;
+
+        if (isWriteMode) {
+            return [
+                {
+                    id: 'write_body',
+                    title: 'أكمل النص الأساسي',
+                    hint: hasDraftBody ? 'يوجد متن كافٍ للانتقال إلى الفحص.' : 'اكتب أو راجع المتن حتى يصبح واضحًا ومتماسكًا.',
+                    status: hasDraftBody ? 'done' : 'current',
+                },
+                {
+                    id: 'quick_check',
+                    title: 'شغّل الفحص السريع',
+                    hint: hasQuickCheckSignal ? 'ظهرت لك قراءة أولية للجودة والجاهزية.' : 'الفحص السريع سيعطيك أقصر طريق لمعرفة ما ينقص النص.',
+                    status: hasQuickCheckSignal ? 'done' : hasDraftBody ? 'current' : 'upcoming',
+                },
+                {
+                    id: 'send_to_chief',
+                    title: 'أرسل لاعتماد رئيس التحرير',
+                    hint: isReadyForApproval ? 'النسخة جاهزة للإرسال بعد المراجعة البشرية.' : 'لا تنتقل إلى الإرسال قبل معالجة الموانع الحرجة.',
+                    status: isReadyForApproval ? 'current' : 'upcoming',
+                },
+            ];
+        }
+
+        if (isImproveMode) {
+            return [
+                {
+                    id: 'resolve_blockers',
+                    title: 'عالج أول مانع مهم',
+                    hint: blockerSummary.count > 0 ? `يوجد ${blockerSummary.count} مانع/ملاحظة عالية الأولوية.` : 'لا توجد موانع حرجة ظاهرة الآن.',
+                    status: blockerSummary.count === 0 ? 'done' : 'current',
+                },
+                {
+                    id: 'run_best_tool',
+                    title: `نفّذ ${actionLabel(nextAction.actionId)}`,
+                    hint: nextActionHelp.after,
+                    status: blockerSummary.count === 0 ? 'current' : 'upcoming',
+                },
+                {
+                    id: 'recheck_send',
+                    title: 'راجع ثم أرسل',
+                    hint: 'بعد التحسين، أعد الفحص السريع أو بوابة النشر ثم انتقل إلى الإرسال.',
+                    status: isReadyForApproval ? 'current' : 'upcoming',
+                },
+            ];
+        }
+
+        const hasAdvancedSignal = Boolean(simResult) || xrayItems.length > 0 || msiTopDaily.length > 0 || msiTopWeekly.length > 0;
+        return [
+            {
+                id: 'choose_depth',
+                title: 'استخدم التحليل المتقدم عند الحاجة فقط',
+                hint: 'هذا الوضع مفيد للقرار التحريري العميق، لا لكل مادة يومية.',
+                status: 'done',
+            },
+            {
+                id: 'run_advanced',
+                title: `نفّذ ${actionLabel(nextAction.actionId)}`,
+                hint: hasAdvancedSignal ? 'بدأت تتوفر لديك إشارات تحليلية أعمق.' : nextActionHelp.after,
+                status: 'current',
+            },
+            {
+                id: 'return_to_flow',
+                title: 'عد إلى التحسين أو الإرسال',
+                hint: 'بعد التحليل المتقدم، خذ قرارًا عمليًا: عد إلى التحسين أو أرسل النسخة.',
+                status: 'upcoming',
+            },
+        ];
+    }, [
+        blockerSummary.count,
+        bodyText,
+        claims.length,
+        isImproveMode,
+        isWriteMode,
+        msiTopDaily.length,
+        msiTopWeekly.length,
+        nextAction.actionId,
+        nextActionHelp.after,
+        proofread,
+        quality,
+        readiness,
+        simResult,
+        xrayItems.length,
+    ]);
+
+    const contextualGuideItems = useMemo(
+        () => [
+            {
+                title: 'ما الذي أفعله الآن؟',
+                description: nextActionHelp.when,
+            },
+            {
+                title: 'لماذا هذه الخطوة؟',
+                description: nextAction.description,
+            },
+            {
+                title: 'ماذا بعد هذه الخطوة؟',
+                description: nextActionHelp.after,
+            },
+        ],
+        [nextAction.description, nextActionHelp.after, nextActionHelp.when],
+    );
+
     const storyTimelineFromContext = useMemo(
         () => (context?.story_context?.timeline || []) as StoryContextItem[],
         [context?.story_context?.timeline]
@@ -2336,6 +2523,12 @@ function WorkspaceDraftsPageContent() {
         setGuideOpen(true);
     }
 
+    function openActionGuide(action: ActionId) {
+        setGuideType('action');
+        setGuideAction(action);
+        setGuideOpen(true);
+    }
+
     function closeGuide() {
         setGuideOpen(false);
         setGuideAction(null);
@@ -2678,37 +2871,87 @@ function WorkspaceDraftsPageContent() {
                                 ? 'هذا الوضع يفتح أدوات التحسين العملية: التحقق، التدقيق، الجودة، SEO، والسوشيال.'
                                 : 'هذا الوضع مخصص للمراجعة العميقة: التفسير، محاكاة التفاعل، MSI، وزوايا المنافسين.'}
                     </div>
-                    <WorkflowHelpPanel
-                        title="كيف نستخدم هذا المحرر؟"
-                        items={[
-                            {
-                                title: workflowText.nextActionLabel,
-                                description: 'ابدأ بالزر المقترح في الشريط العلوي؛ هو أقصر طريق للتقدم داخل المسار الحالي.',
-                            },
-                            {
-                                title: 'الوضع الحالي',
-                                description: isWriteMode
-                                    ? 'أنت الآن في وضع تنفيذ سريع: كتابة + فحص + إرسال.'
-                                    : isImproveMode
-                                      ? 'أنت الآن في وضع تحسين: افتح أدوات الجودة والتحقق عند الحاجة.'
-                                      : 'أنت الآن في وضع تحليل متقدم: استخدمه فقط عندما تحتاج فحصًا أعمق.',
-                            },
-                            {
-                                title: workflowText.blockersLabel,
-                                description: 'إذا ظهرت موانع حرجة، عالجها أولًا أو استخدم إرسال بتحفظ فقط عند الضرورة التحريرية.',
-                            },
-                        ]}
-                    />
-                    {detailsOpen && nextAction.description && (
-                        <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-[11px] text-gray-300">
-                            {nextAction.description}
+                    <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-4 space-y-4" dir="rtl">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="space-y-2">
+                                <div className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-[11px] text-cyan-100">
+                                    <CircleHelp className="h-3.5 w-3.5" />
+                                    الخطوة التالية الآن
+                                </div>
+                                <div className="text-base font-semibold text-white">{nextAction.label}</div>
+                                <p className="max-w-3xl text-sm leading-7 text-slate-300">{nextAction.description}</p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => openActionGuide(nextAction.actionId)}
+                                className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-200 hover:text-white"
+                            >
+                                <CircleHelp className="h-4 w-4" />
+                                شرح هذه الخطوة
+                            </button>
                         </div>
-                    )}
-                    {detailsOpen && (
-                        <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-[11px] text-gray-300">
-                            الجاهزية: {compactStatus.readinessLabel} • ادعاءات حرجة: {compactStatus.blockingClaims} • الجودة: {compactStatus.qualityScore}
+
+                        <WorkflowHelpPanel title="كيف نستخدم هذا المحرر الآن؟" items={contextualGuideItems} />
+
+                        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1.1fr_0.9fr]">
+                            <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                                <div className="mb-2 text-xs font-medium text-slate-200">خارطة التنفيذ السريعة</div>
+                                <div className="space-y-2">
+                                    {editorChecklist.map((step) => (
+                                        <div key={step.id} className="flex items-start gap-3 rounded-xl border border-white/5 bg-white/[0.03] px-3 py-2">
+                                            <span
+                                                className={cn(
+                                                    'mt-1 h-2.5 w-2.5 rounded-full',
+                                                    workflowDot(step.status === 'done' ? 'done' : step.status === 'current' ? 'warn' : 'pending'),
+                                                )}
+                                            />
+                                            <div className="min-w-0 flex-1">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-sm text-white">{step.title}</span>
+                                                    <span
+                                                        className={cn(
+                                                            'rounded-full border px-2 py-0.5 text-[10px]',
+                                                            step.status === 'done'
+                                                                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                                                                : step.status === 'current'
+                                                                  ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+                                                                  : 'border-white/10 bg-white/5 text-slate-400',
+                                                        )}
+                                                    >
+                                                        {step.status === 'done' ? 'تم' : step.status === 'current' ? 'الآن' : 'بعد ذلك'}
+                                                    </span>
+                                                </div>
+                                                <p className="mt-1 text-[11px] leading-6 text-slate-400">{step.hint}</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-3">
+                                <div className="text-xs font-medium text-slate-200">حالة النسخة الحالية</div>
+                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                                    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                                        <p className="text-[11px] text-slate-400">الجاهزية</p>
+                                        <p className="mt-1 text-sm text-white">{compactStatus.readinessLabel}</p>
+                                    </div>
+                                    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                                        <p className="text-[11px] text-slate-400">ادعاءات حرجة</p>
+                                        <p className="mt-1 text-sm text-white">{compactStatus.blockingClaims}</p>
+                                    </div>
+                                    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                                        <p className="text-[11px] text-slate-400">الجودة</p>
+                                        <p className="mt-1 text-sm text-white">{compactStatus.qualityScore}</p>
+                                    </div>
+                                </div>
+                                {nextActionHelp.caution && (
+                                    <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] leading-6 text-amber-100">
+                                        تنبيه: {nextActionHelp.caution}
+                                    </div>
+                                )}
+                            </div>
                         </div>
-                    )}
+                    </div>
                     {detailsOpen && toolsExpanded && (
                         <div className="flex flex-wrap gap-2">
                             <button disabled={runVerifier.isPending} onClick={() => runWithGuide('verify', () => runVerifier.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-cyan-500/20 border border-cyan-500/30 text-cyan-200 text-xs flex items-center gap-2 disabled:opacity-60"><SearchCheck className="w-4 h-4" />{runVerifier.isPending ? 'جاري التحقق...' : 'تحقق'}</button>
@@ -4276,7 +4519,30 @@ function GuideModal({ type, action, onClose, onConfirm }: { type: GuideType; act
                 ) : (
                     <>
                         <h2 className="text-lg font-semibold text-white">{action ? ACTION_HELP[action].title : 'شرح الزر'}</h2>
-                        <p className="text-sm text-gray-300">{action ? ACTION_HELP[action].description : 'شرح غير متاح.'}</p>
+                        {action ? (
+                            <div className="space-y-3 text-sm text-gray-300">
+                                <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                                    <p className="text-xs text-gray-400 mb-1">ماذا يفعل؟</p>
+                                    <p>{ACTION_HELP[action].description}</p>
+                                </div>
+                                <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                                    <p className="text-xs text-gray-400 mb-1">متى أستخدمه؟</p>
+                                    <p>{ACTION_HELP[action].when}</p>
+                                </div>
+                                <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                                    <p className="text-xs text-gray-400 mb-1">ماذا سيحدث بعده؟</p>
+                                    <p>{ACTION_HELP[action].after}</p>
+                                </div>
+                                {ACTION_HELP[action].caution && (
+                                    <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-amber-100">
+                                        <p className="text-xs mb-1">تنبيه</p>
+                                        <p>{ACTION_HELP[action].caution}</p>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <p className="text-sm text-gray-300">شرح غير متاح.</p>
+                        )}
                     </>
                 )}
 

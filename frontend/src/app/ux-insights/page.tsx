@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Activity, BarChart3, MousePointerClick, RefreshCw, Route, Users } from 'lucide-react';
+import { Activity, BarChart3, MousePointerClick, RefreshCw, Route, TrendingDown, Users } from 'lucide-react';
 
 import { telemetryApi, type UxTelemetryRecentItem } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -33,6 +33,12 @@ const ROLE_LABELS: Record<string, string> = {
     fact_checker: 'التحقق',
 };
 
+type FunnelStep = {
+    step: string;
+    label: string;
+    users: number;
+};
+
 function labelSurface(value: string | null | undefined): string {
     if (!value) return '—';
     return SURFACE_LABELS[value] || value;
@@ -46,6 +52,16 @@ function labelEvent(value: string | null | undefined): string {
 function labelRole(value: string | null | undefined): string {
     if (!value) return '—';
     return ROLE_LABELS[value] || value;
+}
+
+function percent(value: number, total: number): string {
+    if (!total) return '0%';
+    return `${Math.round((value / total) * 100)}%`;
+}
+
+function conversionRate(surfaceViews: number, nextActionClicks: number): number {
+    if (!surfaceViews) return 0;
+    return Math.round((nextActionClicks / surfaceViews) * 100);
 }
 
 export default function UxInsightsPage() {
@@ -79,6 +95,19 @@ export default function UxInsightsPage() {
     const authorFunnel = useMemo(() => summary?.funnels?.author || [], [summary?.funnels?.author]);
     const chiefFunnel = useMemo(() => summary?.funnels?.chief || [], [summary?.funnels?.chief]);
 
+    const weakSurfaces = useMemo(
+        () =>
+            surfaceRows
+                .filter((item) => item.surface_views > 0)
+                .map((item) => ({
+                    ...item,
+                    conversion: conversionRate(item.surface_views, item.next_action_clicks),
+                }))
+                .sort((a, b) => a.conversion - b.conversion)
+                .slice(0, 4),
+        [surfaceRows],
+    );
+
     if (!canView) {
         return (
             <div className="rounded-2xl border border-white/10 bg-gray-900/40 p-6 text-center text-gray-300">
@@ -96,7 +125,7 @@ export default function UxInsightsPage() {
                         سلوك الاستخدام
                     </h1>
                     <p className="mt-2 text-sm text-slate-400">
-                        قراءة مبسطة لكيفية استخدام الصفحات الجديدة: من أين يبدأ المستخدم، وهل يضغط الإجراء التالي فعلًا.
+                        قراءة مبسطة لكيفية استخدام الصفحات الجديدة: من أين يبدأ المستخدم، وأين يتقدم، وأين يتوقف قبل تنفيذ الإجراء التالي.
                     </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -127,15 +156,15 @@ export default function UxInsightsPage() {
                 items={[
                     {
                         title: 'الدخول',
-                        description: 'نقيس أي الصفحات أصبحت نقطة البداية الفعلية، مثل اليوم أو الأخبار أو الاعتماد.',
+                        description: 'نقيس أي الصفحات أصبحت نقطة البداية الفعلية مثل اليوم أو الأخبار أو الاعتماد.',
                     },
                     {
                         title: 'الإجراء التالي',
-                        description: 'نقيس هل المستخدم يضغط الزر المقترح داخل الطوابير، لأن هذا أهم مؤشر على نجاح التبسيط.',
+                        description: 'أهم مؤشر هنا هو هل يضغط المستخدم الزر المقترح أم يكتفي بالمشاهدة فقط.',
                     },
                     {
-                        title: 'المسار',
-                        description: 'الفَنَل أدناه يوضح هل المستخدم ينتقل من اليوم إلى الأخبار أو الاعتماد ثم يصل إلى المسودات ويتخذ إجراءً فعليًا.',
+                        title: 'التسرب',
+                        description: 'إذا كانت الصفحة تُزار كثيرًا لكن التحويل فيها ضعيف، فهذا يعني أن التبسيط لم يصل بعد إلى الخطوة العملية الواضحة.',
                     },
                 ]}
             />
@@ -173,18 +202,14 @@ export default function UxInsightsPage() {
                 </div>
             ) : !hasData ? (
                 <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-6 text-sm text-amber-100">
-                    لا توجد بيانات استخدام بعد. افتح الصفحات من المتصفح وسجّل دخولك واضغط بعض أزرار
-                    {' '}
-                    <span className="font-semibold">الإجراء التالي</span>
-                    {' '}
-                    ثم أعد التحديث هنا.
+                    لا توجد بيانات استخدام بعد. افتح الصفحات من المتصفح وسجّل دخولك واضغط بعض أزرار <span className="font-semibold">الإجراء التالي</span> ثم أعد التحديث هنا.
                 </div>
             ) : (
                 <>
                     <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
                         <FunnelCard
                             title="مسار الصحفي والمستخدم التنفيذي"
-                            hint="هل يصل المستخدم من اليوم إلى الأخبار ثم إلى المسودات ثم يضغط الإجراء التالي؟"
+                            hint="هل يصل المستخدم من اليوم إلى الأخبار ثم إلى المسودات ثم يتخذ إجراءً فعليًا؟"
                             steps={authorFunnel}
                         />
                         <FunnelCard
@@ -196,18 +221,32 @@ export default function UxInsightsPage() {
 
                     <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.2fr_0.8fr]">
                         <section className="rounded-2xl border border-white/10 bg-gray-900/40 p-4">
-                            <h2 className="text-sm font-semibold text-white">السطوح الأكثر استخدامًا</h2>
+                            <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                                <TrendingDown className="h-4 w-4 text-amber-300" />
+                                أين يحدث التسرب أكثر؟
+                            </div>
                             <div className="mt-4 space-y-3">
-                                {surfaceRows.map((item) => (
+                                {weakSurfaces.map((item) => (
                                     <div key={item.surface} className="rounded-xl border border-white/10 bg-black/20 p-3">
                                         <div className="flex items-center justify-between gap-3">
                                             <div>
                                                 <div className="text-sm font-medium text-white">{labelSurface(item.surface)}</div>
                                                 <div className="mt-1 text-[11px] text-slate-400">
-                                                    زيارات: {item.surface_views} • الإجراء التالي: {item.next_action_clicks} • تفاعلات أخرى: {item.ui_actions}
+                                                    زيارات: {item.surface_views} • الإجراء التالي: {item.next_action_clicks} • التحويل: {item.conversion}%
                                                 </div>
                                             </div>
-                                            <div className="text-lg font-semibold text-cyan-200">{item.total_events}</div>
+                                            <div
+                                                className={cn(
+                                                    'rounded-full px-2 py-1 text-[11px] font-medium',
+                                                    item.conversion >= 40
+                                                        ? 'bg-emerald-500/15 text-emerald-200'
+                                                        : item.conversion >= 20
+                                                            ? 'bg-amber-500/15 text-amber-200'
+                                                            : 'bg-rose-500/15 text-rose-200',
+                                                )}
+                                            >
+                                                {item.conversion >= 40 ? 'جيد' : item.conversion >= 20 ? 'متوسط' : 'ضعيف'}
+                                            </div>
                                         </div>
                                     </div>
                                 ))}
@@ -215,6 +254,18 @@ export default function UxInsightsPage() {
                         </section>
 
                         <section className="space-y-6">
+                            <div className="rounded-2xl border border-white/10 bg-gray-900/40 p-4">
+                                <h2 className="text-sm font-semibold text-white">أكثر الإجراءات استخدامًا</h2>
+                                <div className="mt-4 space-y-2">
+                                    {topActions.slice(0, 8).map((item) => (
+                                        <div key={item.action_label} className="flex items-center justify-between rounded-xl border border-white/10 bg-black/20 px-3 py-2">
+                                            <span className="text-sm text-slate-200">{item.action_label}</span>
+                                            <span className="text-xs text-cyan-200">{item.total}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
                             <div className="rounded-2xl border border-white/10 bg-gray-900/40 p-4">
                                 <h2 className="text-sm font-semibold text-white">الاستخدام حسب الدور</h2>
                                 <div className="mt-4 space-y-3">
@@ -228,20 +279,37 @@ export default function UxInsightsPage() {
                                     ))}
                                 </div>
                             </div>
-
-                            <div className="rounded-2xl border border-white/10 bg-gray-900/40 p-4">
-                                <h2 className="text-sm font-semibold text-white">أكثر الإجراءات استخدامًا</h2>
-                                <div className="mt-4 space-y-2">
-                                    {topActions.slice(0, 8).map((item) => (
-                                        <div key={item.action_label} className="flex items-center justify-between rounded-xl border border-white/10 bg-black/20 px-3 py-2">
-                                            <span className="text-sm text-slate-200">{item.action_label}</span>
-                                            <span className="text-xs text-cyan-200">{item.total}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
                         </section>
                     </div>
+
+                    <section className="rounded-2xl border border-white/10 bg-gray-900/40 p-4">
+                        <h2 className="text-sm font-semibold text-white">السطوح الأكثر استخدامًا</h2>
+                        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                            {surfaceRows.map((item) => {
+                                const rate = conversionRate(item.surface_views, item.next_action_clicks);
+                                return (
+                                    <div key={item.surface} className="rounded-xl border border-white/10 bg-black/20 p-3">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div className="text-sm font-medium text-white">{labelSurface(item.surface)}</div>
+                                            <div className="text-xs text-cyan-200">{percent(item.next_action_clicks, item.surface_views)}</div>
+                                        </div>
+                                        <div className="mt-2 text-[11px] text-slate-400">
+                                            زيارات: {item.surface_views} • الإجراء التالي: {item.next_action_clicks} • تفاعلات أخرى: {item.ui_actions}
+                                        </div>
+                                        <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/5">
+                                            <div
+                                                className={cn(
+                                                    'h-full rounded-full',
+                                                    rate >= 40 ? 'bg-emerald-400' : rate >= 20 ? 'bg-amber-400' : 'bg-rose-400',
+                                                )}
+                                                style={{ width: `${Math.max(rate, 6)}%` }}
+                                            />
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </section>
                 </>
             )}
 
@@ -260,15 +328,9 @@ export default function UxInsightsPage() {
                             </tr>
                         </thead>
                         <tbody>
-                            {recent.length === 0 ? (
-                                <tr>
-                                    <td colSpan={6} className="py-6 text-center text-slate-500">
-                                        لا توجد أحداث مسجلة بعد.
-                                    </td>
-                                </tr>
-                            ) : (
-                                recent.map((item) => <RecentRow key={item.id} item={item} />)
-                            )}
+                            {recent.map((item) => (
+                                <RecentRow key={item.id} item={item} />
+                            ))}
                         </tbody>
                     </table>
                 </div>
@@ -277,69 +339,57 @@ export default function UxInsightsPage() {
     );
 }
 
-function MetricCard({
-    title,
-    value,
-    hint,
-    icon,
-}: {
-    title: string;
-    value: number;
-    hint: string;
-    icon: ReactNode;
-}) {
+function MetricCard({ title, value, hint, icon }: { title: string; value: number; hint: string; icon: ReactNode }) {
     return (
         <div className="rounded-2xl border border-white/10 bg-gray-900/40 p-4">
-            <div className="flex items-center gap-2 text-white">
-                {icon}
-                <span className="text-sm font-medium">{title}</span>
+            <div className="flex items-center justify-between gap-3">
+                <div>
+                    <div className="text-sm font-semibold text-white">{title}</div>
+                    <div className="mt-1 text-[11px] text-slate-400">{hint}</div>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-white/5 p-2">{icon}</div>
             </div>
-            <div className="mt-3 text-2xl font-bold text-white">{value}</div>
-            <div className="mt-2 text-xs leading-6 text-slate-400">{hint}</div>
+            <div className="mt-4 text-3xl font-bold text-white">{value}</div>
         </div>
     );
 }
 
-function FunnelCard({
-    title,
-    hint,
-    steps,
-}: {
-    title: string;
-    hint: string;
-    steps: Array<{ step: string; label: string; users: number }>;
-}) {
-    const peak = Math.max(...steps.map((step) => step.users), 1);
-
+function FunnelCard({ title, hint, steps }: { title: string; hint: string; steps: FunnelStep[] }) {
+    const maxUsers = Math.max(...steps.map((step) => step.users), 1);
     return (
         <section className="rounded-2xl border border-white/10 bg-gray-900/40 p-4">
-            <div className="flex items-center gap-2 text-white">
+            <div className="flex items-center gap-2 text-sm font-semibold text-white">
                 <Route className="h-4 w-4 text-cyan-300" />
-                <h2 className="text-sm font-semibold">{title}</h2>
+                {title}
             </div>
-            <p className="mt-2 text-xs leading-6 text-slate-400">{hint}</p>
+            <p className="mt-1 text-[11px] text-slate-400">{hint}</p>
             <div className="mt-4 space-y-3">
-                {steps.map((step, index) => (
-                    <div key={step.step} className="rounded-xl border border-white/10 bg-black/20 p-3">
-                        <div className="flex items-center justify-between gap-3">
-                            <div>
-                                <div className="text-sm font-medium text-white">
-                                    {index + 1}. {step.label}
+                {steps.map((step, index) => {
+                    const previous = index === 0 ? step.users : steps[index - 1]?.users || 0;
+                    const drop = index === 0 ? null : Math.max(previous - step.users, 0);
+                    const width = Math.max(Math.round((step.users / maxUsers) * 100), 8);
+                    return (
+                        <div key={step.step} className="rounded-xl border border-white/10 bg-black/20 p-3">
+                            <div className="flex items-center justify-between gap-3">
+                                <div>
+                                    <div className="text-sm font-medium text-white">{step.label}</div>
+                                    <div className="mt-1 text-[11px] text-slate-400">
+                                        {index === 0 ? 'نقطة الدخول' : `الاحتفاظ من الخطوة السابقة: ${percent(step.users, previous || 1)}`}
+                                    </div>
                                 </div>
-                                <div className="mt-1 text-[11px] text-slate-400">
-                                    مستخدمون وصلوا إلى هذه المرحلة خلال الفترة المحددة
-                                </div>
+                                <div className="text-lg font-semibold text-cyan-200">{step.users}</div>
                             </div>
-                            <div className="text-lg font-semibold text-cyan-200">{step.users}</div>
+                            <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/5">
+                                <div className="h-full rounded-full bg-cyan-400" style={{ width: `${width}%` }} />
+                            </div>
+                            {drop !== null && (
+                                <div className="mt-2 text-[11px] text-amber-200">
+                                    التسرب من الخطوة السابقة: {drop}
+                                </div>
+                            )}
                         </div>
-                        <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/5">
-                            <div
-                                className="h-full rounded-full bg-cyan-400/80 transition-all"
-                                style={{ width: `${Math.max((step.users / peak) * 100, 6)}%` }}
-                            />
-                        </div>
-                    </div>
-                ))}
+                    );
+                })}
             </div>
         </section>
     );
@@ -348,21 +398,12 @@ function FunnelCard({
 function RecentRow({ item }: { item: UxTelemetryRecentItem }) {
     return (
         <tr className="border-b border-white/5 text-slate-200">
-            <td className="py-3">{item.created_at ? formatRelativeTime(item.created_at) : '—'}</td>
+            <td className="py-3 pr-2">{formatRelativeTime(item.created_at)}</td>
             <td className="py-3">{item.actor_username || '—'}</td>
-            <td className="py-3 text-slate-400">{labelRole(item.actor_role)}</td>
+            <td className="py-3">{labelRole(item.actor_role)}</td>
             <td className="py-3">{labelSurface(item.surface)}</td>
             <td className="py-3">
-                <span
-                    className={cn(
-                        'rounded-md border px-2 py-0.5 text-[11px]',
-                        item.event_name === 'next_action_click'
-                            ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
-                            : item.event_name === 'surface_view'
-                              ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200'
-                              : 'border-white/10 bg-white/5 text-slate-300',
-                    )}
-                >
+                <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-1 text-[11px] text-cyan-200">
                     {labelEvent(item.event_name)}
                 </span>
             </td>
