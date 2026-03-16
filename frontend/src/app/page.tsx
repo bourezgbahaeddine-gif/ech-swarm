@@ -17,14 +17,14 @@ export default function DashboardPage() {
   const router = useRouter();
   const { user } = useAuth();
   const role = (user?.role || '').toLowerCase();
-  const isManagerView = role === 'director' || role === 'editor_chief';
+  const isDirectorView = role === 'director';
 
   const { data: statsData, isLoading: statsLoading } = useQuery({
     queryKey: ['dashboard-stats'],
     queryFn: () => dashboardApi.stats(),
     refetchInterval: 20000,
     refetchOnWindowFocus: true,
-    enabled: isManagerView,
+    enabled: isDirectorView,
   });
 
   const { data: breakingData, isLoading: breakingLoading } = useQuery({
@@ -32,7 +32,7 @@ export default function DashboardPage() {
     queryFn: () => newsApi.breaking(5),
     refetchInterval: 12000,
     refetchOnWindowFocus: true,
-    enabled: isManagerView,
+    enabled: isDirectorView,
   });
 
   const { data: pendingData, isLoading: pendingLoading } = useQuery({
@@ -40,7 +40,7 @@ export default function DashboardPage() {
     queryFn: () => newsApi.pending(10),
     refetchInterval: 15000,
     refetchOnWindowFocus: true,
-    enabled: isManagerView,
+    enabled: isDirectorView,
   });
 
   const { data: pipelineData, isLoading: pipelineLoading } = useQuery({
@@ -48,7 +48,7 @@ export default function DashboardPage() {
     queryFn: () => dashboardApi.pipelineRuns(10),
     refetchInterval: 15000,
     refetchOnWindowFocus: true,
-    enabled: isManagerView,
+    enabled: isDirectorView,
   });
 
   const { data: agentsData } = useQuery({
@@ -56,19 +56,19 @@ export default function DashboardPage() {
     queryFn: () => dashboardApi.agentStatus(),
     refetchInterval: 20000,
     refetchOnWindowFocus: true,
-    enabled: isManagerView,
+    enabled: isDirectorView,
   });
 
   useEffect(() => {
-    if (user && !isManagerView) {
-      router.replace('/news');
+    if (user && !isDirectorView) {
+      router.replace('/today');
     }
-  }, [isManagerView, router, user]);
+  }, [isDirectorView, router, user]);
 
-  if (user && !isManagerView) {
+  if (user && !isDirectorView) {
     return (
       <div className="rounded-2xl border app-surface p-8 text-center app-text-muted">
-        جاري تحويلك إلى واجهة الأخبار...
+        جاري تحويلك إلى مساحة العمل اليومية...
       </div>
     );
   }
@@ -76,8 +76,8 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <div className="animate-fade-in-up">
-        <h1 className="text-2xl font-bold text-[var(--text-primary)]">لوحة القيادة</h1>
-        <p className="text-sm app-text-muted mt-1">متابعة تشغيل المنصة لمدير التحرير</p>
+        <h1 className="text-2xl font-bold text-[var(--text-primary)]">لوحة الأداء</h1>
+        <p className="text-sm app-text-muted mt-1">متابعة تشغيل المنصة والمؤشرات الإدارية لمدير التحرير</p>
       </div>
 
       <div className="animate-fade-in-up" style={{ animationDelay: '100ms' }}>

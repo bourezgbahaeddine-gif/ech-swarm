@@ -1,35 +1,39 @@
 'use client';
 
+import { useMemo, useState, type ComponentType } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth';
 import {
-    LayoutDashboard,
-    Newspaper,
-    Rss,
-    UserCheck,
-    TrendingUp,
     Activity,
+    Archive,
+    BookOpen,
+    CalendarClock,
+    ChevronDown,
     ChevronLeft,
     ChevronRight,
-    Users,
-    KeyRound,
-    FileText,
-    ShieldCheck,
-    Film,
-    Mic2,
-    FolderGit2,
-    BookOpen,
-    Archive,
-    Gauge,
-    MessagesSquare,
-    Radar,
     FileSearch,
+    FileText,
+    Film,
+    FolderGit2,
+    Gauge,
+    KeyRound,
+    LayoutDashboard,
     Library,
-    ScrollText,
-    CalendarClock,
     Megaphone,
+    MessagesSquare,
+    Mic2,
+    Newspaper,
+    Radar,
+    Rss,
+    ScrollText,
+    ShieldCheck,
+    TrendingUp,
+    UserCheck,
+    Users,
+    Wrench,
 } from 'lucide-react';
 
 type Role =
@@ -46,6 +50,17 @@ type SidebarProps = {
     onToggleCollapsed: () => void;
     mobileOpen: boolean;
     onCloseMobile: () => void;
+};
+
+type NavSection = 'primary' | 'knowledge' | 'tools' | 'ops';
+
+type NavItem = {
+    href: string;
+    label: string;
+    icon: ComponentType<{ className?: string }>;
+    roles: Role[];
+    section: NavSection;
+    roleLabels?: Partial<Record<Role, string>>;
 };
 
 function normalizeRole(role: string): Role | null {
@@ -65,30 +80,191 @@ function normalizeRole(role: string): Role | null {
     return allowed.includes(value as Role) ? (value as Role) : null;
 }
 
-const navItems = [
-    { href: '/', label: 'لوحة القيادة', icon: LayoutDashboard, roles: ['director', 'editor_chief'] as Role[] },
-    { href: '/news', label: 'الأخبار', icon: Newspaper, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor', 'fact_checker'] as Role[] },
-    { href: '/editorial', label: 'قسم التحرير', icon: UserCheck, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
-    { href: '/workspace-drafts', label: 'المحرر الذكي', icon: FolderGit2, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
-    { href: '/stories', label: 'القصص التحريرية', icon: Library, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
-    { href: '/scripts', label: 'استوديو السكربت', icon: ScrollText, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
-    { href: '/trends', label: 'رادار التراند', icon: TrendingUp, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
-    { href: '/events', label: 'لوحة الأحداث', icon: CalendarClock, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
-    { href: '/digital', label: 'فريق الديجيتال', icon: Megaphone, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
-    { href: '/constitution', label: 'الدستور', icon: FileText, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor', 'fact_checker'] as Role[] },
-    { href: '/msi', label: 'مؤشر MSI', icon: Gauge, roles: ['director'] as Role[] },
-    { href: '/simulator', label: 'محاكي الجمهور', icon: MessagesSquare, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
-    { href: '/competitor-xray', label: 'كشاف المنافسين', icon: Radar, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
-    { href: '/memory', label: 'ذاكرة المشروع', icon: BookOpen, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
-    { href: '/archive', label: 'أرشيف الشروق', icon: Archive, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
-    { href: '/services/multimedia', label: 'الوسائط', icon: Film, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
-    { href: '/services/media-logger', label: 'مفرّغ الندوات', icon: Mic2, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
-    { href: '/services/document-intel', label: 'محلل الوثائق', icon: FileSearch, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'] as Role[] },
-    { href: '/team', label: 'فريق التحرير', icon: Users, roles: ['director'] as Role[] },
-    { href: '/sources', label: 'المصادر', icon: Rss, roles: ['director'] as Role[] },
-    { href: '/agents', label: 'مراقبة النظام', icon: Activity, roles: ['director'] as Role[] },
-    { href: '/services/fact-check', label: 'التحقق والاستقصاء', icon: ShieldCheck, roles: ['director', 'editor_chief', 'journalist', 'social_media', 'fact_checker', 'print_editor'] as Role[] },
-    { href: '/settings', label: 'إعدادات APIs', icon: KeyRound, roles: ['director'] as Role[] },
+const navItems: NavItem[] = [
+    {
+        href: '/today',
+        label: 'اليوم',
+        icon: LayoutDashboard,
+        roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor', 'fact_checker', 'observer'],
+        section: 'primary',
+    },
+    {
+        href: '/',
+        label: 'الأداء',
+        icon: Gauge,
+        roles: ['director'],
+        section: 'primary',
+    },
+    {
+        href: '/news',
+        label: 'الأخبار',
+        icon: Newspaper,
+        roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor', 'fact_checker'],
+        section: 'primary',
+    },
+    {
+        href: '/workspace-drafts',
+        label: 'المسودات',
+        icon: FolderGit2,
+        roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
+        section: 'primary',
+    },
+    {
+        href: '/editorial',
+        label: 'الاعتماد',
+        icon: UserCheck,
+        roles: ['director', 'editor_chief', 'social_media'],
+        section: 'primary',
+        roleLabels: {
+            social_media: 'نشر واعتماد',
+        },
+    },
+    {
+        href: '/stories',
+        label: 'القصص',
+        icon: Library,
+        roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
+        section: 'primary',
+    },
+    {
+        href: '/events',
+        label: 'التغطيات',
+        icon: CalendarClock,
+        roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
+        section: 'primary',
+    },
+    {
+        href: '/archive',
+        label: 'الأرشيف',
+        icon: Archive,
+        roles: ['editor_chief', 'journalist', 'social_media', 'print_editor', 'fact_checker'],
+        section: 'primary',
+    },
+    {
+        href: '/',
+        label: 'الأداء',
+        icon: Gauge,
+        roles: ['editor_chief'],
+        section: 'ops',
+    },
+    {
+        href: '/archive',
+        label: 'الأرشيف',
+        icon: Archive,
+        roles: ['director'],
+        section: 'knowledge',
+    },
+    {
+        href: '/digital',
+        label: 'التغطية الرقمية',
+        icon: Megaphone,
+        roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
+        section: 'tools',
+    },
+    {
+        href: '/constitution',
+        label: 'الدستور التحريري',
+        icon: FileText,
+        roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor', 'fact_checker'],
+        section: 'knowledge',
+    },
+    {
+        href: '/memory',
+        label: 'الذاكرة التحريرية',
+        icon: BookOpen,
+        roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
+        section: 'knowledge',
+    },
+    {
+        href: '/services/document-intel',
+        label: 'تحليل الوثائق',
+        icon: FileSearch,
+        roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
+        section: 'knowledge',
+    },
+    {
+        href: '/services/media-logger',
+        label: 'تفريغ التسجيلات',
+        icon: Mic2,
+        roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
+        section: 'knowledge',
+    },
+    {
+        href: '/services/multimedia',
+        label: 'الوسائط',
+        icon: Film,
+        roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
+        section: 'tools',
+    },
+    {
+        href: '/services/fact-check',
+        label: 'التحقق والاستقصاء',
+        icon: ShieldCheck,
+        roles: ['director', 'editor_chief', 'journalist', 'social_media', 'fact_checker', 'print_editor'],
+        section: 'tools',
+    },
+    {
+        href: '/scripts',
+        label: 'السكربت',
+        icon: ScrollText,
+        roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
+        section: 'tools',
+    },
+    {
+        href: '/trends',
+        label: 'الترندات',
+        icon: TrendingUp,
+        roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
+        section: 'tools',
+    },
+    {
+        href: '/simulator',
+        label: 'محاكاة التفاعل',
+        icon: MessagesSquare,
+        roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
+        section: 'tools',
+    },
+    {
+        href: '/competitor-xray',
+        label: 'رصد المنافسين',
+        icon: Radar,
+        roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
+        section: 'tools',
+    },
+    {
+        href: '/team',
+        label: 'فريق التحرير',
+        icon: Users,
+        roles: ['director'],
+        section: 'ops',
+    },
+    {
+        href: '/sources',
+        label: 'المصادر',
+        icon: Rss,
+        roles: ['director'],
+        section: 'ops',
+    },
+    {
+        href: '/agents',
+        label: 'مراقبة النظام',
+        icon: Activity,
+        roles: ['director'],
+        section: 'ops',
+    },
+    {
+        href: '/settings',
+        label: 'إعدادات APIs',
+        icon: KeyRound,
+        roles: ['director'],
+        section: 'ops',
+    },
+];
+
+const sectionLabels: Array<{ key: Exclude<NavSection, 'primary'>; label: string }> = [
+    { key: 'knowledge', label: 'معرفة مساندة' },
+    { key: 'tools', label: 'أدوات إضافية' },
+    { key: 'ops', label: 'تشغيل وإدارة' },
 ];
 
 export default function Sidebar({
@@ -100,7 +276,45 @@ export default function Sidebar({
     const pathname = usePathname();
     const { user } = useAuth();
     const role = normalizeRole(user?.role || '');
-    const visibleNav = role ? navItems.filter((item) => item.roles.includes(role)) : [];
+    const [secondaryOpen, setSecondaryOpen] = useState(false);
+
+    const visibleNav = useMemo(
+        () => (role ? navItems.filter((item) => item.roles.includes(role)) : []),
+        [role],
+    );
+
+    const primaryItems = visibleNav.filter((item) => item.section === 'primary');
+    const secondarySections = sectionLabels
+        .map((section) => ({
+            ...section,
+            items: visibleNav.filter((item) => item.section === section.key),
+        }))
+        .filter((section) => section.items.length > 0);
+
+    const renderNavItem = (item: NavItem) => {
+        const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
+        const label = (role && item.roleLabels?.[role]) || item.label;
+
+        return (
+            <Link
+                key={`${item.section}-${item.href}`}
+                href={item.href}
+                onClick={onCloseMobile}
+                className={cn(
+                    'flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group relative',
+                    isActive
+                        ? 'bg-blue-500/20 text-[#F8FAFC] shadow-inner'
+                        : 'text-[#CBD5E1] hover:text-[#F8FAFC] hover:bg-white/8',
+                )}
+            >
+                {isActive && (
+                    <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full bg-[#2563EB]" />
+                )}
+                <item.icon className={cn('w-5 h-5 flex-shrink-0', isActive && 'drop-shadow-[0_0_6px_rgba(37,99,235,0.5)]')} />
+                {!collapsed && <span className="text-sm font-medium">{label}</span>}
+            </Link>
+        );
+    };
 
     return (
         <>
@@ -110,7 +324,7 @@ export default function Sidebar({
                 onClick={onCloseMobile}
                 className={cn(
                     'fixed inset-0 z-40 bg-black/55 backdrop-blur-[1px] md:hidden transition-opacity',
-                    mobileOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+                    mobileOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none',
                 )}
             />
             <aside
@@ -119,44 +333,60 @@ export default function Sidebar({
                     'bg-[#0F172A] border-slate-800/70 border-l flex flex-col',
                     'w-[86vw] max-w-[280px] md:w-auto',
                     collapsed ? 'md:w-[72px]' : 'md:w-[260px]',
-                    mobileOpen ? 'translate-x-0' : 'translate-x-full md:translate-x-0'
+                    mobileOpen ? 'translate-x-0' : 'translate-x-full md:translate-x-0',
                 )}
             >
                 <div className="flex items-center gap-3 px-4 h-16 border-b border-white/10">
                     <div className="w-9 h-9 rounded-xl border flex items-center justify-center overflow-hidden bg-white/5 border-white/15">
-                        <img src="/ech-logo.png" alt="Echorouk" className="w-7 h-7 object-contain" />
+                        <Image src="/ech-logo.png" alt="Echorouk" width={28} height={28} className="w-7 h-7 object-contain" />
                     </div>
                     {!collapsed && (
                         <div className="overflow-hidden">
                             <h1 className="text-sm font-bold truncate text-[#F8FAFC]">غرفة الشروق</h1>
-                            <p className="text-[10px] font-medium text-[#CBD5E1]">النظام الذكي v1.0</p>
+                            <p className="text-[10px] font-medium text-[#CBD5E1]">تجربة عمل مبسطة حسب الدور</p>
                         </div>
                     )}
                 </div>
 
-                <nav className="flex-1 py-4 px-2 space-y-1 overflow-y-auto">
-                    {visibleNav.map((item) => {
-                        const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
-                        return (
-                            <Link
-                                key={item.href}
-                                href={item.href}
-                                onClick={onCloseMobile}
-                                className={cn(
-                                    'flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group relative',
-                                    isActive
-                                        ? 'bg-blue-500/20 text-[#F8FAFC] shadow-inner'
-                                        : 'text-[#CBD5E1] hover:text-[#F8FAFC] hover:bg-white/8'
-                                )}
-                            >
-                                {isActive && (
-                                    <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full bg-[#2563EB]" />
-                                )}
-                                <item.icon className={cn('w-5 h-5 flex-shrink-0', isActive && 'drop-shadow-[0_0_6px_rgba(37,99,235,0.5)]')} />
-                                {!collapsed && <span className="text-sm font-medium">{item.label}</span>}
-                            </Link>
-                        );
-                    })}
+                <nav className="flex-1 py-4 px-2 overflow-y-auto">
+                    <div className="space-y-1">
+                        {primaryItems.map(renderNavItem)}
+                    </div>
+
+                    {secondarySections.length > 0 && (
+                        <div className="mt-5 pt-4 border-t border-white/10">
+                            {!collapsed && (
+                                <button
+                                    type="button"
+                                    onClick={() => setSecondaryOpen((prev) => !prev)}
+                                    className="w-full mb-2 px-3 py-2 rounded-xl border border-white/10 bg-white/5 text-[#CBD5E1] hover:text-white flex items-center justify-between text-xs"
+                                >
+                                    <span className="inline-flex items-center gap-2">
+                                        <Wrench className="w-4 h-4" />
+                                        المزيد من الأدوات
+                                    </span>
+                                    <ChevronDown className={cn('w-4 h-4 transition-transform', secondaryOpen && 'rotate-180')} />
+                                </button>
+                            )}
+
+                            {(collapsed || secondaryOpen) && (
+                                <div className="space-y-4">
+                                    {secondarySections.map((section) => (
+                                        <div key={section.key}>
+                                            {!collapsed && (
+                                                <div className="px-3 pb-1 text-[10px] uppercase tracking-[0.18em] text-[#64748B]">
+                                                    {section.label}
+                                                </div>
+                                            )}
+                                            <div className="space-y-1">
+                                                {section.items.map(renderNavItem)}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </nav>
 
                 {!collapsed && (

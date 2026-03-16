@@ -39,12 +39,19 @@ function NewsPageContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const { user } = useAuth();
+    const initialStatus = searchParams.get('status') || '';
+    const initialCategory = searchParams.get('category') || '';
+    const initialBreakingParam = searchParams.get('breaking');
     const [page, setPage] = useState(1);
-    const [status, setStatus] = useState<string>('');
-    const [category, setCategory] = useState<string>('');
+    const [status, setStatus] = useState<string>(initialStatus);
+    const [category, setCategory] = useState<string>(initialCategory);
     const [search, setSearch] = useState(() => searchParams.get('q') || '');
     const [debouncedSearch, setDebouncedSearch] = useState('');
-    const [isBreaking, setIsBreaking] = useState<boolean | null>(null);
+    const [isBreaking, setIsBreaking] = useState<boolean | null>(() => {
+        if (initialBreakingParam === 'true') return true;
+        if (initialBreakingParam === 'false') return false;
+        return null;
+    });
     const [selectedArticle, setSelectedArticle] = useState<number | null>(null);
     const [rejectReason, setRejectReason] = useState('');
     const [draftEditor, setDraftEditor] = useState<{
@@ -903,6 +910,11 @@ function NewsPageContent() {
     );
 }
 
+function NewsPageShell() {
+    const searchParams = useSearchParams();
+    return <NewsPageContent key={searchParams.toString()} />;
+}
+
 export default function NewsPage() {
     return (
         <Suspense
@@ -912,7 +924,7 @@ export default function NewsPage() {
                 </div>
             }
         >
-            <NewsPageContent />
+            <NewsPageShell />
         </Suspense>
     );
 }
