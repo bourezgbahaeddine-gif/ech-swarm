@@ -17,6 +17,7 @@ export type WorkflowChip = {
 export function WorkflowCard({
     title,
     subtitle,
+    meta,
     statusLabel,
     statusClassName,
     chips = [],
@@ -26,11 +27,14 @@ export function WorkflowCard({
     blockers = [],
     tone = 'default',
     compact = false,
+    hideReason = false,
+    hideNextAction = false,
     primaryAction,
     actions,
 }: {
     title: string;
     subtitle?: string;
+    meta?: ReactNode;
     statusLabel?: string;
     statusClassName?: string;
     chips?: WorkflowChip[];
@@ -40,6 +44,8 @@ export function WorkflowCard({
     blockers?: string[];
     tone?: WorkflowTone;
     compact?: boolean;
+    hideReason?: boolean;
+    hideNextAction?: boolean;
     primaryAction?: { label: string; href: string; onClick?: () => void };
     actions?: ReactNode;
 }) {
@@ -79,13 +85,18 @@ export function WorkflowCard({
                     </div>
 
                     {subtitle && <div className={cn('mt-1 text-slate-400', compact ? 'text-[11px]' : 'text-xs')}>{subtitle}</div>}
+                    {meta && <div className={cn('mt-2', compact ? 'text-[11px]' : 'text-xs')}>{meta}</div>}
 
-                    <div className={cn('text-slate-200 leading-6', compact ? 'mt-2 text-[12px] line-clamp-2' : 'mt-3 text-sm')}>
-                        {truncate(reason, compact ? 120 : 190)}
-                    </div>
-                    <div className={cn('text-cyan-200', compact ? 'mt-1.5 text-[11px]' : 'mt-2 text-xs')}>
-                        {workflowText.nextActionLabel}: <span className="font-semibold">{nextActionLabel}</span>
-                    </div>
+                    {!hideReason && (
+                        <div className={cn('text-slate-200 leading-6', compact ? 'mt-2 text-[12px] line-clamp-2' : 'mt-3 text-sm')}>
+                            {truncate(reason, compact ? 120 : 190)}
+                        </div>
+                    )}
+                    {!hideNextAction && (
+                        <div className={cn('text-cyan-200', compact ? 'mt-1.5 text-[11px]' : 'mt-2 text-xs')}>
+                            {workflowText.nextActionLabel}: <span className="font-semibold">{nextActionLabel}</span>
+                        </div>
+                    )}
 
                     {blockers.length > 0 && (
                         <div className="mt-3 flex flex-wrap gap-1.5">
