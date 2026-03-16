@@ -55,6 +55,7 @@ type RightTab = 'evidence' | 'proofread' | 'quality' | 'seo' | 'social' | 'conte
 type GuideType = 'welcome' | 'action';
 type ActionId = 'quick_check' | 'verify' | 'proofread' | 'improve' | 'headlines' | 'seo' | 'links' | 'social' | 'quality' | 'publish_gate' | 'apply' | 'save' | 'manual_draft' | 'audience_test';
 type ViewMode = 'write' | 'improve' | 'advanced';
+type EditorStage = 'writing' | 'review';
 type LeftTab = 'drafts' | 'source' | 'archive';
 type ClaimOverrideDraft = {
     evidenceLinksRaw: string;
@@ -829,6 +830,7 @@ function WorkspaceDraftsPageContent() {
     const [detailsOpen, setDetailsOpen] = useState(false);
     const [focusMode, setFocusMode] = useState(false);
     const [headerToolsOpen, setHeaderToolsOpen] = useState(false);
+    const [editorStage, setEditorStage] = useState<EditorStage>(isWriterRole ? 'writing' : 'review');
     const [smartHighlightEnabled, setSmartHighlightEnabled] = useState(true);
     const [inlineAiOpen, setInlineAiOpen] = useState(false);
     const [inlineSourceOpen, setInlineSourceOpen] = useState(false);
@@ -2139,6 +2141,7 @@ function WorkspaceDraftsPageContent() {
         const marker = workId || articleId || 'initial';
         if (lastSimplifiedWorkRef.current === marker) return;
         lastSimplifiedWorkRef.current = marker;
+        setEditorStage('writing');
         setViewMode('write');
         setDetailsOpen(false);
         setToolsExpanded(false);
@@ -2148,7 +2151,8 @@ function WorkspaceDraftsPageContent() {
 
     const showSidePanels = detailsOpen && !focusMode;
     const mainSpanClass = showSidePanels ? 'xl:col-span-8' : 'xl:col-span-12';
-    const showWriterMinimal = isWriterRole && focusMode && !detailsOpen;
+    const isWritingStage = isWriterRole && editorStage === 'writing';
+    const showWriterMinimal = isWritingStage && focusMode && !detailsOpen;
 
     useEffect(() => {
         if (leftTab !== 'archive') return;
@@ -2567,6 +2571,23 @@ function WorkspaceDraftsPageContent() {
         setToolsExpanded(true);
     }
 
+    function enterReviewStage() {
+        setEditorStage('review');
+        setDetailsOpen(true);
+        setToolsExpanded(false);
+        setHeaderToolsOpen(false);
+        setFocusMode(false);
+    }
+
+    function returnToWritingStage() {
+        setEditorStage('writing');
+        setViewMode('write');
+        setDetailsOpen(false);
+        setToolsExpanded(false);
+        setHeaderToolsOpen(false);
+        setFocusMode(true);
+    }
+
     function closeGuide() {
         setGuideOpen(false);
         setGuideAction(null);
@@ -2772,6 +2793,35 @@ function WorkspaceDraftsPageContent() {
                     </div>
                 )}
 
+                {isWritingStage ? (
+                    <div className="mt-4 space-y-3">
+                        <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-4" dir="rtl">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div className="space-y-1">
+                                    <p className="text-sm font-medium text-white">مرحلة الكتابة</p>
+                                    <p className="text-[12px] text-slate-400">ركّز على العنوان والمتن فقط. عندما تنتهي، انتقل إلى المراجعة قبل الإرسال.</p>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={enterReviewStage}
+                                        className="min-h-10 rounded-xl border border-cyan-500/30 bg-cyan-500/15 px-4 py-2 text-xs font-medium text-cyan-100"
+                                    >
+                                        أنهيت الكتابة
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setDetailsOpen(true)}
+                                        className="min-h-10 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-slate-200"
+                                    >
+                                        أحتاج مساعدة
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                <>
                 {(!isWriterRole || detailsOpen) && (
                     <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] text-gray-300">
                         {workflowSteps.map((step, idx) => (
@@ -2845,6 +2895,15 @@ function WorkspaceDraftsPageContent() {
                             </button>
                         )}
                         <div className="mr-auto flex items-center gap-2">
+                            {isWriterRole && (
+                                <button
+                                    type="button"
+                                    onClick={returnToWritingStage}
+                                    className="min-h-10 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-slate-200"
+                                >
+                                    عودة إلى الكتابة
+                                </button>
+                            )}
                             {showWriterMinimal ? (
                                 <button
                                     type="button"
@@ -3048,6 +3107,8 @@ function WorkspaceDraftsPageContent() {
                         </div>
                     )}
                 </div>
+                </>
+                )}
 
                 {(err || ok) && <div className={cn('mt-3 rounded-xl px-3 py-2 text-xs', err ? 'bg-red-500/15 text-red-200 border border-red-500/30' : 'bg-emerald-500/15 text-emerald-200 border border-emerald-500/30')}>{err || ok}</div>}
             </div>
