@@ -366,6 +366,18 @@ export interface UxTelemetrySummary {
         action_label: string;
         total: number;
     }>;
+    funnels: {
+        chief: Array<{
+            step: string;
+            label: string;
+            users: number;
+        }>;
+        author: Array<{
+            step: string;
+            label: string;
+            users: number;
+        }>;
+    };
 }
 
 export interface UxTelemetryRecentItem {

@@ -234,7 +234,7 @@ const navItems: NavItem[] = [
     },
     {
         href: '/ux-insights',
-        label: '???? ?????????',
+        label: 'سلوك الاستخدام',
         icon: MousePointerClick,
         roles: ['director', 'editor_chief'],
         section: 'ops',

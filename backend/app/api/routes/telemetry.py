@@ -81,6 +81,16 @@ def _serialize_recent(entry: ActionAuditLog) -> dict[str, Any]:
     }
 
 
+def _count_unique_users(items: list[ActionAuditLog], predicate) -> int:
+    return len(
+        {
+            item.actor_username
+            for item in items
+            if item.actor_username and predicate(item)
+        }
+    )
+
+
 @router.post("/ux", status_code=status.HTTP_202_ACCEPTED)
 async def log_ux_event(
     payload: UxTelemetryEventRequest,
@@ -165,6 +175,8 @@ async def get_ux_summary(
     role_views_counter: Counter[str] = Counter()
     role_next_actions_counter: Counter[str] = Counter()
     usernames: set[str] = set()
+    chief_roles = {"director", "editor_chief"}
+    author_roles = {"journalist", "social_media", "print_editor", "fact_checker"}
 
     for item in items:
         surface = item.entity_id or "unknown"
@@ -221,5 +233,89 @@ async def get_ux_summary(
                 {"action_label": label, "total": total}
                 for label, total in action_counter.most_common(10)
             ],
+            "funnels": {
+                "chief": [
+                    {
+                        "step": "today",
+                        "label": "اليوم",
+                        "users": _count_unique_users(
+                            items,
+                            lambda item: _actor_role(item) in chief_roles
+                            and item.reason == "surface_view"
+                            and item.entity_id == "today",
+                        ),
+                    },
+                    {
+                        "step": "editorial",
+                        "label": "الاعتماد",
+                        "users": _count_unique_users(
+                            items,
+                            lambda item: _actor_role(item) in chief_roles
+                            and item.reason == "surface_view"
+                            and item.entity_id == "editorial",
+                        ),
+                    },
+                    {
+                        "step": "workspace_drafts",
+                        "label": "المسودات",
+                        "users": _count_unique_users(
+                            items,
+                            lambda item: _actor_role(item) in chief_roles
+                            and item.reason == "surface_view"
+                            and item.entity_id == "workspace_drafts",
+                        ),
+                    },
+                    {
+                        "step": "next_action",
+                        "label": "ضغط الإجراء التالي",
+                        "users": _count_unique_users(
+                            items,
+                            lambda item: _actor_role(item) in chief_roles
+                            and item.reason == "next_action_click",
+                        ),
+                    },
+                ],
+                "author": [
+                    {
+                        "step": "today",
+                        "label": "اليوم",
+                        "users": _count_unique_users(
+                            items,
+                            lambda item: _actor_role(item) in author_roles
+                            and item.reason == "surface_view"
+                            and item.entity_id == "today",
+                        ),
+                    },
+                    {
+                        "step": "news",
+                        "label": "الأخبار",
+                        "users": _count_unique_users(
+                            items,
+                            lambda item: _actor_role(item) in author_roles
+                            and item.reason == "surface_view"
+                            and item.entity_id == "news",
+                        ),
+                    },
+                    {
+                        "step": "workspace_drafts",
+                        "label": "المسودات",
+                        "users": _count_unique_users(
+                            items,
+                            lambda item: _actor_role(item) in author_roles
+                            and item.reason == "surface_view"
+                            and item.entity_id == "workspace_drafts",
+                        ),
+                    },
+                    {
+                        "step": "next_action",
+                        "label": "ضغط الإجراء التالي",
+                        "users": _count_unique_users(
+                            items,
+                            lambda item: _actor_role(item) in author_roles
+                            and item.reason == "next_action_click",
+                        ),
+                    },
+                ],
+            },
         }
     )
