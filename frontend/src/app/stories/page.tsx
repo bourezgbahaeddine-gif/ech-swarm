@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import {
@@ -31,7 +31,7 @@ export default function StoriesPage() {
     const [selectedStoryId, setSelectedStoryId] = useState<number | null>(null);
     const [clusterHours, setClusterHours] = useState<number>(24);
     const [clusterMinSize, setClusterMinSize] = useState<number>(2);
-    const [view, setView] = useState<'stories' | 'clusters'>('stories');
+    const [view, setView] = useState<'queues' | 'clusters'>('queues');
     const [clusterQuery, setClusterQuery] = useState<string>('');
     const [expandedClusters, setExpandedClusters] = useState<Set<number>>(new Set());
     const [actionMsg, setActionMsg] = useState<string | null>(null);
@@ -61,7 +61,7 @@ export default function StoriesPage() {
 
     const stories = useMemo(() => storiesData?.data || [], [storiesData?.data]);
     const clusterReport = clustersData?.data;
-    const clusterItems = clusterReport?.items || [];
+    const clusterItems = useMemo(() => clusterReport?.items || [], [clusterReport?.items]);
 
     const filteredClusters = useMemo(() => {
         const query = clusterQuery.trim().toLowerCase();
@@ -88,19 +88,49 @@ export default function StoriesPage() {
     const storyDeskRows = useMemo(() => {
         return [...stories]
             .sort((a, b) => storyActionScore(b) - storyActionScore(a))
-            .slice(0, 14);
+            .slice(0, 20);
     }, [stories]);
-    const topPriorityStory = storyDeskRows[0] || null;
 
-    const storiesNeedingAction = useMemo(
-        () => storyDeskRows.filter((story) => storyActionScore(story) >= 45),
-        [storyDeskRows],
-    );
+    const storyQueues = useMemo(() => {
+        const active: StoryRecord[] = [];
+        const needsUpdate: StoryRecord[] = [];
+        const lostMomentum: StoryRecord[] = [];
+        const needsNewAngle: StoryRecord[] = [];
 
-    const storiesUpdatedRecently = useMemo(
-        () => storyDeskRows.filter((story) => storyHoursSinceLastUpdate(story) <= 12),
-        [storyDeskRows],
-    );
+        storyDeskRows.forEach((story) => {
+            const bucket = classifyStoryQueue(story);
+            if (bucket === 'lost_momentum') {
+                lostMomentum.push(story);
+                return;
+            }
+            if (bucket === 'new_angle') {
+                needsNewAngle.push(story);
+                return;
+            }
+            if (bucket === 'update') {
+                needsUpdate.push(story);
+                return;
+            }
+            active.push(story);
+        });
+
+        return {
+            active,
+            needsUpdate,
+            lostMomentum,
+            needsNewAngle,
+        };
+    }, [storyDeskRows]);
+
+    const topPriorityStory = useMemo(() => {
+        return (
+            storyQueues.needsUpdate[0] ||
+            storyQueues.active[0] ||
+            storyQueues.needsNewAngle[0] ||
+            storyQueues.lostMomentum[0] ||
+            null
+        );
+    }, [storyQueues]);
 
     const {
         data: topStoryCenterData,
@@ -108,7 +138,7 @@ export default function StoriesPage() {
     } = useQuery({
         queryKey: ['stories-top-control-center', topPriorityStory?.id],
         queryFn: () => storiesApi.controlCenter(topPriorityStory!.id, { timeline_limit: 20 }),
-        enabled: view === 'stories' && Boolean(topPriorityStory?.id),
+        enabled: view === 'queues' && Boolean(topPriorityStory?.id),
         staleTime: 60_000,
     });
     const topStoryCenter = topStoryCenterData?.data;
@@ -207,15 +237,15 @@ export default function StoriesPage() {
             <div className="flex items-center gap-2">
                 <button
                     type="button"
-                    onClick={() => setView('stories')}
+                    onClick={() => setView('queues')}
                     className={cn(
                         'rounded-lg border px-3 py-1.5 text-xs transition-colors',
-                        view === 'stories'
+                        view === 'queues'
                             ? 'border-cyan-400/60 bg-cyan-500/20 text-cyan-100'
                             : 'border-white/10 bg-white/5 text-slate-300',
                     )}
                 >
-                    مركز القصص
+                    متابعة القصص
                 </button>
                 <button
                     type="button"
@@ -259,15 +289,14 @@ export default function StoriesPage() {
                 />
             )}
 
-            {view === 'stories' && (
+            {view === 'queues' && (
                 storiesLoading ? (
-                    <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-6 text-slate-400">جاري تحميل مركز القصص...</div>
+                    <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-6 text-slate-400">جاري تحميل طوابير القصص...</div>
                 ) : (
-                    <StoryDeskSection
+                    <StoryQueuesSection
                         stories={storyDeskRows}
                         totalStories={stories.length}
-                        needsActionCount={storiesNeedingAction.length}
-                        recentlyUpdatedCount={storiesUpdatedRecently.length}
+                        queues={storyQueues}
                         topStory={topPriorityStory}
                         topStoryGaps={topStoryCenter?.gaps || []}
                         topStoryCoverage={topStoryCenter?.overview.coverage_score ?? null}
@@ -287,11 +316,10 @@ export default function StoriesPage() {
     );
 }
 
-function StoryDeskSection({
+function StoryQueuesSection({
     stories,
     totalStories,
-    needsActionCount,
-    recentlyUpdatedCount,
+    queues,
     topStory,
     topStoryGaps,
     topStoryCoverage,
@@ -303,8 +331,12 @@ function StoryDeskSection({
 }: {
     stories: StoryRecord[];
     totalStories: number;
-    needsActionCount: number;
-    recentlyUpdatedCount: number;
+    queues: {
+        active: StoryRecord[];
+        needsUpdate: StoryRecord[];
+        lostMomentum: StoryRecord[];
+        needsNewAngle: StoryRecord[];
+    };
     topStory: StoryRecord | null;
     topStoryGaps: StoryGapItem[];
     topStoryCoverage: number | null;
@@ -314,22 +346,26 @@ function StoryDeskSection({
     onRunNextAction: () => void;
     onOpenStory: (storyId: number) => void;
 }) {
-    const urgentStories = useMemo(() => stories.filter((story) => storyActionScore(story) >= 45).slice(0, 5), [stories]);
+    const quickActionStories = useMemo(
+        () => [...queues.needsUpdate, ...queues.active, ...queues.needsNewAngle].slice(0, 5),
+        [queues],
+    );
 
     return (
         <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-4 space-y-4">
             <div>
                 <h2 className="text-sm font-semibold text-white inline-flex items-center gap-1.5">
                     <ClipboardList className="w-4 h-4 text-cyan-300" />
-                    Story Desk
+                    طبقة متابعة القصص
                 </h2>
-                <p className="text-[11px] text-slate-400 mt-1">قرار سريع: ما الجديد؟ ما الذي ينقص؟ وما الإجراء التالي؟</p>
+                <p className="text-[11px] text-slate-400 mt-1">نرى فقط ما يحتاج متابعة فعلية: القصص النشطة، ما يحتاج تحديثًا، ما فقد الزخم، وما يحتاج زاوية جديدة.</p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-xs">
                 <MetricCard label="إجمالي القصص" value={totalStories} />
-                <MetricCard label="تحتاج إجراء الآن" value={needsActionCount} />
-                <MetricCard label="تحديثات آخر 12 ساعة" value={recentlyUpdatedCount} />
+                <MetricCard label="قصص نشطة" value={queues.active.length} />
+                <MetricCard label="تحتاج تحديثًا" value={queues.needsUpdate.length} />
+                <MetricCard label="فقدت الزخم" value={queues.lostMomentum.length} />
             </div>
 
             {stories.length === 0 ? (
@@ -340,11 +376,11 @@ function StoryDeskSection({
                 <>
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
                         <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3 space-y-2">
-                            <p className="text-xs font-semibold text-cyan-100">Overview</p>
+                            <p className="text-xs font-semibold text-cyan-100">القصة الأهم الآن</p>
                             {topStory ? (
                                 <>
                                     <p className="text-sm text-white line-clamp-2">{topStory.title}</p>
-                                    <p className="text-[11px] text-cyan-100/90">{storyNeedsNowReason(topStory)}</p>
+                                    <p className="text-[11px] text-cyan-100/90">{storyQueueReason(topStory)}</p>
                                     <p className="text-[10px] text-slate-300">
                                         التغطية: {topStoryCoverage ?? '-'}% • آخر تحديث: {formatRelativeTime(topStory.updated_at || topStory.created_at || '')}
                                     </p>
@@ -355,7 +391,7 @@ function StoryDeskSection({
                         </div>
 
                         <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
-                            <p className="text-xs font-semibold text-amber-100">What&apos;s Missing</p>
+                            <p className="text-xs font-semibold text-amber-100">ما الذي ينقص؟</p>
                             {topStoryGapsLoading ? (
                                 <p className="text-[11px] text-slate-300">جاري تحليل الفجوات...</p>
                             ) : topStoryGaps.length > 0 ? (
@@ -371,7 +407,7 @@ function StoryDeskSection({
                         </div>
 
                         <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 space-y-2">
-                            <p className="text-xs font-semibold text-emerald-100">Next Actions</p>
+                            <p className="text-xs font-semibold text-emerald-100">الإجراء التالي</p>
                             {topStory ? (
                                 <>
                                     <p className="text-[11px] text-emerald-100/90">الإجراء المقترح: {topStoryNextActionLabel}</p>
@@ -401,10 +437,41 @@ function StoryDeskSection({
                         </div>
                     </div>
 
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                        <StoryQueueCard
+                            title="قصص نشطة"
+                            hint="يجري عليها العمل الآن أو شهدت تحديثًا حديثًا."
+                            tone="cyan"
+                            stories={queues.active}
+                            onOpenStory={onOpenStory}
+                        />
+                        <StoryQueueCard
+                            title="تحتاج تحديثًا"
+                            hint="قصص تحتاج متابعة أو استكمالًا قبل أن تبرد."
+                            tone="amber"
+                            stories={queues.needsUpdate}
+                            onOpenStory={onOpenStory}
+                        />
+                        <StoryQueueCard
+                            title="فقدت الزخم"
+                            hint="قصص ذات قيمة لكنها ابتعدت زمنيًا وتحتاج قرارًا: تنشيط أم إغلاق؟"
+                            tone="rose"
+                            stories={queues.lostMomentum}
+                            onOpenStory={onOpenStory}
+                        />
+                        <StoryQueueCard
+                            title="تحتاج زاوية جديدة"
+                            hint="القصة اكتسبت مواد كافية لكن تحتاج مدخلًا أو زاوية متابعة جديدة."
+                            tone="emerald"
+                            stories={queues.needsNewAngle}
+                            onOpenStory={onOpenStory}
+                        />
+                    </div>
+
                     <div className="rounded-xl border border-white/10 bg-black/20 p-2">
-                        <p className="text-xs text-slate-300 mb-2">قصص تحتاج إجراء الآن (حتى 5)</p>
+                        <p className="text-xs text-slate-300 mb-2">أقرب 5 قصص لإجراء سريع</p>
                         <div className="space-y-2">
-                            {urgentStories.length > 0 ? urgentStories.map((story) => (
+                            {quickActionStories.length > 0 ? quickActionStories.map((story) => (
                                 <div
                                     key={`desk-row-${story.id}`}
                                     className="rounded-lg border border-white/10 bg-white/5 p-2 flex items-center justify-between gap-3"
@@ -412,7 +479,7 @@ function StoryDeskSection({
                                     <div className="min-w-0">
                                         <p className="text-[11px] text-cyan-300">{story.story_key}</p>
                                         <p className="text-sm text-white line-clamp-1">{story.title}</p>
-                                        <p className="text-[10px] text-slate-400 line-clamp-1">{story.summary || storyNeedsNowReason(story)}</p>
+                                        <p className="text-[10px] text-slate-400 line-clamp-1">{storyQueueReason(story)} • {storyNextActionLabel(story)}</p>
                                     </div>
                                     <button
                                         type="button"
@@ -429,6 +496,70 @@ function StoryDeskSection({
                         </div>
                     </div>
                 </>
+            )}
+        </section>
+    );
+}
+
+function StoryQueueCard({
+    title,
+    hint,
+    tone,
+    stories,
+    onOpenStory,
+}: {
+    title: string;
+    hint: string;
+    tone: 'cyan' | 'amber' | 'rose' | 'emerald';
+    stories: StoryRecord[];
+    onOpenStory: (storyId: number) => void;
+}) {
+    const toneClasses = {
+        cyan: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-100',
+        amber: 'border-amber-500/30 bg-amber-500/10 text-amber-100',
+        rose: 'border-rose-500/30 bg-rose-500/10 text-rose-100',
+        emerald: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100',
+    }[tone];
+
+    return (
+        <section className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+                <div>
+                    <h3 className={cn('text-sm font-semibold', toneClasses)}>{title}</h3>
+                    <p className="text-[11px] text-slate-400 mt-1">{hint}</p>
+                </div>
+                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-slate-300">{stories.length}</span>
+            </div>
+
+            {stories.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-white/10 bg-white/5 px-3 py-4 text-[11px] text-slate-500">
+                    لا توجد قصص في هذا المسار الآن.
+                </div>
+            ) : (
+                <div className="space-y-2">
+                    {stories.slice(0, 4).map((story) => (
+                        <div key={`${title}-${story.id}`} className="rounded-lg border border-white/10 bg-white/5 p-3">
+                            <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                    <p className="text-[11px] text-cyan-300">{story.story_key}</p>
+                                    <p className="text-sm text-white line-clamp-1">{story.title}</p>
+                                    <p className="text-[11px] text-slate-400 mt-1 line-clamp-2">{storyQueueReason(story)}</p>
+                                    <p className="text-[10px] text-slate-500 mt-2">
+                                        الإجراء التالي: {storyNextActionLabel(story)} • آخر نشاط: {formatRelativeTime(story.updated_at || story.created_at || '')}
+                                    </p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => onOpenStory(story.id)}
+                                    className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-[10px] text-slate-200"
+                                >
+                                    فتح القصة
+                                    <ArrowLeftCircle className="w-3 h-3" />
+                                </button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
             )}
         </section>
     );
@@ -649,7 +780,6 @@ function StoryControlCenterDrawer({ storyId, onClose }: { storyId: number; onClo
     const [showAdvanced, setShowAdvanced] = useState(false);
     const [taskMsg, setTaskMsg] = useState<string | null>(null);
     const [taskErr, setTaskErr] = useState<string | null>(null);
-    const [lastSeenAt, setLastSeenAt] = useState<string | null>(null);
 
     const { data, isLoading, error } = useQuery({
         queryKey: ['stories-control-center', storyId],
@@ -657,15 +787,14 @@ function StoryControlCenterDrawer({ storyId, onClose }: { storyId: number; onClo
     });
 
     const center: StoryControlCenterResponse | undefined = data?.data;
+    const centerTimeline = useMemo(() => center?.timeline || [], [center?.timeline]);
     const timeline = useMemo(() => {
-        if (!center?.timeline) return [];
-        return [...center.timeline].sort((a, b) => storyTimestamp(b.created_at) - storyTimestamp(a.created_at));
-    }, [center?.timeline]);
+        return [...centerTimeline].sort((a, b) => storyTimestamp(b.created_at) - storyTimestamp(a.created_at));
+    }, [centerTimeline]);
 
-    useEffect(() => {
-        if (typeof window === 'undefined') return;
-        const key = `story_last_seen_${storyId}`;
-        setLastSeenAt(window.localStorage.getItem(key));
+    const lastSeenAt = useMemo(() => {
+        if (typeof window === 'undefined') return null;
+        return window.localStorage.getItem(`story_last_seen_${storyId}`);
     }, [storyId]);
 
     const lastSeenMs = useMemo(() => storyTimestamp(lastSeenAt), [lastSeenAt]);
@@ -1006,6 +1135,24 @@ function storyHoursSinceLastUpdate(story: StoryRecord) {
     return Math.max(0, (Date.now() - ts) / 3_600_000);
 }
 
+function classifyStoryQueue(story: StoryRecord): 'active' | 'update' | 'lost_momentum' | 'new_angle' {
+    const hours = storyHoursSinceLastUpdate(story);
+    const itemCount = story.items?.length || 0;
+    const priority = story.priority || 0;
+    const status = (story.status || '').toLowerCase();
+
+    if (hours >= 48 || (hours >= 36 && priority >= 7)) {
+        return 'lost_momentum';
+    }
+    if (itemCount >= 6 && hours >= 18 && Boolean(story.summary)) {
+        return 'new_angle';
+    }
+    if (!story.summary || status.includes('draft') || hours >= 12) {
+        return 'update';
+    }
+    return 'active';
+}
+
 function storyActionScore(story: StoryRecord) {
     const status = (story.status || '').toLowerCase();
     const hours = storyHoursSinceLastUpdate(story);
@@ -1018,16 +1165,28 @@ function storyActionScore(story: StoryRecord) {
     return score;
 }
 
-function storyNeedsNowReason(story: StoryRecord) {
-    const hours = storyHoursSinceLastUpdate(story);
-    if (hours <= 3) return 'تحديثات حديثة؛ تحتاج متابعة مباشرة.';
-    if (!story.summary) return 'لا يوجد ملخص واضح للقصة حتى الآن.';
-    if ((story.priority || 0) >= 8) return 'القصة ذات أولوية عالية وتحتاج متابعة.';
-    return 'التغطية بحاجة مراجعة فجوات قبل الإغلاق.';
+function storyQueueReason(story: StoryRecord) {
+    const bucket = classifyStoryQueue(story);
+    if (bucket === 'lost_momentum') {
+        return 'القصة ابتعدت زمنيًا عن آخر تحديث وتحتاج قرارًا واضحًا: إعادة تنشيط أو إغلاق مؤقت.';
+    }
+    if (bucket === 'new_angle') {
+        return 'القصة جمعت مواد كافية، لكن قيمتها الآن في زاوية جديدة أو معالجة أعمق.';
+    }
+    if (bucket === 'update') {
+        if (!story.summary) {
+            return 'القصة موجودة لكن ما زالت تحتاج ملخصًا واضحًا وزاوية متابعة قبل أن تصبح سهلة التداول.';
+        }
+        return 'مرّ وقت كافٍ منذ آخر تحديث، ومن الأفضل دفع متابعة جديدة أو استكمال الفجوات.';
+    }
+    return 'هناك نشاط حديث أو أولوية قائمة تجعل هذه القصة ضمن المتابعة الجارية الآن.';
 }
 
 function storyNextActionLabel(story: StoryRecord) {
+    const bucket = classifyStoryQueue(story);
     const status = (story.status || '').toLowerCase();
+    if (bucket === 'lost_momentum') return 'حسم قرار التنشيط أو الإغلاق';
+    if (bucket === 'new_angle') return 'إنشاء زاوية أو معالجة جديدة';
     if (status.includes('draft')) return 'إنهاء المتابعة الحالية';
     if (!story.summary) return 'إضافة ملخص وزاوية';
     if ((story.priority || 0) >= 8) return 'إنشاء متابعة قصيرة';

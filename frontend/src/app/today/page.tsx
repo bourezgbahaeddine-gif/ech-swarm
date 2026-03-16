@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import Link from 'next/link';
 import { useMemo, type ComponentType } from 'react';
@@ -36,16 +36,27 @@ type Role =
     | 'fact_checker'
     | 'observer';
 
+type QueueTone = 'default' | 'warn' | 'danger' | 'success';
+
 type QueueItem = {
     id: string;
     title: string;
     subtitle: string;
+    workflowLabel: string;
     reason: string;
     nextAction: string;
     href: string;
     status: string;
     timestamp?: string | null;
-    tone?: 'default' | 'warn' | 'danger' | 'success';
+    blockers?: string[];
+    tone?: QueueTone;
+};
+
+type SummaryCardData = {
+    label: string;
+    value: number;
+    hint: string;
+    tone?: QueueTone;
 };
 
 function normalizeRole(role: string): Role | null {
@@ -69,8 +80,8 @@ function articleTitle(article: ArticleBrief): string {
     return article.title_ar || article.original_title || `مادة #${article.id}`;
 }
 
-function articleTimestamp(article: ArticleBrief): string {
-    return article.created_at || article.crawled_at;
+function articleTimestamp(article: ArticleBrief): string | null {
+    return article.updated_at || article.created_at || article.crawled_at || null;
 }
 
 function ageInHours(value?: string | null): number {
@@ -80,46 +91,64 @@ function ageInHours(value?: string | null): number {
     return Math.max(0, (Date.now() - time) / 3_600_000);
 }
 
-function articleToQueueItem(article: ArticleBrief, config: {
-    reason: string;
-    nextAction: string;
-    href: string;
-    tone?: QueueItem['tone'];
-}): QueueItem {
+function articleToQueueItem(
+    article: ArticleBrief,
+    config: {
+        workflowLabel: string;
+        reason: string;
+        nextAction: string;
+        href: string;
+        tone?: QueueTone;
+        blockers?: string[];
+    },
+): QueueItem {
     return {
         id: `article-${article.id}-${article.status}`,
         title: articleTitle(article),
-        subtitle: `${article.source_name || 'بدون مصدر ظاهر'} · ${article.status || 'unknown'}`,
+        subtitle: `${article.source_name || 'بدون مصدر ظاهر'} · ${article.status || 'غير محدد'}`,
+        workflowLabel: config.workflowLabel,
         reason: config.reason,
         nextAction: config.nextAction,
         href: config.href,
         status: article.status || 'unknown',
         timestamp: articleTimestamp(article),
+        blockers: config.blockers || [],
         tone: config.tone,
     };
 }
 
-function chiefItemToQueueItem(item: ChiefPendingItem, config?: {
-    nextAction?: string;
-    href?: string;
-    reason?: string;
-    tone?: QueueItem['tone'];
-}): QueueItem {
-    const blocking = [
+function chiefItemToQueueItem(
+    item: ChiefPendingItem,
+    config?: {
+        workflowLabel?: string;
+        nextAction?: string;
+        href?: string;
+        reason?: string;
+        tone?: QueueTone;
+    },
+): QueueItem {
+    const blockers = [
         ...(item.decision_card?.quality_issues || []),
         ...(item.decision_card?.claims_issues || []),
         ...(item.policy?.required_fixes || []),
     ].filter(Boolean);
+
     return {
         id: `chief-${item.id}-${item.status || 'unknown'}`,
         title: item.title_ar || item.original_title || `مادة #${item.id}`,
         subtitle: `${item.source_name || 'بدون مصدر ظاهر'} · ${item.status || 'بانتظار القرار'}`,
-        reason: config?.reason || (blocking[0] ? `تحتاج قرارًا مع تنبيه: ${blocking[0]}` : 'وصلت إليك لأن المادة دخلت مسار اعتماد رئيس التحرير.'),
-        nextAction: config?.nextAction || 'افتح قرار الاعتماد',
+        workflowLabel: config?.workflowLabel || 'بانتظار اعتماد رئيس التحرير',
+        reason:
+            config?.reason ||
+            (blockers[0]
+                ? `وصلت إليك لأن المادة دخلت مرحلة الاعتماد ومعها تنبيه واضح: ${blockers[0]}`
+                : 'وصلت إليك لأن المادة دخلت مرحلة اعتماد رئيس التحرير وتحتاج قرارًا نهائيًا.'),
+        nextAction: config?.nextAction || 'اتخذ القرار',
         href: config?.href || (item.work_id ? `/workspace-drafts?article_id=${item.id}&work_id=${encodeURIComponent(item.work_id)}` : '/editorial'),
         status: item.status || 'ready_for_chief_approval',
         timestamp: item.updated_at,
-        tone: config?.tone || (item.is_breaking ? 'danger' : blocking.length ? 'warn' : 'default'),
+        blockers,
+        tone: config?.tone || (item.is_breaking ? 'danger' : blockers.length ? 'warn' : 'default'),
     };
 }
 
@@ -128,34 +157,25 @@ function notificationToQueueItem(item: DashboardNotification): QueueItem {
         id: `notification-${item.id}`,
         title: item.title,
         subtitle: item.type,
+        workflowLabel: 'تنبيه غرفة الأخبار',
         reason: item.message,
-        nextAction: item.article_id ? 'افتح الخبر المرتبط' : 'افتح طابور العمل',
-        href: item.article_id ? `/news?status=candidate` : '/today',
+        nextAction: item.article_id ? 'افتح الخبر المرتبط' : 'افتح طابور اليوم',
+        href: item.article_id ? `/news/${item.article_id}` : '/today',
         status: item.severity,
         timestamp: item.created_at,
         tone: item.severity === 'high' ? 'danger' : item.severity === 'medium' ? 'warn' : 'default',
     };
 }
 
-function SummaryCard({
-    label,
-    value,
-    hint,
-    tone = 'default',
-}: {
-    label: string;
-    value: number;
-    hint: string;
-    tone?: 'default' | 'warn' | 'danger' | 'success';
-}) {
+function SummaryCard({ label, value, hint, tone = 'default' }: SummaryCardData) {
     const toneClasses =
         tone === 'danger'
             ? 'border-rose-500/30 bg-rose-500/10 text-rose-100'
             : tone === 'warn'
-                ? 'border-amber-500/30 bg-amber-500/10 text-amber-100'
-                : tone === 'success'
-                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100'
-                    : 'border-white/10 bg-white/5 text-white';
+              ? 'border-amber-500/30 bg-amber-500/10 text-amber-100'
+              : tone === 'success'
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100'
+                : 'border-white/10 bg-white/5 text-white';
 
     return (
         <div className={cn('rounded-2xl border p-4', toneClasses)}>
@@ -163,6 +183,26 @@ function SummaryCard({
             <div className="mt-2 text-3xl font-bold">{value}</div>
             <div className="mt-2 text-xs opacity-80">{hint}</div>
         </div>
+    );
+}
+
+function WorkflowStrip({ items }: { items: Array<{ label: string; count: number; hint: string }> }) {
+    return (
+        <section className="rounded-3xl border border-white/10 bg-white/5 p-4">
+            <div className="flex items-center gap-2 text-white mb-3">
+                <LayoutDashboard className="w-4 h-4 text-cyan-300" />
+                <h2 className="text-sm font-semibold">المسار الحالي</h2>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {items.map((item) => (
+                    <div key={item.label} className="rounded-2xl border border-white/10 bg-white/[0.04] p-3">
+                        <div className="text-xs text-slate-400">{item.label}</div>
+                        <div className="mt-2 text-2xl font-semibold text-white">{item.count}</div>
+                        <div className="mt-2 text-xs text-slate-400 leading-6">{item.hint}</div>
+                    </div>
+                ))}
+            </div>
+        </section>
     );
 }
 
@@ -206,10 +246,10 @@ function QueueSection({
                                 item.tone === 'danger'
                                     ? 'border-rose-500/25 bg-rose-500/10'
                                     : item.tone === 'warn'
-                                        ? 'border-amber-500/25 bg-amber-500/10'
-                                        : item.tone === 'success'
-                                            ? 'border-emerald-500/25 bg-emerald-500/10'
-                                            : 'border-white/10 bg-white/5',
+                                      ? 'border-amber-500/25 bg-amber-500/10'
+                                      : item.tone === 'success'
+                                        ? 'border-emerald-500/25 bg-emerald-500/10'
+                                        : 'border-white/10 bg-white/5',
                             )}
                         >
                             <div className="flex items-start justify-between gap-4">
@@ -219,12 +259,27 @@ function QueueSection({
                                         <span className={cn('px-2 py-0.5 rounded-md text-[10px] font-medium border', getStatusColor((item.status || '').toLowerCase()))}>
                                             {item.status}
                                         </span>
+                                        <span className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] text-slate-300">
+                                            {item.workflowLabel}
+                                        </span>
                                     </div>
                                     <div className="mt-1 text-xs text-slate-400">{item.subtitle}</div>
-                                    <div className="mt-3 text-sm text-slate-200 leading-6">{truncate(item.reason, 170)}</div>
+                                    <div className="mt-3 text-sm text-slate-200 leading-6">{truncate(item.reason, 180)}</div>
                                     <div className="mt-2 text-xs text-cyan-200">
                                         الإجراء التالي: <span className="font-semibold">{item.nextAction}</span>
                                     </div>
+                                    {item.blockers && item.blockers.length > 0 && (
+                                        <div className="mt-3 flex flex-wrap gap-1.5">
+                                            {item.blockers.slice(0, 2).map((blocker) => (
+                                                <span
+                                                    key={`${item.id}-${blocker}`}
+                                                    className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-100"
+                                                >
+                                                    عائق: {truncate(blocker, 80)}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="flex shrink-0 flex-col items-end gap-3">
@@ -317,7 +372,8 @@ export default function TodayPage() {
     const journalistNow = useMemo(() => {
         const returned = reservations.slice(0, 3).map((article) =>
             articleToQueueItem(article, {
-                reason: 'عادت هذه المادة مع تحفظات أو ملاحظات وتحتاج تحديثًا سريعًا قبل إعادة الإرسال.',
+                workflowLabel: 'عاد من الاعتماد بتحفظات',
+                reason: 'ظهرت لك الآن لأن المادة رجعت من رئيس التحرير مع ملاحظات واضحة وتحتاج تعديلًا سريعًا قبل إعادة الإرسال.',
                 nextAction: 'افتح المسودة وعدّل',
                 href: `/workspace-drafts?article_id=${article.id}`,
                 tone: 'warn',
@@ -328,7 +384,8 @@ export default function TodayPage() {
             .slice(0, 3)
             .map((article) =>
                 articleToQueueItem(article, {
-                    reason: 'ظهرت كمادة عاجلة وتحتاج قرارًا سريعًا: ترشيح، إعادة صياغة، أو متابعة.',
+                    workflowLabel: 'مرشّح عاجل في طابور الأخبار',
+                    reason: 'دخلت هذه المادة نطاقك لأن النظام رصدها كمادة عاجلة وتحتاج قرارًا تحريريًا سريعًا.',
                     nextAction: 'افتح طابور الأخبار',
                     href: '/news?status=candidate',
                     tone: 'danger',
@@ -340,14 +397,16 @@ export default function TodayPage() {
     const journalistNext = useMemo(() => {
         const followUps = draftGenerated.slice(0, 6).map((article) =>
             articleToQueueItem(article, {
-                reason: 'هذه المادة وصلت إلى مرحلة المسودة وتحتاج استكمالًا أو فحصًا سريعًا ثم إرسالًا للاعتماد.',
+                workflowLabel: 'مسودة قيد الاستكمال',
+                reason: 'المادة موجودة في مرحلة draft_generated؛ أي أنها دخلت مساحة التحرير وتحتاج استكمالًا أو فحصًا سريعًا ثم إرسالًا للاعتماد.',
                 nextAction: 'أكمل في المحرر',
                 href: `/workspace-drafts?article_id=${article.id}`,
             }),
         );
         const freshCandidates = pendingCandidates.slice(0, Math.max(0, 6 - followUps.length)).map((article) =>
             articleToQueueItem(article, {
-                reason: 'وصلت حديثًا إلى طابور الأخبار وتنتظر بدء العمل التحريري عليها.',
+                workflowLabel: 'مرشّح جديد في طابور الأخبار',
+                reason: 'دخلت المادة حديثًا إلى قائمة الأخبار وتنتظر بدء العمل التحريري عليها.',
                 nextAction: 'افتح قائمة الأخبار',
                 href: '/news?status=candidate',
             }),
@@ -361,7 +420,8 @@ export default function TodayPage() {
             .slice(0, 4)
             .map((article) =>
                 articleToQueueItem(article, {
-                    reason: 'هذه المادة بقيت في مرحلة المسودة أكثر من المعتاد، وقد تتأخر إذا لم تُستكمل الآن.',
+                    workflowLabel: 'مسودة متأخرة',
+                    reason: 'هذه المادة بقيت في draft_generated أكثر من اللازم، ما يعني أنها قد تتأخر عن المسار الطبيعي إذا لم تُستكمل الآن.',
                     nextAction: 'استكملها الآن',
                     href: `/workspace-drafts?article_id=${article.id}`,
                     tone: 'warn',
@@ -381,9 +441,10 @@ export default function TodayPage() {
             .slice(0, 6)
             .map((item) =>
                 chiefItemToQueueItem(item, {
+                    workflowLabel: 'بانتظار قرار رئيس التحرير',
                     nextAction: 'اتخذ القرار',
                     reason: item.is_breaking
-                        ? 'هذه مادة عاجلة وصلت إلى طابور الاعتماد ويجب حسمها الآن.'
+                        ? 'المادة عاجلة ووصلت الآن إلى مرحلة الاعتماد النهائي، لذلك تحتاج حسمًا مباشرًا.'
                         : undefined,
                 }),
             );
@@ -392,7 +453,8 @@ export default function TodayPage() {
     const chiefNext = useMemo(() => {
         const readyItems = readyManualPublish.slice(0, 3).map((article) =>
             articleToQueueItem(article, {
-                reason: 'هذه المادة اجتازت الاعتماد وأصبحت جاهزة للنشر اليدوي أو التسليم لفريق النشر.',
+                workflowLabel: 'جاهز للنشر اليدوي',
+                reason: 'اجتازت المادة الاعتماد وأصبحت في ready_for_manual_publish، أي أنها جاهزة للتسليم أو النشر اليدوي.',
                 nextAction: 'راجع الجاهز للنشر',
                 href: '/news?status=ready_for_manual_publish',
                 tone: 'success',
@@ -400,7 +462,8 @@ export default function TodayPage() {
         );
         const reservationItems = reservations.slice(0, Math.max(0, 6 - readyItems.length)).map((article) =>
             articleToQueueItem(article, {
-                reason: 'اعتماد بتحفظات ما زال يحتاج متابعة حتى لا يبقى معلقًا في المنطقة الرمادية.',
+                workflowLabel: 'اعتماد بتحفظات',
+                reason: 'هذه المواد ما زالت في حالة تحفظات؛ تحتاج متابعة حتى لا تبقى عالقة بين التحرير والاعتماد.',
                 nextAction: 'راجع التحفظات',
                 href: '/editorial',
                 tone: 'warn',
@@ -415,8 +478,9 @@ export default function TodayPage() {
             .slice(0, 4)
             .map((item) =>
                 chiefItemToQueueItem(item, {
-                    nextAction: 'حسم القرار الآن',
-                    reason: 'هذه المادة بقيت في طابور الاعتماد أكثر من الحد المرغوب وتحتاج حسمًا سريعًا.',
+                    workflowLabel: 'اعتماد متأخر',
+                    nextAction: 'احسم القرار الآن',
+                    reason: 'هذه المادة بقيت في طابور الاعتماد أكثر من الحد المرغوب، وقد تعطل المسار إن لم تُحسم الآن.',
                     tone: 'danger',
                 }),
             );
@@ -427,27 +491,26 @@ export default function TodayPage() {
         return [...staleApprovals, ...criticalNotifications].slice(0, 4);
     }, [chiefPending, notifications]);
 
-    const summaryCards = useMemo(() => {
+    const summaryCards = useMemo<SummaryCardData[]>(() => {
         if (isChiefFlow) {
             const overdue = chiefPending.filter((item) => ageInHours(item.updated_at) >= 2).length;
             return [
                 {
                     label: 'بانتظارك',
                     value: chiefPending.length,
-                    hint: 'مواد وصلت إلى مرحلة قرار رئيس التحرير.',
-                    tone: 'default' as const,
+                    hint: 'مواد دخلت مرحلة قرار رئيس التحرير.',
                 },
                 {
                     label: 'متأخر',
                     value: overdue,
                     hint: 'مواد تحتاج حسمًا سريعًا حتى لا يتعطل المسار.',
-                    tone: overdue > 0 ? ('danger' as const) : ('default' as const),
+                    tone: overdue > 0 ? 'danger' : 'default',
                 },
                 {
                     label: 'جاهز اليوم',
                     value: readyManualPublish.length,
                     hint: 'مواد جاهزة للنشر اليدوي بعد الاعتماد.',
-                    tone: readyManualPublish.length > 0 ? ('success' as const) : ('default' as const),
+                    tone: readyManualPublish.length > 0 ? 'success' : 'default',
                 },
             ];
         }
@@ -457,22 +520,61 @@ export default function TodayPage() {
                 label: 'جديد لك',
                 value: pendingCandidates.length,
                 hint: 'مواد دخلت طابور الأخبار وتحتاج بدء العمل.',
-                tone: 'default' as const,
             },
             {
-                label: 'يحتاج متابعة',
+                label: 'قيد الكتابة',
                 value: draftGenerated.length,
-                hint: 'مواد في مرحلة المسودة أو الاستكمال.',
-                tone: draftGenerated.length > 6 ? ('warn' as const) : ('default' as const),
+                hint: 'مواد في draft_generated وتحتاج استكمالًا أو إرسالًا للاعتماد.',
+                tone: draftGenerated.length > 6 ? 'warn' : 'default',
             },
             {
                 label: 'عاد للمراجعة',
                 value: reservations.length,
                 hint: 'مواد رجعت بتحفظات أو ملاحظات.',
-                tone: reservations.length > 0 ? ('warn' as const) : ('default' as const),
+                tone: reservations.length > 0 ? 'warn' : 'default',
             },
         ];
     }, [draftGenerated.length, isChiefFlow, pendingCandidates.length, chiefPending, readyManualPublish.length, reservations.length]);
+
+    const workflowItems = useMemo(() => {
+        if (isChiefFlow) {
+            return [
+                {
+                    label: 'بانتظار الاعتماد',
+                    count: chiefPending.length,
+                    hint: 'المواد التي دخلت نطاق قرار رئيس التحرير الآن.',
+                },
+                {
+                    label: 'بتحفظات',
+                    count: reservations.length,
+                    hint: 'مواد تحتاج متابعة بعد قرار بتحفظات.',
+                },
+                {
+                    label: 'جاهز للنشر اليدوي',
+                    count: readyManualPublish.length,
+                    hint: 'مواد اجتازت الاعتماد ويمكن تسليمها للنشر.',
+                },
+            ];
+        }
+
+        return [
+            {
+                label: 'مرشّح جديد',
+                count: pendingCandidates.length,
+                hint: 'مواد دخلت الأخبار وتنتظر بدء العمل.',
+            },
+            {
+                label: 'draft_generated',
+                count: draftGenerated.length,
+                hint: 'مواد داخل التحرير وتحتاج استكمالًا أو فحصًا سريعًا.',
+            },
+            {
+                label: 'عاد بتحفظات',
+                count: reservations.length,
+                hint: 'مواد رجعت من الاعتماد وتحتاج تعديلًا قبل إعادة الإرسال.',
+            },
+        ];
+    }, [draftGenerated.length, isChiefFlow, pendingCandidates.length, chiefPending.length, readyManualPublish.length, reservations.length]);
 
     const isLoading =
         pendingCandidatesQuery.isLoading ||
@@ -493,8 +595,8 @@ export default function TodayPage() {
                     </h1>
                     <p className="text-sm text-slate-400 mt-2 max-w-3xl leading-7">
                         {isChiefFlow
-                            ? 'هذه الصفحة تعرض ما دخل نطاق قرارك الآن، لماذا وصل إليك، وما الإجراء التالي لحسمه دون الغرق في بقية النظام.'
-                            : 'هذه الصفحة تعرض ما دخل نطاق عملك الآن، لماذا ظهر لك، وما الخطوة التالية لإنهاء المادة بأقل احتكاك.'}
+                            ? 'هذه الصفحة تعرض ما دخل نطاق قرارك الآن، ولماذا وصل إليك، وما الخطوة التالية داخل مسار الاعتماد والنشر اليدوي.'
+                            : 'هذه الصفحة تعرض ما دخل نطاق عملك الآن، ولماذا ظهر لك، وما الخطوة التالية داخل مسار الأخبار والتحرير.'}
                     </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -508,6 +610,8 @@ export default function TodayPage() {
                     </Link>
                 </div>
             </div>
+
+            <WorkflowStrip items={workflowItems} />
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {summaryCards.map((card) => (
@@ -523,24 +627,24 @@ export default function TodayPage() {
             ) : (
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
                     <QueueSection
-                        title={isChiefFlow ? 'قرار الآن' : 'ابدأ الآن'}
-                        hint={isChiefFlow ? 'المواد التي تحتاج حسمًا سريعًا من رئيس التحرير.' : 'أهم ما دخل نطاقك الآن ويحتاج بدء العمل أو تصحيحًا سريعًا.'}
+                        title={isChiefFlow ? 'دخل نطاقك الآن' : 'ابدأ الآن'}
+                        hint={isChiefFlow ? 'المواد التي تحتاج قرارًا مباشرًا من رئيس التحرير.' : 'أهم ما دخل نطاقك الآن ويحتاج بدء العمل أو تصحيحًا سريعًا.'}
                         icon={Zap}
                         items={isChiefFlow ? chiefNow : journalistNow}
                         emptyLabel={isChiefFlow ? 'لا توجد مواد حرجة بانتظار القرار الآن.' : 'لا توجد عناصر عاجلة الآن.'}
                     />
 
                     <QueueSection
-                        title="بعد ذلك"
-                        hint={isChiefFlow ? 'المواد الجاهزة للمتابعة بعد حسم العاجل.' : 'المواد القادمة في دورك بعد إنهاء العناصر العاجلة.'}
+                        title="الخطوة التالية في المسار"
+                        hint={isChiefFlow ? 'العناصر التالية بعد حسم العاجل: جاهز للنشر اليدوي أو يحتاج متابعة بتحفظات.' : 'المواد التالية في مسار الأخبار والتحرير بعد إنهاء العاجل.'}
                         icon={CheckCircle2}
                         items={isChiefFlow ? chiefNext : journalistNext}
                         emptyLabel="لا توجد عناصر إضافية في هذه اللحظة."
                     />
 
                     <QueueSection
-                        title="يحتاج انتباهًا"
-                        hint={isChiefFlow ? 'مواد متأخرة أو إشارات عالية الخطورة قد تعطل المسار.' : 'مواد قد تتأخر أو تنبيهات تستحق الانتباه قبل أن تتعطل.'}
+                        title="ما الذي يعيق التقدم؟"
+                        hint={isChiefFlow ? 'مواد متأخرة أو عالية الخطورة قد تعطل الاعتماد.' : 'مواد قد تتأخر أو تنبيهات تستحق الانتباه قبل أن تتعطل.'}
                         icon={isChiefFlow ? ShieldAlert : AlertTriangle}
                         items={isChiefFlow ? chiefRisk : journalistRisk}
                         emptyLabel="لا توجد عناصر متعثرة حاليًا."
@@ -549,21 +653,19 @@ export default function TodayPage() {
             )}
 
             <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
-                <h2 className="text-sm font-semibold text-white mb-2">
-                    لماذا هذه الصفحة مهمة؟
-                </h2>
+                <h2 className="text-sm font-semibold text-white mb-2">كيف نقرأ هذه الصفحة؟</h2>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-300">
                     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-                        <div className="font-semibold text-white mb-1">لماذا وصل إليك؟</div>
-                        <div>كل بطاقة تشرح سبب الظهور بدل ترك المستخدم يفسّر الحالة بنفسه.</div>
+                        <div className="font-semibold text-white mb-1">ما الذي دخل نطاقي؟</div>
+                        <div>كل بطاقة مرتبطة بحالة حقيقية في الـ workflow مثل draft_generated أو ready_for_manual_publish أو بانتظار الاعتماد.</div>
                     </div>
                     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-                        <div className="font-semibold text-white mb-1">ما الإجراء التالي؟</div>
-                        <div>كل عنصر يوجّهك إلى الخطوة المتوقعة داخل المسار التحريري الحالي.</div>
+                        <div className="font-semibold text-white mb-1">لماذا ظهرت لي؟</div>
+                        <div>كل عنصر يشرح سبب ظهوره الآن حتى لا نترك المستخدم يفسّر الحالة بنفسه أو يضيع بين الصفحات.</div>
                     </div>
                     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-                        <div className="font-semibold text-white mb-1">ما الذي يعيق التقدم؟</div>
-                        <div>العناصر المتأخرة أو المتحفظ عليها تظهر منفصلة حتى لا تضيع داخل القوائم العامة.</div>
+                        <div className="font-semibold text-white mb-1">ما الذي يمنع التقدم؟</div>
+                        <div>العناصر المتأخرة أو التي تحمل تحفظات أو عوائق تظهر منفصلة حتى لا تضيع داخل القوائم العامة.</div>
                     </div>
                 </div>
             </div>
