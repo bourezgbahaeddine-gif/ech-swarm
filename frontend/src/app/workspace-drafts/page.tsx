@@ -750,7 +750,9 @@ function appendEvidenceLink(existing: string, nextValue: string): string {
 function WorkspaceDraftsPageContent() {
     const queryClient = useQueryClient();
     const { user } = useAuth();
-    const isDirector = (user?.role || '').toLowerCase() === 'director';
+    const userRole = (user?.role || '').toLowerCase();
+    const isDirector = userRole === 'director';
+    const isWriterRole = ['journalist', 'social_media', 'print_editor', 'fact_checker'].includes(userRole);
     const search = useSearchParams();
     const articleId = search.get('article_id');
     const initialWork = search.get('work_id');
@@ -841,6 +843,7 @@ function WorkspaceDraftsPageContent() {
     const [selectedStoryId, setSelectedStoryId] = useState<number | null>(null);
     const [overrideOpen, setOverrideOpen] = useState(false);
     const [overrideNote, setOverrideNote] = useState('');
+    const lastSimplifiedWorkRef = useRef<string | null>(null);
     const lastSavedRef = useRef<{ title: string; body: string }>({ title: '', body: '' });
     const isWriteMode = viewMode === 'write';
     const isImproveMode = viewMode === 'improve';
@@ -2131,6 +2134,18 @@ function WorkspaceDraftsPageContent() {
         createDraftFromArticle.mutate();
     }, [articleNumericId, listLoading, workId, drafts.length, createDraftFromArticle]);
 
+    useEffect(() => {
+        if (!isWriterRole) return;
+        const marker = workId || articleId || 'initial';
+        if (lastSimplifiedWorkRef.current === marker) return;
+        lastSimplifiedWorkRef.current = marker;
+        setViewMode('write');
+        setDetailsOpen(false);
+        setToolsExpanded(false);
+        setHeaderToolsOpen(false);
+        setFocusMode(true);
+    }, [articleId, isWriterRole, workId]);
+
     const showSidePanels = detailsOpen && !focusMode;
     const mainSpanClass = showSidePanels ? 'xl:col-span-8' : 'xl:col-span-12';
 
@@ -2543,7 +2558,7 @@ function WorkspaceDraftsPageContent() {
         if (mode === 'write') {
             setDetailsOpen(false);
             setToolsExpanded(false);
-            setFocusMode(false);
+            setFocusMode(true);
             return;
         }
 
@@ -2693,6 +2708,26 @@ function WorkspaceDraftsPageContent() {
                     ]}
                 />
 
+                {isWriterRole && focusMode && !detailsOpen && (
+                    <div className="mb-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-100" dir="rtl">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                                <p className="font-medium">أنت الآن في وضع كتابة هادئ.</p>
+                                <p className="mt-1 text-[12px] text-emerald-100/80">
+                                    ركّز على النص فقط. إذا احتجت المساعدة أو الأدوات، افتح اللوحة المساعدة من الزر المجاور.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setDetailsOpen(true)}
+                                className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100"
+                            >
+                                افتح اللوحة المساعدة
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                         <h1 className="text-xl font-semibold text-white">المحرر الذكي لغرفة الشروق</h1>
@@ -2736,15 +2771,17 @@ function WorkspaceDraftsPageContent() {
                     </div>
                 )}
 
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] text-gray-300">
-                    {workflowSteps.map((step, idx) => (
-                        <div key={step.id} className="flex items-center gap-1">
-                            <span className={cn('h-2 w-2 rounded-full', workflowDot(step.status))} />
-                            <span>{step.label}</span>
-                            {idx < workflowSteps.length - 1 && <span className="text-gray-600">—</span>}
-                        </div>
-                    ))}
-                </div>
+                {(!isWriterRole || detailsOpen) && (
+                    <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] text-gray-300">
+                        {workflowSteps.map((step, idx) => (
+                            <div key={step.id} className="flex items-center gap-1">
+                                <span className={cn('h-2 w-2 rounded-full', workflowDot(step.status))} />
+                                <span>{step.label}</span>
+                                {idx < workflowSteps.length - 1 && <span className="text-gray-600">—</span>}
+                            </div>
+                        ))}
+                    </div>
+                )}
 
                 {blockerSummary.count > 0 ? (
                     <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] text-red-100">
@@ -2945,7 +2982,7 @@ function WorkspaceDraftsPageContent() {
                                         onClick={() => setFocusMode((prev) => !prev)}
                                         className="min-h-8 px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-slate-200 text-[11px]"
                                     >
-                                        {focusMode ? 'إلغاء التركيز' : 'وضع التركيز'}
+                                        {focusMode ? 'إظهار الألواح الجانبية' : 'وضع التركيز'}
                                     </button>
                                     <button
                                         onClick={() => setSmartHighlightEnabled((prev) => !prev)}
