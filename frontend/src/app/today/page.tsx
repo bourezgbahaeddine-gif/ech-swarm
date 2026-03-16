@@ -19,6 +19,7 @@ import { WorkflowCard, WorkflowSection, type WorkflowTone } from '@/components/w
 import { WorkflowHelpPanel } from '@/components/workflow/WorkflowHelpPanel';
 import { getWorkflowStatusLabel } from '@/lib/workflow-language';
 import { RoleOnboardingBanner } from '@/components/workflow/RoleOnboardingBanner';
+import { trackNextAction, useTrackSurfaceView } from '@/lib/ux-telemetry';
 
 type Role =
     | 'director'
@@ -202,6 +203,15 @@ export default function TodayPage() {
     const role = normalizeRole(user?.role || '');
     const isChiefFlow = role === 'editor_chief' || role === 'director';
     const isAuthorFlow = !isChiefFlow;
+    const surfaceDetails = useMemo(
+        () => ({
+            role: role || 'guest',
+            flow: isChiefFlow ? 'chief' : 'author',
+        }),
+        [isChiefFlow, role],
+    );
+
+    useTrackSurfaceView('today', surfaceDetails);
 
     const pendingCandidatesQuery = useQuery({
         queryKey: ['today-pending-candidates'],
@@ -561,7 +571,18 @@ export default function TodayPage() {
                                         timestamp={item.timestamp}
                                         blockers={item.blockers}
                                         tone={item.tone}
-                                        primaryAction={{ label: item.nextAction, href: item.href }}
+                                        primaryAction={{
+                                            label: item.nextAction,
+                                            href: item.href,
+                                            onClick: () =>
+                                                trackNextAction('today', item.nextAction, {
+                                                    ...surfaceDetails,
+                                                    queue_section: 'now',
+                                                    item_id: item.id,
+                                                    workflow_label: item.workflowLabel,
+                                                    target_href: item.href,
+                                                }),
+                                        }}
                                     />
                                 ))}
                             </div>
@@ -589,7 +610,18 @@ export default function TodayPage() {
                                         timestamp={item.timestamp}
                                         blockers={item.blockers}
                                         tone={item.tone}
-                                        primaryAction={{ label: item.nextAction, href: item.href }}
+                                        primaryAction={{
+                                            label: item.nextAction,
+                                            href: item.href,
+                                            onClick: () =>
+                                                trackNextAction('today', item.nextAction, {
+                                                    ...surfaceDetails,
+                                                    queue_section: 'next',
+                                                    item_id: item.id,
+                                                    workflow_label: item.workflowLabel,
+                                                    target_href: item.href,
+                                                }),
+                                        }}
                                     />
                                 ))}
                             </div>
@@ -617,7 +649,18 @@ export default function TodayPage() {
                                         timestamp={item.timestamp}
                                         blockers={item.blockers}
                                         tone={item.tone}
-                                        primaryAction={{ label: item.nextAction, href: item.href }}
+                                        primaryAction={{
+                                            label: item.nextAction,
+                                            href: item.href,
+                                            onClick: () =>
+                                                trackNextAction('today', item.nextAction, {
+                                                    ...surfaceDetails,
+                                                    queue_section: 'risk',
+                                                    item_id: item.id,
+                                                    workflow_label: item.workflowLabel,
+                                                    target_href: item.href,
+                                                }),
+                                        }}
                                     />
                                 ))}
                             </div>

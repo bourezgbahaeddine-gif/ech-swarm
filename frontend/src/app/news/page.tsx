@@ -11,6 +11,7 @@ import { useAuth } from '@/lib/auth';
 import { WorkflowCard } from '@/components/workflow/WorkflowCard';
 import { WorkflowHelpPanel } from '@/components/workflow/WorkflowHelpPanel';
 import { getWorkflowStatusLabel } from '@/lib/workflow-language';
+import { trackNextAction, useTrackSurfaceView } from '@/lib/ux-telemetry';
 import {
     Newspaper, Search, ExternalLink,
     ChevronLeft, ChevronRight,
@@ -79,6 +80,19 @@ function NewsPageContent() {
         const t = setTimeout(() => setDebouncedSearch(search.trim()), 400);
         return () => clearTimeout(t);
     }, [search]);
+
+    const surfaceDetails = useMemo(
+        () => ({
+            role: user?.role || 'guest',
+            view_mode: viewMode,
+            status_filter: status || 'all',
+            category_filter: category || 'all',
+            breaking_filter: isBreaking === null ? 'all' : isBreaking ? 'true' : 'false',
+        }),
+        [category, isBreaking, status, user?.role, viewMode],
+    );
+
+    useTrackSurfaceView('news', surfaceDetails);
 
     const { data, isLoading } = useQuery({
         queryKey: ['news', page, status, category, debouncedSearch, isBreaking],
@@ -662,7 +676,18 @@ function NewsPageContent() {
                                         nextActionLabel={nextAction.label}
                                         timestamp={article.created_at || article.crawled_at}
                                         tone={freshBreaking ? 'danger' : article.importance_score >= 8 ? 'warn' : 'default'}
-                                        primaryAction={{ label: nextAction.label, href: nextAction.href }}
+                                        primaryAction={{
+                                            label: nextAction.label,
+                                            href: nextAction.href,
+                                            onClick: () =>
+                                                trackNextAction('news', nextAction.label, {
+                                                    ...surfaceDetails,
+                                                    queue_view: 'queue',
+                                                    article_id: article.id,
+                                                    article_status: article.status,
+                                                    target_href: nextAction.href,
+                                                }),
+                                        }}
                                         actions={
                                             <div className="space-y-3">
                                                 {article.summary && (
@@ -887,6 +912,15 @@ function NewsPageContent() {
                                                 <td className="px-4 py-3 align-top">
                                                     <Link
                                                         href={nextAction.href}
+                                                        onClick={() =>
+                                                            trackNextAction('news', nextAction.label, {
+                                                                ...surfaceDetails,
+                                                                queue_view: 'table',
+                                                                article_id: article.id,
+                                                                article_status: article.status,
+                                                                target_href: nextAction.href,
+                                                            })
+                                                        }
                                                         className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100 hover:bg-cyan-500/20"
                                                     >
                                                         {nextAction.label}

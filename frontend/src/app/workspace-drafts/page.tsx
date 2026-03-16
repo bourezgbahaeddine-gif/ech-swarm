@@ -49,6 +49,7 @@ import { cn, formatRelativeTime, truncate } from '@/lib/utils';
 import { WorkflowHelpPanel } from '@/components/workflow/WorkflowHelpPanel';
 import { RoleOnboardingBanner } from '@/components/workflow/RoleOnboardingBanner';
 import { workflowText } from '@/lib/workflow-language';
+import { trackNextAction, trackUiAction, useTrackSurfaceView } from '@/lib/ux-telemetry';
 
 type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
 type RightTab = 'evidence' | 'proofread' | 'quality' | 'seo' | 'social' | 'context' | 'msi' | 'simulator' | 'xray';
@@ -718,6 +719,17 @@ function WorkspaceDraftsPageContent() {
     const [manualCategory, setManualCategory] = useState('local_algeria');
     const [manualUrgency, setManualUrgency] = useState('medium');
     const [leftTab, setLeftTab] = useState<LeftTab>('drafts');
+    const surfaceDetails = useMemo(
+        () => ({
+            role: user?.role || 'guest',
+            view_mode: viewMode,
+            article_id: articleNumericId,
+            work_id: workId,
+        }),
+        [articleNumericId, user?.role, viewMode, workId],
+    );
+
+    useTrackSurfaceView('workspace_drafts', surfaceDetails);
     const [archiveQuery, setArchiveQuery] = useState('');
     const [archiveItems, setArchiveItems] = useState<ArchiveSearchItem[]>([]);
     const [archiveError, setArchiveError] = useState<string | null>(null);
@@ -2553,7 +2565,10 @@ function WorkspaceDraftsPageContent() {
                 <div className="mt-3 space-y-3">
                     <div className="flex flex-wrap items-center gap-2">
                         <button
-                            onClick={() => runWithGuide('quick_check', () => runQuickCheck.mutate())}
+                            onClick={() => {
+                                trackUiAction('workspace_drafts', 'فحص سريع', surfaceDetails);
+                                runWithGuide('quick_check', () => runQuickCheck.mutate());
+                            }}
                             disabled={runQuickCheck.isPending}
                             className="min-h-8 px-2 py-1 rounded-lg bg-indigo-500/20 border border-indigo-500/30 text-indigo-100 text-[10px] flex items-center gap-2 disabled:opacity-60"
                         >
@@ -2561,14 +2576,20 @@ function WorkspaceDraftsPageContent() {
                             {runQuickCheck.isPending ? 'جاري الفحص...' : 'فحص سريع'}
                         </button>
                         <button
-                            onClick={() => nextAction.handler()}
+                            onClick={() => {
+                                trackNextAction('workspace_drafts', nextAction.label, surfaceDetails);
+                                nextAction.handler();
+                            }}
                             className={cn('min-h-8 px-2 py-1 rounded-lg border text-[10px] flex items-center gap-2', severityStyles(nextAction.severity).badge, 'border-white/15')}
                         >
                             {nextAction.label}
                         </button>
                         <button
                             disabled={applyToArticle.isPending}
-                            onClick={() => runWithGuide('apply', () => applyToArticle.mutate())}
+                            onClick={() => {
+                                trackNextAction('workspace_drafts', 'إرسال لاعتماد رئيس التحرير', surfaceDetails);
+                                runWithGuide('apply', () => applyToArticle.mutate());
+                            }}
                             className="min-h-8 px-2 py-1 rounded-lg bg-white/10 border border-white/15 text-gray-200 text-[10px] disabled:opacity-60"
                         >
                             {applyToArticle.isPending ? 'جاري الإرسال...' : 'إرسال لاعتماد رئيس التحرير'}
@@ -2606,13 +2627,17 @@ function WorkspaceDraftsPageContent() {
                         <div className="ml-auto flex items-center gap-2">
                             <button
                                 disabled={autosave.isPending}
-                                onClick={() => runWithGuide('save', () => { setSaveState('saving'); autosave.mutate(); })}
+                                onClick={() => {
+                                    trackUiAction('workspace_drafts', 'حفظ', surfaceDetails);
+                                    runWithGuide('save', () => { setSaveState('saving'); autosave.mutate(); });
+                                }}
                                 className="min-h-8 px-2 py-1 rounded-xl bg-white/10 border border-white/15 text-gray-200 text-[10px] flex items-center gap-2 disabled:opacity-60"
                             >
                                 <Save className="w-4 h-4" />حفظ
                             </button>
                             <button
                                 onClick={() => {
+                                    trackUiAction('workspace_drafts', 'وضع: اكتب وأنهِ', { ...surfaceDetails, target_mode: 'write' });
                                     setViewMode('write');
                                     setDetailsOpen(false);
                                     setToolsExpanded(false);
@@ -2624,6 +2649,7 @@ function WorkspaceDraftsPageContent() {
                             </button>
                             <button
                                 onClick={() => {
+                                    trackUiAction('workspace_drafts', 'وضع: حسّن أكثر', { ...surfaceDetails, target_mode: 'improve' });
                                     setViewMode('improve');
                                     setDetailsOpen(true);
                                     setToolsExpanded(true);
@@ -2634,6 +2660,7 @@ function WorkspaceDraftsPageContent() {
                             </button>
                             <button
                                 onClick={() => {
+                                    trackUiAction('workspace_drafts', 'وضع: تحليل متقدم', { ...surfaceDetails, target_mode: 'advanced' });
                                     setViewMode('advanced');
                                     setDetailsOpen(true);
                                     setToolsExpanded(true);
@@ -2712,7 +2739,10 @@ function WorkspaceDraftsPageContent() {
                                 <p className="text-[11px] text-gray-500 mt-1">أهم خطوة الآن: {nextAction.description || 'لا توجد خطوة عاجلة حالياً.'}</p>
                             </div>
                             <button
-                                onClick={() => nextAction.handler()}
+                                onClick={() => {
+                                    trackNextAction('workspace_drafts', nextAction.label, { ...surfaceDetails, compact_bar: true });
+                                    nextAction.handler();
+                                }}
                                 className={cn('min-h-9 px-3 py-2 rounded-xl border text-[11px]', severityStyles(nextAction.severity).badge, 'border-white/15')}
                             >
                                 نفّذ الآن

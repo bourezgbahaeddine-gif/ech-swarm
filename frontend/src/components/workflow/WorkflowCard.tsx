@@ -38,7 +38,7 @@ export function WorkflowCard({
     timestamp?: string | null;
     blockers?: string[];
     tone?: WorkflowTone;
-    primaryAction?: { label: string; href: string };
+    primaryAction?: { label: string; href: string; onClick?: () => void };
     actions?: ReactNode;
 }) {
     const toneClasses =
@@ -105,6 +105,7 @@ export function WorkflowCard({
                     {primaryAction && (
                         <Link
                             href={primaryAction.href}
+                            onClick={primaryAction.onClick}
                             className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100 hover:bg-cyan-500/20"
                         >
                             <span>{primaryAction.label}</span>

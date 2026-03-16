@@ -331,6 +331,17 @@ export interface DashboardNotification {
     severity: 'high' | 'medium' | 'low' | string;
 }
 
+export interface UxTelemetryEventPayload {
+    event_name: string;
+    surface: string;
+    target_surface?: string | null;
+    entity_type?: string | null;
+    entity_id?: string | number | null;
+    action_label?: string | null;
+    page_path?: string | null;
+    details?: Record<string, unknown>;
+}
+
 export interface PublishedMonitorItem {
     title: string;
     url: string;
@@ -2441,6 +2452,11 @@ export const competitorXrayApi = {
 };
 
 // ── Axios Interceptors: envelope compatibility + auth handling ──
+
+export const telemetryApi = {
+    logUxEvent: (payload: UxTelemetryEventPayload) =>
+        api.post<{ logged: boolean; surface: string; event_name: string }>('/telemetry/ux', payload),
+};
 
 api.interceptors.response.use(
     (response) => {

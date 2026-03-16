@@ -18,6 +18,7 @@ import { AlertTriangle, CheckCircle2, RotateCcw, Send, ShieldCheck } from 'lucid
 import { WorkflowCard } from '@/components/workflow/WorkflowCard';
 import { WorkflowHelpPanel } from '@/components/workflow/WorkflowHelpPanel';
 import { getWorkflowStatusLabel } from '@/lib/workflow-language';
+import { trackNextAction, useTrackSurfaceView } from '@/lib/ux-telemetry';
 
 type EditorialTabKey = 'pending' | 'returned' | 'reservations' | 'manual';
 
@@ -100,6 +101,16 @@ export default function EditorialPage() {
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
     const [notesMap, setNotesMap] = useState<Record<number, string>>({});
+    const surfaceDetails = useMemo(
+        () => ({
+            role: role || 'guest',
+            active_tab: activeTab,
+            chief_flow: isChief,
+        }),
+        [activeTab, isChief, role],
+    );
+
+    useTrackSurfaceView('editorial', surfaceDetails);
 
     const decisionRequiresReason: Record<string, boolean> = {
         approve: false,
@@ -275,6 +286,12 @@ export default function EditorialPage() {
         const confirmed = typeof window === 'undefined' ? true : window.confirm(confirmationMessage);
         if (!confirmed) return;
 
+        trackNextAction('editorial', decisionLabel[decision], {
+            ...surfaceDetails,
+            queue_view: normalizeStatus(item.status) === 'approval_request_with_reservations' ? 'reservations' : 'pending',
+            article_id: item.id,
+            current_status: item.status,
+        });
         chiefDecisionMutation.mutate({ articleId: item.id, decision, notes: note || undefined });
     };
 
@@ -347,6 +364,21 @@ export default function EditorialPage() {
                 nextActionLabel={action.label}
                 timestamp={article.created_at || article.crawled_at}
                 tone={article.is_breaking ? 'danger' : 'default'}
+                primaryAction={
+                    action.href
+                        ? {
+                              label: action.label,
+                              href: action.href,
+                              onClick: () =>
+                                  trackNextAction('editorial', action.label, {
+                                      ...surfaceDetails,
+                                      article_id: article.id,
+                                      article_status: article.status,
+                                      target_href: action.href,
+                                  }),
+                          }
+                        : undefined
+                }
                 actions={
                     <div className="space-y-3">
                         {article.summary && (

@@ -28,6 +28,7 @@ import { cn, formatRelativeTime } from '@/lib/utils';
 import { WorkflowCard, WorkflowSection } from '@/components/workflow/WorkflowCard';
 import { WorkflowHelpPanel } from '@/components/workflow/WorkflowHelpPanel';
 import { getWorkflowStatusLabel } from '@/lib/workflow-language';
+import { trackNextAction, useTrackSurfaceView } from '@/lib/ux-telemetry';
 
 export default function StoriesPage() {
     const router = useRouter();
@@ -39,6 +40,25 @@ export default function StoriesPage() {
     const [expandedClusters, setExpandedClusters] = useState<Set<number>>(new Set());
     const [actionMsg, setActionMsg] = useState<string | null>(null);
     const [actionErr, setActionErr] = useState<string | null>(null);
+    const surfaceDetails = useMemo(
+        () => ({
+            view,
+            cluster_hours: clusterHours,
+            cluster_min_size: clusterMinSize,
+        }),
+        [clusterHours, clusterMinSize, view],
+    );
+
+    useTrackSurfaceView('stories', surfaceDetails);
+
+    const openStory = (storyId: number, source: string) => {
+        trackNextAction('stories', 'فتح القصة', {
+            ...surfaceDetails,
+            story_id: storyId,
+            source,
+        });
+        setSelectedStoryId(storyId);
+    };
 
     const {
         data: storiesData,
@@ -307,7 +327,7 @@ export default function StoriesPage() {
                         topStoryNextActionLabel={storyDraftModeLabel(topStoryNextMode)}
                         nextActionPending={runTopStoryNextAction.isPending}
                         onRunNextAction={() => runTopStoryNextAction.mutate()}
-                        onOpenStory={(storyId) => setSelectedStoryId(storyId)}
+                        onOpenStory={(storyId, source) => openStory(storyId, source)}
                     />
                 )
             )}
@@ -365,7 +385,7 @@ function StoryQueuesSection({
     topStoryNextActionLabel: string;
     nextActionPending: boolean;
     onRunNextAction: () => void;
-    onOpenStory: (storyId: number) => void;
+    onOpenStory: (storyId: number, source: string) => void;
 }) {
     const quickActionStories = useMemo(
         () => [...queues.needsUpdate, ...queues.active, ...queues.needsNewAngle].slice(0, 5),
@@ -445,7 +465,7 @@ function StoryQueuesSection({
                                         </button>
                                         <button
                                             type="button"
-                                            onClick={() => onOpenStory(topStory.id)}
+                                            onClick={() => onOpenStory(topStory.id, 'top_story')}
                                             className="inline-flex items-center gap-1 rounded-lg border border-emerald-300/40 bg-emerald-500/20 px-2.5 py-1.5 text-[11px] text-emerald-100"
                                         >
                                             فتح لوحة القرار
@@ -507,7 +527,7 @@ function StoryQueuesSection({
                                         <div className="flex justify-end">
                                             <button
                                                 type="button"
-                                                onClick={() => onOpenStory(story.id)}
+                                                onClick={() => onOpenStory(story.id, 'quick_actions')}
                                                 className="inline-flex items-center gap-1 rounded-lg border border-cyan-400/40 bg-cyan-500/15 px-2 py-1 text-[10px] text-cyan-100"
                                             >
                                                 فتح
@@ -538,7 +558,7 @@ function StoryQueueCard({
     hint: string;
     tone: 'cyan' | 'amber' | 'rose' | 'emerald';
     stories: StoryRecord[];
-    onOpenStory: (storyId: number) => void;
+    onOpenStory: (storyId: number, source: string) => void;
 }) {
     const toneClasses = {
         cyan: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-100',
@@ -577,7 +597,7 @@ function StoryQueueCard({
                                 <div className="flex justify-end">
                                     <button
                                         type="button"
-                                        onClick={() => onOpenStory(story.id)}
+                                        onClick={() => onOpenStory(story.id, title)}
                                         className="inline-flex items-center gap-1 rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-[10px] text-slate-200"
                                     >
                                         فتح القصة

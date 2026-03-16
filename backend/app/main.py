@@ -59,6 +59,7 @@ from app.api.routes.stories import router as stories_router
 from app.api.routes.scripts import router as scripts_router
 from app.api.routes.events import router as events_router
 from app.api.routes.digital import router as digital_router
+from app.api.routes.telemetry import router as telemetry_router
 from app.msi.scheduler import start_msi_scheduler, stop_msi_scheduler
 from app.services.competitor_xray_service import competitor_xray_service
 from app.services.digital_team_service import digital_team_service
@@ -720,6 +721,7 @@ app.include_router(stories_router, prefix="/api/v1")
 app.include_router(scripts_router, prefix="/api/v1")
 app.include_router(events_router, prefix="/api/v1")
 app.include_router(digital_router, prefix="/api/v1")
+app.include_router(telemetry_router, prefix="/api/v1")
 
 
 # ── Health Check ──
