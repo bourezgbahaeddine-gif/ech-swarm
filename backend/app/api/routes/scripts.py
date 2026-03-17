@@ -22,6 +22,7 @@ from app.repositories.script_repository import script_repository
 from app.services.audit_service import audit_service
 from app.services.job_queue_service import job_queue_service
 from app.services.script_studio_service import script_studio_service
+from app.services.script_video_workspace_service import script_video_workspace_service
 
 router = APIRouter(prefix="/scripts", tags=["Script Studio"])
 
@@ -48,6 +49,9 @@ class ScriptFromArticleRequest(BaseModel):
     length_seconds: int = Field(default=75, ge=20, le=900)
     language: str = Field(default="ar", max_length=8)
     style_constraints: list[str] = Field(default_factory=list)
+    video_profile: str | None = Field(default=None, max_length=64)
+    target_platform: str | None = Field(default=None, max_length=64)
+    editorial_objective: str | None = Field(default=None, max_length=64)
 
 
 class ScriptFromStoryRequest(BaseModel):
@@ -56,6 +60,9 @@ class ScriptFromStoryRequest(BaseModel):
     length_seconds: int = Field(default=90, ge=20, le=1200)
     language: str = Field(default="ar", max_length=8)
     style_constraints: list[str] = Field(default_factory=list)
+    video_profile: str | None = Field(default=None, max_length=64)
+    target_platform: str | None = Field(default=None, max_length=64)
+    editorial_objective: str | None = Field(default=None, max_length=64)
 
 
 class BulletinRequest(BaseModel):
@@ -78,10 +85,74 @@ class ScriptRegenerateRequest(BaseModel):
     max_items: int | None = Field(default=None, ge=1, le=30)
     duration_minutes: int | None = Field(default=None, ge=1, le=60)
     desks: list[str] | None = None
+    video_profile: str | None = Field(default=None, max_length=64)
+    target_platform: str | None = Field(default=None, max_length=64)
+    editorial_objective: str | None = Field(default=None, max_length=64)
 
 
 class ScriptDuplicateVersionRequest(BaseModel):
     source_version: int | None = Field(default=None, ge=1)
+
+
+class VideoWorkspaceUpdateRequest(BaseModel):
+    video_profile: str | None = Field(default=None, max_length=64)
+    target_platform: str | None = Field(default=None, max_length=64)
+    editorial_objective: str | None = Field(default=None, max_length=64)
+    pace_notes: str | None = Field(default=None, max_length=4000)
+    hook: str | None = Field(default=None, max_length=4000)
+    closing: str | None = Field(default=None, max_length=4000)
+    vo_script: str | None = Field(default=None, max_length=40000)
+    hook_strength: float | None = Field(default=None, ge=0, le=1)
+
+
+class VideoScenePatchRequest(BaseModel):
+    duration_s: int | None = Field(default=None, ge=1, le=600)
+    scene_type: str | None = Field(default=None, max_length=64)
+    priority: str | None = Field(default=None, max_length=32)
+    visual: str | None = Field(default=None, max_length=4000)
+    on_screen_text: str | None = Field(default=None, max_length=2000)
+    vo_line: str | None = Field(default=None, max_length=4000)
+    asset_status: str | None = Field(default=None, max_length=32)
+    source_reference: str | None = Field(default=None, max_length=1024)
+    locked: bool | None = None
+
+
+class VideoSceneAddRequest(BaseModel):
+    insert_after: int | None = Field(default=None, ge=1)
+    duration_s: int = Field(default=5, ge=1, le=600)
+    scene_type: str = Field(default="body", max_length=64)
+    priority: str = Field(default="medium", max_length=32)
+    visual: str = Field(default="", max_length=4000)
+    on_screen_text: str = Field(default="", max_length=2000)
+    vo_line: str = Field(default="", max_length=4000)
+    asset_status: str = Field(default="missing", max_length=32)
+    source_reference: str | None = Field(default=None, max_length=1024)
+
+
+class VideoSceneSplitRequest(BaseModel):
+    split_duration_s: int = Field(..., ge=1, le=600)
+
+
+class VideoSceneMergeRequest(BaseModel):
+    source_idx: int = Field(..., ge=1)
+    target_idx: int = Field(..., ge=1)
+
+
+class VideoSceneReorderRequest(BaseModel):
+    ordered_scene_indices: list[int] = Field(default_factory=list, min_length=1)
+
+
+class VideoCaptionsUpdateRequest(BaseModel):
+    captions_lines: list[dict] = Field(default_factory=list)
+
+
+class VideoDeliveryUpdateRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=1024)
+    thumbnail_line: str | None = Field(default=None, max_length=2000)
+    social_copy: str | None = Field(default=None, max_length=8000)
+    shot_list: list[str] | None = None
+    source_references: list[str] | None = None
+    status: str | None = Field(default=None, max_length=64)
 
 
 def _serialize_output(output: ScriptOutput) -> dict:
@@ -133,6 +204,7 @@ def _serialize_project(project, *, include_outputs: bool = True) -> dict:
         "latest_output_at": latest_output.created_at.isoformat() if latest_output and latest_output.created_at else None,
         "latest_quality_blockers": latest_blockers,
         "latest_quality_warnings": latest_warnings,
+        "video_workspace": script_video_workspace_service.workspace_summary(project),
         "outputs": [_serialize_output(output) for output in outputs] if include_outputs else [],
     }
 
@@ -166,6 +238,11 @@ def _to_diff_text(output: ScriptOutput) -> str:
     if isinstance(output.content_json, dict):
         return json.dumps(output.content_json, ensure_ascii=False, sort_keys=True, indent=2)
     return ""
+
+
+def _require_video_project(project) -> None:
+    if project.type != ScriptProjectType.video_script:
+        raise HTTPException(status_code=409, detail="Video workspace actions are only available for video scripts")
 
 
 def _build_recovery_hints(error_text: str) -> list[dict]:
@@ -320,6 +397,9 @@ async def create_script_from_article(
         "length_seconds": payload.length_seconds,
         "language": payload.language,
         "style_constraints": payload.style_constraints,
+        "video_profile": payload.video_profile,
+        "target_platform": payload.target_platform,
+        "editorial_objective": payload.editorial_objective,
     }
     project = await script_repository.create_project(
         db,
@@ -378,6 +458,9 @@ async def create_script_from_story(
         "length_seconds": payload.length_seconds,
         "language": payload.language,
         "style_constraints": payload.style_constraints,
+        "video_profile": payload.video_profile,
+        "target_platform": payload.target_platform,
+        "editorial_objective": payload.editorial_objective,
     }
     project = await script_repository.create_project(
         db,
@@ -733,6 +816,375 @@ async def script_recovery_hints(
             "hints": _build_recovery_hints(error_text),
         }
     )
+
+
+@router.patch("/{script_id}/video")
+async def update_video_workspace(
+    script_id: int,
+    payload: VideoWorkspaceUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(*VIEW_ROLES)),
+):
+    project = await script_repository.get_project_by_id(db, script_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Script project not found")
+    _require_video_project(project)
+
+    content = script_video_workspace_service.payload_from_project(project)
+    updates = payload.model_dump(exclude_none=True)
+    content.update(updates)
+    updated = await script_video_workspace_service.save_manual_video_version(
+        db,
+        project=project,
+        content_json=content,
+        actor_username=current_user.username,
+        action="script_video_workspace_update",
+        details={"fields": sorted(updates.keys())},
+    )
+    return success_envelope(_serialize_project(updated))
+
+
+@router.patch("/{script_id}/scenes/{scene_idx}")
+async def patch_video_scene(
+    script_id: int,
+    scene_idx: int,
+    payload: VideoScenePatchRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(*VIEW_ROLES)),
+):
+    project = await script_repository.get_project_by_id(db, script_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Script project not found")
+    _require_video_project(project)
+
+    content = script_video_workspace_service.payload_from_project(project)
+    scenes = content.get("scenes") or []
+    if scene_idx < 1 or scene_idx > len(scenes):
+        raise HTTPException(status_code=404, detail="Scene not found")
+    scene = dict(scenes[scene_idx - 1])
+    updates = payload.model_dump(exclude_none=True)
+    scene.update(updates)
+    scenes[scene_idx - 1] = scene
+    content["scenes"] = scenes
+    updated = await script_video_workspace_service.save_manual_video_version(
+        db,
+        project=project,
+        content_json=content,
+        actor_username=current_user.username,
+        action="script_video_scene_update",
+        details={"scene_idx": scene_idx, "fields": sorted(updates.keys())},
+    )
+    return success_envelope(_serialize_project(updated))
+
+
+@router.post("/{script_id}/scenes")
+async def add_video_scene(
+    script_id: int,
+    payload: VideoSceneAddRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(*VIEW_ROLES)),
+):
+    project = await script_repository.get_project_by_id(db, script_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Script project not found")
+    _require_video_project(project)
+
+    content = script_video_workspace_service.payload_from_project(project)
+    scenes = list(content.get("scenes") or [])
+    new_scene = {
+        "idx": 0,
+        "duration_s": payload.duration_s,
+        "scene_type": payload.scene_type,
+        "priority": payload.priority,
+        "visual": payload.visual,
+        "on_screen_text": payload.on_screen_text,
+        "vo_line": payload.vo_line,
+        "asset_status": payload.asset_status,
+        "source_reference": payload.source_reference,
+        "locked": False,
+    }
+    insert_at = len(scenes)
+    if payload.insert_after and payload.insert_after <= len(scenes):
+        insert_at = payload.insert_after
+    scenes.insert(insert_at, new_scene)
+    content["scenes"] = scenes
+    updated = await script_video_workspace_service.save_manual_video_version(
+        db,
+        project=project,
+        content_json=content,
+        actor_username=current_user.username,
+        action="script_video_scene_add",
+        details={"insert_after": payload.insert_after},
+    )
+    return success_envelope(_serialize_project(updated))
+
+
+@router.delete("/{script_id}/scenes/{scene_idx}")
+async def delete_video_scene(
+    script_id: int,
+    scene_idx: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(*VIEW_ROLES)),
+):
+    project = await script_repository.get_project_by_id(db, script_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Script project not found")
+    _require_video_project(project)
+    content = script_video_workspace_service.payload_from_project(project)
+    scenes = list(content.get("scenes") or [])
+    if scene_idx < 1 or scene_idx > len(scenes):
+        raise HTTPException(status_code=404, detail="Scene not found")
+    scenes.pop(scene_idx - 1)
+    content["scenes"] = scenes
+    updated = await script_video_workspace_service.save_manual_video_version(
+        db,
+        project=project,
+        content_json=content,
+        actor_username=current_user.username,
+        action="script_video_scene_delete",
+        details={"scene_idx": scene_idx},
+    )
+    return success_envelope(_serialize_project(updated))
+
+
+@router.post("/{script_id}/scenes/reorder")
+async def reorder_video_scenes(
+    script_id: int,
+    payload: VideoSceneReorderRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(*VIEW_ROLES)),
+):
+    project = await script_repository.get_project_by_id(db, script_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Script project not found")
+    _require_video_project(project)
+    content = script_video_workspace_service.payload_from_project(project)
+    scenes = list(content.get("scenes") or [])
+    current_ids = [int(scene.get("idx") or index + 1) for index, scene in enumerate(scenes)]
+    if sorted(current_ids) != sorted(payload.ordered_scene_indices):
+        raise HTTPException(status_code=400, detail="ordered_scene_indices must include all current scene indices exactly once")
+    by_idx = {int(scene.get("idx") or index + 1): scene for index, scene in enumerate(scenes)}
+    content["scenes"] = [by_idx[idx] for idx in payload.ordered_scene_indices]
+    updated = await script_video_workspace_service.save_manual_video_version(
+        db,
+        project=project,
+        content_json=content,
+        actor_username=current_user.username,
+        action="script_video_scene_reorder",
+        details={"ordered_scene_indices": payload.ordered_scene_indices},
+    )
+    return success_envelope(_serialize_project(updated))
+
+
+@router.post("/{script_id}/scenes/{scene_idx}/split")
+async def split_video_scene(
+    script_id: int,
+    scene_idx: int,
+    payload: VideoSceneSplitRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(*VIEW_ROLES)),
+):
+    project = await script_repository.get_project_by_id(db, script_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Script project not found")
+    _require_video_project(project)
+    content = script_video_workspace_service.payload_from_project(project)
+    scenes = list(content.get("scenes") or [])
+    if scene_idx < 1 or scene_idx > len(scenes):
+        raise HTTPException(status_code=404, detail="Scene not found")
+    scene = dict(scenes[scene_idx - 1])
+    duration = int(scene.get("duration_s") or 0)
+    if payload.split_duration_s >= duration:
+        raise HTTPException(status_code=400, detail="split_duration_s must be smaller than scene duration")
+    scene["duration_s"] = payload.split_duration_s
+    second = dict(scene)
+    second["duration_s"] = duration - payload.split_duration_s
+    second["scene_type"] = "body"
+    scenes[scene_idx - 1] = scene
+    scenes.insert(scene_idx, second)
+    content["scenes"] = scenes
+    updated = await script_video_workspace_service.save_manual_video_version(
+        db,
+        project=project,
+        content_json=content,
+        actor_username=current_user.username,
+        action="script_video_scene_split",
+        details={"scene_idx": scene_idx, "split_duration_s": payload.split_duration_s},
+    )
+    return success_envelope(_serialize_project(updated))
+
+
+@router.post("/{script_id}/scenes/merge")
+async def merge_video_scenes(
+    script_id: int,
+    payload: VideoSceneMergeRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(*VIEW_ROLES)),
+):
+    project = await script_repository.get_project_by_id(db, script_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Script project not found")
+    _require_video_project(project)
+    content = script_video_workspace_service.payload_from_project(project)
+    scenes = list(content.get("scenes") or [])
+    if payload.source_idx == payload.target_idx:
+        raise HTTPException(status_code=400, detail="source_idx and target_idx must differ")
+    if min(payload.source_idx, payload.target_idx) < 1 or max(payload.source_idx, payload.target_idx) > len(scenes):
+        raise HTTPException(status_code=404, detail="Scene not found")
+    source = dict(scenes[payload.source_idx - 1])
+    target = dict(scenes[payload.target_idx - 1])
+    target["duration_s"] = int(target.get("duration_s") or 0) + int(source.get("duration_s") or 0)
+    target["vo_line"] = " ".join(filter(None, [str(target.get("vo_line") or "").strip(), str(source.get("vo_line") or "").strip()])).strip()
+    target["on_screen_text"] = " | ".join(
+        filter(None, [str(target.get("on_screen_text") or "").strip(), str(source.get("on_screen_text") or "").strip()])
+    ).strip()
+    target["visual"] = " + ".join(filter(None, [str(target.get("visual") or "").strip(), str(source.get("visual") or "").strip()])).strip()
+    scenes[payload.target_idx - 1] = target
+    scenes.pop(payload.source_idx - 1)
+    content["scenes"] = scenes
+    updated = await script_video_workspace_service.save_manual_video_version(
+        db,
+        project=project,
+        content_json=content,
+        actor_username=current_user.username,
+        action="script_video_scene_merge",
+        details={"source_idx": payload.source_idx, "target_idx": payload.target_idx},
+    )
+    return success_envelope(_serialize_project(updated))
+
+
+@router.post("/{script_id}/scenes/{scene_idx}/lock")
+async def lock_video_scene(
+    script_id: int,
+    scene_idx: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(*VIEW_ROLES)),
+):
+    return await patch_video_scene(
+        script_id=script_id,
+        scene_idx=scene_idx,
+        payload=VideoScenePatchRequest(locked=True),
+        db=db,
+        current_user=current_user,
+    )
+
+
+@router.post("/{script_id}/scenes/{scene_idx}/unlock")
+async def unlock_video_scene(
+    script_id: int,
+    scene_idx: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(*VIEW_ROLES)),
+):
+    return await patch_video_scene(
+        script_id=script_id,
+        scene_idx=scene_idx,
+        payload=VideoScenePatchRequest(locked=False),
+        db=db,
+        current_user=current_user,
+    )
+
+
+@router.post("/{script_id}/scenes/{scene_idx}/regenerate", status_code=status.HTTP_202_ACCEPTED)
+async def regenerate_video_scene(
+    script_id: int,
+    scene_idx: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(*VIEW_ROLES)),
+):
+    project = await script_repository.get_project_by_id(db, script_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Script project not found")
+    _require_video_project(project)
+    try:
+        updated = await script_video_workspace_service.regenerate_single_scene(
+            db,
+            project=project,
+            scene_idx=scene_idx,
+            actor_username=current_user.username,
+        )
+    except ValueError as exc:
+        message = "Scene could not be regenerated"
+        if str(exc) == "scene_not_found":
+            raise HTTPException(status_code=404, detail="Scene not found") from exc
+        if str(exc) == "scene_locked":
+            raise HTTPException(status_code=409, detail="Scene is locked") from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+    return success_envelope(_serialize_project(updated), status_code=status.HTTP_202_ACCEPTED)
+
+
+@router.patch("/{script_id}/captions")
+async def update_video_captions(
+    script_id: int,
+    payload: VideoCaptionsUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(*VIEW_ROLES)),
+):
+    project = await script_repository.get_project_by_id(db, script_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Script project not found")
+    _require_video_project(project)
+    content = script_video_workspace_service.payload_from_project(project)
+    content["captions_lines"] = payload.captions_lines
+    updated = await script_video_workspace_service.save_manual_video_version(
+        db,
+        project=project,
+        content_json=content,
+        actor_username=current_user.username,
+        action="script_video_captions_update",
+        details={"lines": len(payload.captions_lines)},
+    )
+    return success_envelope(_serialize_project(updated))
+
+
+@router.patch("/{script_id}/delivery")
+async def update_video_delivery(
+    script_id: int,
+    payload: VideoDeliveryUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(*VIEW_ROLES)),
+):
+    project = await script_repository.get_project_by_id(db, script_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Script project not found")
+    _require_video_project(project)
+    content = script_video_workspace_service.payload_from_project(project)
+    delivery = dict(content.get("delivery") or {})
+    for key, value in payload.model_dump(exclude_none=True).items():
+        delivery[key] = value
+    content["delivery"] = delivery
+    updated = await script_video_workspace_service.save_manual_video_version(
+        db,
+        project=project,
+        content_json=content,
+        actor_username=current_user.username,
+        action="script_video_delivery_update",
+        details={"fields": sorted(payload.model_dump(exclude_none=True).keys())},
+    )
+    return success_envelope(_serialize_project(updated))
+
+
+@router.post("/{script_id}/delivery/export")
+async def export_video_delivery_bundle(
+    script_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(*VIEW_ROLES)),
+):
+    project = await script_repository.get_project_by_id(db, script_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Script project not found")
+    _require_video_project(project)
+    bundle = script_video_workspace_service.export_bundle(project)
+    await audit_service.log_action(
+        db,
+        action="script_video_delivery_export",
+        entity_type="script_project",
+        entity_id=project.id,
+        actor=current_user,
+        details={"delivery_status": bundle.get("delivery_status")},
+    )
+    await db.commit()
+    return success_envelope(bundle)
 
 
 @router.post("/{script_id}/approve")

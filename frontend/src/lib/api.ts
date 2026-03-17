@@ -885,6 +885,48 @@ export interface ScriptOutputRecord {
     created_at: string | null;
 }
 
+export interface VideoScriptScene {
+    idx: number;
+    duration_s: number;
+    scene_type?: string;
+    priority?: string;
+    visual: string;
+    on_screen_text: string;
+    vo_line: string;
+    asset_status?: string;
+    source_reference?: string | null;
+    locked?: boolean;
+}
+
+export interface VideoCaptionLine {
+    idx: number;
+    start_s: number;
+    end_s: number;
+    text: string;
+}
+
+export interface VideoDeliveryPackage {
+    title: string;
+    thumbnail_line?: string;
+    social_copy?: string;
+    shot_list: string[];
+    source_references: string[];
+    status?: string;
+    exported_at?: string | null;
+}
+
+export interface VideoWorkspaceSummary {
+    video_profile?: string;
+    target_platform?: string;
+    editorial_objective?: string;
+    total_duration_s?: number;
+    delivery_status?: string;
+    next_action?: string;
+    blockers?: Array<{ code: string; message: string; severity: string; details?: Record<string, unknown> }>;
+    warnings?: Array<{ code: string; message: string; severity: string; details?: Record<string, unknown> }>;
+    missing_assets?: number;
+}
+
 export interface ScriptProjectRecord {
     id: number;
     type: 'story_script' | 'video_script' | 'bulletin_daily' | 'bulletin_weekly' | string;
@@ -902,6 +944,7 @@ export interface ScriptProjectRecord {
     latest_output_at?: string | null;
     latest_quality_blockers?: number;
     latest_quality_warnings?: number;
+    video_workspace?: VideoWorkspaceSummary;
     outputs: ScriptOutputRecord[];
 }
 
@@ -952,6 +995,26 @@ export interface ScriptRecoveryHintsResponse {
         title: string;
         action: string;
     }>;
+}
+
+export interface VideoDeliveryExportBundle {
+    script_id: number;
+    title: string;
+    video_profile: string;
+    target_platform: string;
+    editorial_objective: string;
+    vo_script: string;
+    total_duration_s: number;
+    scenes: VideoScriptScene[];
+    captions_srt: string;
+    captions_lines: VideoCaptionLine[];
+    assets_list: Array<Record<string, unknown>>;
+    thumbnail_ideas: string[];
+    thumbnail_line?: string;
+    social_copy?: string;
+    shot_list: string[];
+    source_references: string[];
+    delivery_status?: string;
 }
 
 export interface SocialApprovedItem {
@@ -1164,6 +1227,9 @@ export const scriptsApi = {
             length_seconds?: number;
             language?: string;
             style_constraints?: string[];
+            video_profile?: string;
+            target_platform?: string;
+            editorial_objective?: string;
         },
     ) => api.post<ScriptProjectQueuedResponse>(`/scripts/from-article/${articleId}`, payload),
     createFromStory: (
@@ -1174,6 +1240,9 @@ export const scriptsApi = {
             length_seconds?: number;
             language?: string;
             style_constraints?: string[];
+            video_profile?: string;
+            target_platform?: string;
+            editorial_objective?: string;
         },
     ) => api.post<ScriptProjectQueuedResponse>(`/scripts/from-story/${storyId}`, payload),
     generateDailyBulletin: (
@@ -1210,6 +1279,9 @@ export const scriptsApi = {
             max_items?: number;
             duration_minutes?: number;
             desks?: string[];
+            video_profile?: string;
+            target_platform?: string;
+            editorial_objective?: string;
         },
     ) => api.post<ScriptProjectQueuedResponse>(`/scripts/${scriptId}/regenerate`, payload || {}),
     duplicateVersion: (scriptId: number, payload?: { source_version?: number }) =>
@@ -1220,6 +1292,75 @@ export const scriptsApi = {
         }),
     recoveryHints: (scriptId: number) =>
         api.get<ScriptRecoveryHintsResponse>(`/scripts/${scriptId}/recovery-hints`),
+    updateVideoWorkspace: (
+        scriptId: number,
+        payload: Partial<{
+            video_profile: string;
+            target_platform: string;
+            editorial_objective: string;
+            pace_notes: string;
+            hook: string;
+            closing: string;
+            vo_script: string;
+            hook_strength: number;
+        }>
+    ) => api.patch<ScriptProjectRecord>(`/scripts/${scriptId}/video`, payload),
+    updateScene: (
+        scriptId: number,
+        sceneIdx: number,
+        payload: Partial<{
+            duration_s: number;
+            scene_type: string;
+            priority: string;
+            visual: string;
+            on_screen_text: string;
+            vo_line: string;
+            asset_status: string;
+            source_reference: string | null;
+            locked: boolean;
+        }>
+    ) => api.patch<ScriptProjectRecord>(`/scripts/${scriptId}/scenes/${sceneIdx}`, payload),
+    addScene: (
+        scriptId: number,
+        payload: {
+            insert_after?: number;
+            duration_s?: number;
+            scene_type?: string;
+            priority?: string;
+            visual?: string;
+            on_screen_text?: string;
+            vo_line?: string;
+            asset_status?: string;
+            source_reference?: string | null;
+        }
+    ) => api.post<ScriptProjectRecord>(`/scripts/${scriptId}/scenes`, payload),
+    deleteScene: (scriptId: number, sceneIdx: number) => api.delete<ScriptProjectRecord>(`/scripts/${scriptId}/scenes/${sceneIdx}`),
+    reorderScenes: (scriptId: number, ordered_scene_indices: number[]) =>
+        api.post<ScriptProjectRecord>(`/scripts/${scriptId}/scenes/reorder`, { ordered_scene_indices }),
+    splitScene: (scriptId: number, sceneIdx: number, split_duration_s: number) =>
+        api.post<ScriptProjectRecord>(`/scripts/${scriptId}/scenes/${sceneIdx}/split`, { split_duration_s }),
+    mergeScenes: (scriptId: number, source_idx: number, target_idx: number) =>
+        api.post<ScriptProjectRecord>(`/scripts/${scriptId}/scenes/merge`, { source_idx, target_idx }),
+    lockScene: (scriptId: number, sceneIdx: number) =>
+        api.post<ScriptProjectRecord>(`/scripts/${scriptId}/scenes/${sceneIdx}/lock`, {}),
+    unlockScene: (scriptId: number, sceneIdx: number) =>
+        api.post<ScriptProjectRecord>(`/scripts/${scriptId}/scenes/${sceneIdx}/unlock`, {}),
+    regenerateScene: (scriptId: number, sceneIdx: number) =>
+        api.post<ScriptProjectRecord>(`/scripts/${scriptId}/scenes/${sceneIdx}/regenerate`, {}),
+    updateCaptions: (scriptId: number, captions_lines: VideoCaptionLine[]) =>
+        api.patch<ScriptProjectRecord>(`/scripts/${scriptId}/captions`, { captions_lines }),
+    updateDelivery: (
+        scriptId: number,
+        payload: Partial<{
+            title: string;
+            thumbnail_line: string;
+            social_copy: string;
+            shot_list: string[];
+            source_references: string[];
+            status: string;
+        }>
+    ) => api.patch<ScriptProjectRecord>(`/scripts/${scriptId}/delivery`, payload),
+    exportDelivery: (scriptId: number) => api.post<VideoDeliveryExportBundle>(`/scripts/${scriptId}/delivery/export`, {}),
 };
 
 export const dashboardApi = {

@@ -417,10 +417,37 @@ class ScriptStudioService:
             },
             ScriptProjectType.video_script: {
                 "vo_script": "string",
-                "scenes": [{"idx": 1, "duration_s": 12, "visual": "string", "on_screen_text": "string", "vo_line": "string"}],
+                "hook": "string",
+                "closing": "string",
+                "video_profile": "short_vertical|news_package|explainer|breaking_clip|voiceover_package|document_explainer",
+                "target_platform": "instagram_reels|youtube|x|facebook|youtube_shorts",
+                "editorial_objective": "inform|explain|breaking|voiceover|hook_fast",
+                "pace_notes": "string",
+                "scenes": [
+                    {
+                        "idx": 1,
+                        "duration_s": 12,
+                        "scene_type": "hook|body|transition|ending",
+                        "priority": "high|medium|low",
+                        "visual": "string",
+                        "on_screen_text": "string",
+                        "vo_line": "string",
+                        "asset_status": "missing|linked|optional",
+                        "source_reference": "string",
+                        "locked": False,
+                    }
+                ],
                 "captions_srt": "string",
-                "assets_list": [{"type": "archive|photo|broll", "hint": "string"}],
+                "assets_list": [{"type": "archive|photo|broll", "hint": "string", "scene_idx": 1, "status": "missing|linked"}],
                 "thumbnail_ideas": ["string"],
+                "delivery": {
+                    "title": "string",
+                    "thumbnail_line": "string",
+                    "social_copy": "string",
+                    "shot_list": ["string"],
+                    "source_references": ["string"],
+                    "status": "draft|bundle_ready|sent",
+                },
             },
             ScriptProjectType.bulletin_daily: {
                 "opening": "string",
@@ -493,20 +520,43 @@ class ScriptStudioService:
             article = context.get("article") or {}
             title = article.get("title") or context.get("story", {}).get("title") or "Video package"
             vo_line = article.get("summary") or f"Newsroom summary for {title}."
+            profile = str(params.get("video_profile") or "news_package")
+            target_platform = str(params.get("target_platform") or "youtube")
+            objective = str(params.get("editorial_objective") or "inform")
             return {
                 "vo_script": f"{title}. {vo_line}",
+                "hook": title,
+                "closing": "Close with a verified takeaway and a clear ending line.",
+                "video_profile": profile,
+                "target_platform": target_platform,
+                "editorial_objective": objective,
+                "hook_strength": 0.55,
+                "pace_notes": "fast opening then stable pacing",
                 "scenes": [
                     {
                         "idx": 1,
                         "duration_s": int(params.get("length_seconds") or 45),
+                        "scene_type": "hook",
+                        "priority": "high",
                         "visual": "Anchor shot with relevant headline card",
                         "on_screen_text": title,
                         "vo_line": vo_line,
+                        "asset_status": "missing",
+                        "source_reference": article.get("url") or context.get("story", {}).get("story_key"),
+                        "locked": False,
                     }
                 ],
                 "captions_srt": "1\n00:00:00,000 --> 00:00:05,000\n" + title,
-                "assets_list": [{"type": "archive", "hint": "Use related newsroom photo/video archive"}],
+                "assets_list": [{"type": "archive", "hint": "Use related newsroom photo/video archive", "scene_idx": 1, "status": "missing"}],
                 "thumbnail_ideas": [title],
+                "delivery": {
+                    "title": title,
+                    "thumbnail_line": title,
+                    "social_copy": f"{title} - {vo_line}",
+                    "shot_list": [f"Scene 1: {title}"],
+                    "source_references": [article.get("url") or ""],
+                    "status": "draft",
+                },
             }
 
         items = context.get("items") or []
@@ -608,11 +658,19 @@ class ScriptStudioService:
             scenes = output_json.get("scenes") or []
             if isinstance(scenes, list):
                 total_duration = 0
+                first_scene_duration = 0
+                missing_assets = 0
                 for scene in scenes:
                     if not isinstance(scene, dict):
                         continue
-                    total_duration += int(scene.get("duration_s") or 0)
+                    duration = int(scene.get("duration_s") or 0)
+                    total_duration += duration
+                    if not first_scene_duration:
+                        first_scene_duration = duration
+                    if str(scene.get("asset_status") or "missing") == "missing":
+                        missing_assets += 1
                 expected_duration = int(params.get("length_seconds") or 60)
+                video_profile = str(output_json.get("video_profile") or params.get("video_profile") or "news_package")
                 if total_duration <= 0:
                     issues.append(
                         {
@@ -628,6 +686,60 @@ class ScriptStudioService:
                             "message": "Scene durations exceed requested length by a large margin.",
                             "severity": "warn",
                             "details": {"total_duration": total_duration, "expected": expected_duration},
+                        }
+                    )
+                if not str(output_json.get("hook") or "").strip():
+                    issues.append(
+                        {
+                            "code": "video_missing_hook",
+                            "message": "Video script should define a clear hook.",
+                            "severity": "warn",
+                        }
+                    )
+                if not str(output_json.get("closing") or "").strip():
+                    issues.append(
+                        {
+                            "code": "video_missing_closing",
+                            "message": "Video script should define a clear ending.",
+                            "severity": "warn",
+                        }
+                    )
+                if video_profile == "short_vertical":
+                    if not (30 <= total_duration <= 60):
+                        issues.append(
+                            {
+                                "code": "video_profile_duration_mismatch",
+                                "message": "Short vertical videos should remain between 30 and 60 seconds.",
+                                "severity": "warn",
+                                "details": {"profile": video_profile, "total_duration": total_duration},
+                            }
+                        )
+                    if first_scene_duration > 5:
+                        issues.append(
+                            {
+                                "code": "video_hook_too_slow",
+                                "message": "The first scene is too long for a fast hook in short vertical format.",
+                                "severity": "warn",
+                                "details": {"first_scene_duration": first_scene_duration},
+                            }
+                        )
+                if missing_assets >= max(1, len(scenes) // 2):
+                    issues.append(
+                        {
+                            "code": "video_visual_dependency_risk",
+                            "message": "Most scenes still miss linked or planned assets.",
+                            "severity": "warn",
+                            "details": {"missing_assets": missing_assets, "scenes": len(scenes)},
+                        }
+                    )
+                captions_srt = str(output_json.get("captions_srt") or "")
+                caption_lines = [line for line in captions_srt.splitlines() if line and "-->" not in line and not line.isdigit()]
+                if video_profile == "short_vertical" and any(len(line.split()) > 10 for line in caption_lines):
+                    issues.append(
+                        {
+                            "code": "video_caption_density_high",
+                            "message": "Caption lines are dense for short vertical consumption.",
+                            "severity": "warn",
                         }
                     )
 
