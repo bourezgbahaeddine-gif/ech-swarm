@@ -1994,6 +1994,7 @@ export interface DocumentIntelDataPoint {
 }
 
 export interface DocumentIntelExtractResult {
+    document_id?: number | null;
     filename: string;
     parser_used: string;
     language_hint: string;
@@ -2009,6 +2010,26 @@ export interface DocumentIntelExtractResult {
     data_points: DocumentIntelDataPoint[];
     warnings: string[];
     preview_text: string;
+}
+
+export interface DocumentIntelActionResult {
+    document_id: number;
+    action_type: string;
+    target_type?: string | null;
+    target_id?: string | null;
+    message: string;
+    payload: Record<string, unknown>;
+}
+
+export interface DocumentIntelActionLogItem {
+    id: number;
+    action_type: string;
+    target_type?: string | null;
+    target_id?: string | null;
+    note?: string | null;
+    payload: Record<string, unknown>;
+    actor_username?: string | null;
+    created_at: string;
 }
 
 export interface DocumentIntelExtractSubmitResult {
@@ -2524,6 +2545,8 @@ export const documentIntelApi = {
         });
     },
     getExtractJobStatus: (jobId: string) => api.get<DocumentIntelExtractJobStatus>(`/document-intel/extract/${jobId}`),
+    getDocument: (documentId: number) => api.get<DocumentIntelExtractResult>(`/document-intel/documents/${documentId}`),
+    listActions: (documentId: number) => api.get<DocumentIntelActionLogItem[]>(`/document-intel/documents/${documentId}/actions`),
     extractFromUpload: (payload: {
         file: File;
         language_hint?: 'ar' | 'fr' | 'en' | 'auto';
@@ -2540,6 +2563,10 @@ export const documentIntelApi = {
             timeout: 180000,
         });
     },
+    createStory: (documentId: number) => api.post<DocumentIntelActionResult>(`/document-intel/documents/${documentId}/create-story`),
+    saveToMemory: (documentId: number) => api.post<DocumentIntelActionResult>(`/document-intel/documents/${documentId}/save-memory`),
+    sendToFactcheck: (documentId: number) =>
+        api.post<DocumentIntelActionResult>(`/document-intel/documents/${documentId}/send-to-factcheck`),
 };
 
 export const competitorXrayApi = {

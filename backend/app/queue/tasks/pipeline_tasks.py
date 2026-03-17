@@ -23,6 +23,7 @@ from app.queue.async_runtime import run_async
 from app.queue.celery_app import celery_app
 from app.services.document_intel_job_storage import document_intel_job_storage
 from app.services.document_intel_service import document_intel_service
+from app.services.document_intel_workspace_service import document_intel_workspace_service
 from app.services.echorouk_archive_service import echorouk_archive_service
 from app.services.job_queue_service import job_queue_service
 from app.services.script_studio_service import script_studio_service
@@ -180,6 +181,15 @@ async def _run_document_intel_extract(job: JobRun) -> dict:
             max_news_items=int(payload.get("max_news_items") or 8),
             max_data_points=int(payload.get("max_data_points") or 30),
         )
+        async with async_session() as db:
+            document = await document_intel_workspace_service.save_document_result(
+                db,
+                result=result,
+                actor=None,
+                source_job_id=str(job.id),
+            )
+            await db.commit()
+            result["document_id"] = document.id
         return result
     finally:
         await document_intel_job_storage.delete_payload(blob_key)

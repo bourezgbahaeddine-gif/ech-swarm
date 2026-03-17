@@ -48,6 +48,7 @@ class DocumentExtractStats(BaseModel):
 
 
 class DocumentExtractResponse(BaseModel):
+    document_id: int | None = None
     filename: str
     parser_used: str
     language_hint: str
@@ -63,6 +64,26 @@ class DocumentExtractResponse(BaseModel):
     data_points: list[DocumentExtractDataPoint] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     preview_text: str = ""
+
+
+class DocumentIntelActionResponse(BaseModel):
+    document_id: int
+    action_type: str
+    target_type: str | None = None
+    target_id: str | None = None
+    message: str
+    payload: dict = Field(default_factory=dict)
+
+
+class DocumentIntelActionLogItem(BaseModel):
+    id: int
+    action_type: str
+    target_type: str | None = None
+    target_id: str | None = None
+    note: str | None = None
+    payload: dict = Field(default_factory=dict)
+    actor_username: str | None = None
+    created_at: datetime
 
 
 class DocumentExtractSubmitResponse(BaseModel):

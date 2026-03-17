@@ -76,6 +76,11 @@ from app.models.digital_team import (
     SocialPost,
     SocialPostVersion,
 )
+from app.models.document_intel import (
+    DocumentIntelDocument,
+    DocumentIntelClaim,
+    DocumentIntelAction,
+)
 
 __all__ = [
     "Source", "Article", "EditorDecision", "EditorialDraft", "FeedbackLog",
@@ -147,4 +152,7 @@ __all__ = [
     "SocialTask",
     "SocialPost",
     "SocialPostVersion",
+    "DocumentIntelDocument",
+    "DocumentIntelClaim",
+    "DocumentIntelAction",
 ]

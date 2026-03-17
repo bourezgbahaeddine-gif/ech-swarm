@@ -1,9 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
     AlertTriangle,
     CheckCircle2,
@@ -19,7 +19,9 @@ import {
 import {
     documentIntelApi,
     editorialApi,
+    type DocumentIntelActionLogItem,
     type DocumentIntelClaim,
+    type DocumentIntelActionResult,
     type DocumentIntelEntity,
     type DocumentIntelExtractJobStatus,
     type DocumentIntelExtractResult,
@@ -42,49 +44,49 @@ function apiError(error: unknown, fallback: string): string {
 function documentTypeLabel(value?: string): string {
     switch ((value || '').toLowerCase()) {
         case 'official_gazette':
-            return '????? ????? / ????? ?????';
+            return 'وثيقة رسمية / جريدة رسمية';
         case 'statement':
-            return '???? ?? ?????';
+            return 'بيان أو تصريح';
         case 'scanned_document':
-            return '????? ?????? ??????';
+            return 'وثيقة ممسوحة ضوئيًا';
         case 'report':
         default:
-            return '????? ?? ????? ???????';
+            return 'تقرير أو وثيقة تحليلية';
     }
 }
 
 function claimTypeLabel(value?: string): string {
     switch ((value || '').toLowerCase()) {
         case 'legal':
-            return '????? ??????';
+            return 'ادعاء قانوني';
         case 'statistical':
-            return '????? ????';
+            return 'ادعاء رقمي';
         case 'attribution':
-            return '???? / ?????';
+            return 'نسبة / تصريح';
         case 'factual':
         default:
-            return '????? ??????';
+            return 'ادعاء وقائعي';
     }
 }
 
 function entityTypeLabel(value?: string): string {
     switch ((value || '').toLowerCase()) {
         case 'location':
-            return '????';
+            return 'مكان';
         case 'person':
-            return '???';
+            return 'شخص';
         case 'organization':
         default:
-            return '??? / ?????';
+            return 'جهة / مؤسسة';
     }
 }
 
 function nextActionText(result: DocumentIntelExtractResult | null): string {
-    if (!result) return '???? ???? ????? ????? ??? ????? ??????? ?????.';
-    if (result.news_candidates.length > 0) return '???? ?????? ???? ??? ???? ??? ????? ???? ??????.';
-    if (result.claims.length > 0) return '???? ????????? ????????? ???? ?? ????? ?????? ??? ???????.';
-    if (result.data_points.length > 0) return '????? ?? ?????? ??????? ????? ????? ??????? ?? ???? ????.';
-    return '???? ??????? ????? ?? ???? ?? ??????? ?????? ??????? ??????.';
+    if (!result) return 'ابدأ برفع وثيقة لتحصل على خلاصة تحريرية أولية.';
+    if (result.news_candidates.length > 0) return 'ابدأ بتحويل أبرز خبر مرشح إلى مسودة داخل المحرر.';
+    if (result.claims.length > 0) return 'راجع الادعاءات المستخرجة وحدد ما يحتاج تحققًا قبل الصياغة.';
+    if (result.data_points.length > 0) return 'استفد من النقاط الرقمية لبناء زاوية تفسيرية أو ملخص سريع.';
+    return 'اقرأ الخلاصة أولًا ثم راجع نص الوثيقة لتحديد الزاوية الأنسب.';
 }
 
 function riskBadgeClass(value?: string): string {
@@ -98,8 +100,9 @@ function riskBadgeClass(value?: string): string {
     }
 }
 
-export default function DocumentIntelPage() {
+function DocumentIntelPageContent() {
     const router = useRouter();
+    const searchParams = useSearchParams();
     const { user } = useAuth();
     const role = (user?.role || '').toLowerCase();
     const canRun = RUN_ROLES.has(role);
@@ -110,9 +113,15 @@ export default function DocumentIntelPage() {
     const [maxNewsItems, setMaxNewsItems] = useState(8);
     const [maxDataPoints, setMaxDataPoints] = useState(30);
     const [error, setError] = useState<string | null>(null);
+    const [actionNotice, setActionNotice] = useState<string | null>(null);
     const [createdWorkId, setCreatedWorkId] = useState<string | null>(null);
     const [jobId, setJobId] = useState<string | null>(null);
     const [showTechDetails, setShowTechDetails] = useState(false);
+    const selectedDocumentId = useMemo(() => {
+        const raw = searchParams.get('document_id');
+        const parsed = raw ? Number(raw) : NaN;
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    }, [searchParams]);
 
     const runExtract = useMutation({
         mutationFn: () =>
@@ -127,7 +136,7 @@ export default function DocumentIntelPage() {
             setError(null);
             setCreatedWorkId(null);
         },
-        onError: (err) => setError(apiError(err, '???? ????? ??????? ??? ???????.')),
+        onError: (err) => setError(apiError(err, 'تعذر إرسال الوثيقة إلى التحليل.')),
     });
 
     const extractStatusQuery = useQuery({
@@ -139,6 +148,12 @@ export default function DocumentIntelPage() {
             if (!status || status === 'completed' || status === 'failed' || status === 'dead_lettered') return false;
             return 1500;
         },
+    });
+
+    const storedDocumentQuery = useQuery({
+        queryKey: ['document-intel-document', selectedDocumentId],
+        queryFn: () => documentIntelApi.getDocument(selectedDocumentId as number),
+        enabled: !!selectedDocumentId,
     });
 
     const createDraftFromCandidate = useMutation({
@@ -156,90 +171,147 @@ ${candidate.evidence}`,
         onSuccess: (res) => {
             const workId = (res.data as { work_id?: string })?.work_id;
             if (!workId) {
-                setError('?? ????? ??????? ??? ?? ??? ????? ???? ?????.');
+                setError('تم إنشاء المسودة لكن لم يتم إرجاع معرف العمل.');
                 return;
             }
             setCreatedWorkId(workId);
             setError(null);
+            setActionNotice('تم إنشاء خبر جديد من الوثيقة وفتح المسودة داخل المحرر.');
             router.push(`/workspace-drafts?work_id=${encodeURIComponent(workId)}`);
         },
-        onError: (err) => setError(apiError(err, '???? ????? ????? ?? ????? ??????.')),
+        onError: (err) => setError(apiError(err, 'تعذر إنشاء مسودة من الخبر المرشح.')),
     });
 
     const statusPayload = extractStatusQuery.data?.data;
-    const result: DocumentIntelExtractResult | null =
+    const extractedResult: DocumentIntelExtractResult | null =
         statusPayload?.status === 'completed' && statusPayload.result ? statusPayload.result : null;
+    const result: DocumentIntelExtractResult | null =
+        (storedDocumentQuery.data?.data as DocumentIntelExtractResult | undefined) || extractedResult;
     const derivedError =
         statusPayload?.status === 'failed' || statusPayload?.status === 'dead_lettered'
-            ? statusPayload.error || '??? ????? ???????.'
+            ? statusPayload.error || 'فشل تحليل الوثيقة.'
             : null;
     const effectiveError = error || derivedError;
     const extractStatus = statusPayload?.status ?? null;
     const isProcessing = runExtract.isPending || extractStatus === 'queued' || extractStatus === 'running';
     const extractStatusText =
         extractStatus === 'queued'
-            ? '??????? ?? ???????'
+            ? 'الوثيقة في الطابور'
             : extractStatus === 'running'
-              ? '???? ????? ???????'
+              ? 'جارٍ تحليل الوثيقة'
               : extractStatus === 'completed'
-                ? '????? ???????'
+                ? 'اكتمل التحليل'
                 : extractStatus === 'failed' || extractStatus === 'dead_lettered'
-                  ? '??? ???????'
+                  ? 'فشل التحليل'
                   : null;
 
     const overviewClaims = useMemo(() => (result?.claims || []).slice(0, 5), [result]);
     const overviewEntities = useMemo(() => (result?.entities || []).slice(0, 8), [result]);
     const overviewAngles = useMemo(() => (result?.story_angles || []).slice(0, 4), [result]);
+    const documentId = result?.document_id ?? null;
+
+    const actionsQuery = useQuery({
+        queryKey: ['document-intel-actions', documentId],
+        queryFn: () => documentIntelApi.listActions(documentId as number),
+        enabled: !!documentId,
+    });
+
+    useEffect(() => {
+        if (!extractedResult?.document_id) return;
+        const next = new URLSearchParams(searchParams.toString());
+        next.set('document_id', String(extractedResult.document_id));
+        router.replace(`/services/document-intel?${next.toString()}`);
+    }, [extractedResult?.document_id, router, searchParams]);
+
+    const createStoryMutation = useMutation({
+        mutationFn: () => documentIntelApi.createStory(documentId as number),
+        onSuccess: (res) => {
+            const payload = res.data as DocumentIntelActionResult;
+            const targetId = payload.target_id ? Number(payload.target_id) : NaN;
+            setError(null);
+            setActionNotice(payload.message || 'تم إنشاء قصة من الوثيقة.');
+            if (Number.isFinite(targetId) && targetId > 0) {
+                router.push(`/stories`);
+            }
+        },
+        onError: (err) => setError(apiError(err, 'تعذر إنشاء قصة من الوثيقة.')),
+    });
+
+    const saveToMemoryMutation = useMutation({
+        mutationFn: () => documentIntelApi.saveToMemory(documentId as number),
+        onSuccess: (res) => {
+            setError(null);
+            setActionNotice((res.data as DocumentIntelActionResult).message || 'تم حفظ الوثيقة في الذاكرة التحريرية.');
+        },
+        onError: (err) => setError(apiError(err, 'تعذر حفظ الوثيقة في الذاكرة التحريرية.')),
+    });
+
+    const sendToFactcheckMutation = useMutation({
+        mutationFn: () => documentIntelApi.sendToFactcheck(documentId as number),
+        onSuccess: (res) => {
+            const payload = (res.data as DocumentIntelActionResult).payload || {};
+            const textSeed = typeof payload.text_seed === 'string' ? payload.text_seed : '';
+            const reference = typeof payload.reference === 'string' ? payload.reference : '';
+            const next = new URLSearchParams();
+            if (textSeed) next.set('text', textSeed);
+            if (reference) next.set('reference', reference);
+            setError(null);
+            setActionNotice((res.data as DocumentIntelActionResult).message || 'تم تجهيز الوثيقة للتحقق.');
+            router.push(`/services/fact-check${next.toString() ? `?${next.toString()}` : ''}`);
+        },
+        onError: (err) => setError(apiError(err, 'تعذر تجهيز الوثيقة للتحقق.')),
+    });
 
     return (
         <div className="space-y-5 app-theme-shell" dir="rtl">
             <div className="space-y-2">
                 <h1 className="text-2xl font-bold text-white flex items-center gap-2">
                     <FileSearch className="w-6 h-6 text-cyan-400" />
-                    ????? ???????
+                    تحليل الوثائق
                 </h1>
                 <p className="text-sm text-gray-400">
-                    ???? ????? PDF ??????? ???? ????? ???????? ??????? ?????? ???????? ??????? ?????? ????? ??????? ??? ??? ????.
+                    ارفع وثيقة PDF لنستخرج منها خلاصة تحريرية، أخبارًا مرشحة، ادعاءات، كيانات، وزوايا قابلة للتحويل إلى عمل صحفي.
                 </p>
             </div>
 
             {effectiveError && <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">{effectiveError}</div>}
+            {actionNotice && <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{actionNotice}</div>}
 
             <section className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-4">
                 <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-4">
                     <label className="h-12 px-3 rounded-xl border border-white/10 bg-white/5 text-sm text-gray-200 flex items-center gap-2 cursor-pointer">
                         <FileUp className="w-4 h-4 text-cyan-300" />
-                        <span className="line-clamp-1">{file ? file.name : '???? ??? PDF ???????'}</span>
+                        <span className="line-clamp-1">{file ? file.name : 'اختر ملف PDF للتحليل'}</span>
                         <input type="file" accept=".pdf,application/pdf" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
                     </label>
 
                     <button onClick={() => runExtract.mutate()} disabled={!canRun || !file || isProcessing} className="h-12 rounded-xl border border-emerald-500/30 bg-emerald-500/20 text-emerald-200 text-sm disabled:opacity-50 flex items-center justify-center gap-2">
                         {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                        ????? ???????
+                        تحليل الوثيقة
                     </button>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <label className="space-y-1">
-                        <span className="text-xs text-gray-400">??? ???????</span>
+                        <span className="text-xs text-gray-400">لغة التلميح</span>
                         <select value={languageHint} onChange={(e) => setLanguageHint(e.target.value as 'ar' | 'fr' | 'en' | 'auto')} className="w-full h-10 px-3 rounded-lg border border-white/10 bg-white/5 text-sm text-gray-200">
-                            <option value="ar">???????</option>
-                            <option value="fr">????????</option>
-                            <option value="en">??????????</option>
-                            <option value="auto">??? ??????</option>
+                            <option value="ar">العربية</option>
+                            <option value="fr">الفرنسية</option>
+                            <option value="en">الإنجليزية</option>
+                            <option value="auto">كشف تلقائي</option>
                         </select>
                     </label>
                     <label className="space-y-1">
-                        <span className="text-xs text-gray-400">??? ??????? ???????</span>
+                        <span className="text-xs text-gray-400">عدد الأخبار المرشحة</span>
                         <input type="number" min={1} max={20} value={maxNewsItems} onChange={(e) => setMaxNewsItems(Math.max(1, Math.min(20, Number(e.target.value) || 1)))} className="w-full h-10 px-3 rounded-lg border border-white/10 bg-white/5 text-sm text-gray-200" />
                     </label>
                     <label className="space-y-1">
-                        <span className="text-xs text-gray-400">??? ?????? ???????</span>
+                        <span className="text-xs text-gray-400">عدد النقاط الرقمية</span>
                         <input type="number" min={5} max={120} value={maxDataPoints} onChange={(e) => setMaxDataPoints(Math.max(5, Math.min(120, Number(e.target.value) || 5)))} className="w-full h-10 px-3 rounded-lg border border-white/10 bg-white/5 text-sm text-gray-200" />
                     </label>
                 </div>
 
-                {jobId && <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-200">{extractStatusText ? `${extractStatusText} - ` : ''}???? ??????: {jobId}</div>}
+                {jobId && <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-200">{extractStatusText ? `${extractStatusText} - ` : ''}معرف المهمة: {jobId}</div>}
             </section>
 
             {result && (
@@ -247,54 +319,79 @@ ${candidate.evidence}`,
                     <section className="rounded-2xl border border-white/10 bg-gradient-to-br from-cyan-950/40 via-slate-950/40 to-slate-900/50 p-5 space-y-4">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                             <div className="space-y-2">
-                                <p className="text-xs text-cyan-300">Overview</p>
+                                <p className="text-xs text-cyan-300">نظرة عامة</p>
                                 <h2 className="text-xl font-bold text-white">{documentTypeLabel(result.document_type)}</h2>
-                                <p className="text-sm text-gray-300 leading-7 max-w-4xl">{result.document_summary || '?? ????? ????? ????? ??????? ???.'}</p>
+                                <p className="text-sm text-gray-300 leading-7 max-w-4xl">{result.document_summary || 'لم تتوفر خلاصة كافية للوثيقة بعد.'}</p>
                             </div>
                             <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 min-w-[260px] space-y-2">
-                                <div className="text-xs text-gray-400">?? ??????? ???????</div>
+                                <div className="text-xs text-gray-400">ما الإجراء التالي؟</div>
                                 <div className="text-sm text-white leading-6">{nextActionText(result)}</div>
                                 <div className="flex flex-wrap gap-2 pt-1">
                                     {canCreateDraft && result.news_candidates[0] ? (
                                         <button onClick={() => createDraftFromCandidate.mutate(result.news_candidates[0])} disabled={createDraftFromCandidate.isPending} className="h-9 px-3 rounded-lg border border-emerald-500/30 bg-emerald-500/20 text-emerald-200 text-xs disabled:opacity-50">
-                                            {createDraftFromCandidate.isPending ? '???? ????? ???????...' : '???? ?????'}
+                                            {createDraftFromCandidate.isPending ? 'جارٍ إنشاء المسودة...' : 'أنشئ خبرًا'}
                                         </button>
                                     ) : null}
-                                    <button onClick={() => router.push('/services/fact-check')} className="h-9 px-3 rounded-lg border border-amber-500/30 bg-amber-500/15 text-amber-200 text-xs">???? ??????</button>
-                                    <button onClick={() => router.push('/memory')} className="h-9 px-3 rounded-lg border border-white/10 bg-white/5 text-gray-200 text-xs">???? ?? ???????</button>
+                                    <button
+                                        onClick={() => createStoryMutation.mutate()}
+                                        disabled={!documentId || createStoryMutation.isPending}
+                                        className="h-9 px-3 rounded-lg border border-fuchsia-500/30 bg-fuchsia-500/15 text-fuchsia-200 text-xs disabled:opacity-50"
+                                    >
+                                        {createStoryMutation.isPending ? 'جارٍ إنشاء القصة...' : 'أنشئ قصة'}
+                                    </button>
+                                    <button
+                                        onClick={() => sendToFactcheckMutation.mutate()}
+                                        disabled={!documentId || sendToFactcheckMutation.isPending}
+                                        className="h-9 px-3 rounded-lg border border-amber-500/30 bg-amber-500/15 text-amber-200 text-xs disabled:opacity-50"
+                                    >
+                                        {sendToFactcheckMutation.isPending ? 'جارٍ تجهيز التحقق...' : 'أرسل للتحقق'}
+                                    </button>
+                                    <button
+                                        onClick={() => saveToMemoryMutation.mutate()}
+                                        disabled={!documentId || saveToMemoryMutation.isPending}
+                                        className="h-9 px-3 rounded-lg border border-white/10 bg-white/5 text-gray-200 text-xs disabled:opacity-50"
+                                    >
+                                        {saveToMemoryMutation.isPending ? 'جارٍ الحفظ...' : 'احفظ في الذاكرة'}
+                                    </button>
                                 </div>
                             </div>
                         </div>
 
                         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
-                            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3"><div className="text-gray-400">??????? ???????</div><div className="text-white text-xl font-semibold mt-1">{result.news_candidates.length}</div></div>
-                            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3"><div className="text-gray-400">?????????</div><div className="text-white text-xl font-semibold mt-1">{result.claims.length}</div></div>
-                            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3"><div className="text-gray-400">????????</div><div className="text-white text-xl font-semibold mt-1">{result.entities.length}</div></div>
-                            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3"><div className="text-gray-400">?????? ???????</div><div className="text-white text-xl font-semibold mt-1">{result.data_points.length}</div></div>
-                            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3"><div className="text-gray-400">????? ????????</div><div className="text-white text-xl font-semibold mt-1">{result.detected_language}</div></div>
+                            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3"><div className="text-gray-400">الأخبار المرشحة</div><div className="text-white text-xl font-semibold mt-1">{result.news_candidates.length}</div></div>
+                            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3"><div className="text-gray-400">الادعاءات</div><div className="text-white text-xl font-semibold mt-1">{result.claims.length}</div></div>
+                            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3"><div className="text-gray-400">الكيانات</div><div className="text-white text-xl font-semibold mt-1">{result.entities.length}</div></div>
+                            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3"><div className="text-gray-400">النقاط الرقمية</div><div className="text-white text-xl font-semibold mt-1">{result.data_points.length}</div></div>
+                            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3"><div className="text-gray-400">اللغة المكتشفة</div><div className="text-white text-xl font-semibold mt-1">{result.detected_language}</div></div>
                         </div>
                     </section>
 
                     <section className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-4">
                         <div className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-4">
-                            <div className="flex items-center gap-2 text-white font-semibold"><Newspaper className="w-4 h-4 text-cyan-300" />News & Angles</div>
+                            <div className="flex items-center gap-2 text-white font-semibold"><Newspaper className="w-4 h-4 text-cyan-300" />الأخبار والزوايا</div>
 
                             {result.news_candidates.length === 0 ? (
-                                <p className="text-sm text-gray-500">?? ??? ??????? ????? ????? ????? ?? ???????.</p>
+                                <p className="text-sm text-gray-500">لم يتم استخراج أخبار مرشحة واضحة من الوثيقة.</p>
                             ) : (
                                 <div className="space-y-3">
                                     {result.news_candidates.map((item) => (
                                         <article key={item.rank} className="rounded-xl border border-white/10 bg-white/[0.03] p-4 space-y-3">
                                             <div className="flex items-center justify-between gap-3">
-                                                <p className="text-xs text-cyan-300">??? ???? #{item.rank}</p>
-                                                <span className="text-xs text-gray-400">??? {Math.round(item.confidence * 100)}%</span>
+                                                <p className="text-xs text-cyan-300">خبر مرشح #{item.rank}</p>
+                                                <span className="text-xs text-gray-400">ثقة {Math.round(item.confidence * 100)}%</span>
                                             </div>
                                             <h3 className="text-base text-white font-semibold leading-7">{item.headline}</h3>
                                             <p className="text-sm text-gray-300 leading-7">{item.summary}</p>
                                             {item.entities.length > 0 ? <div className="flex flex-wrap gap-2">{item.entities.map((entity) => <span key={`${item.rank}-${entity}`} className="px-2 py-1 rounded-full border border-white/10 bg-white/5 text-[11px] text-gray-300">{entity}</span>)}</div> : null}
                                             <div className="flex flex-wrap gap-2">
-                                                {canCreateDraft ? <button onClick={() => createDraftFromCandidate.mutate(item)} disabled={createDraftFromCandidate.isPending} className="h-9 px-3 rounded-lg border border-emerald-500/30 bg-emerald-500/20 text-emerald-200 text-xs disabled:opacity-50">????? ???</button> : null}
-                                                <button onClick={() => router.push('/stories')} className="h-9 px-3 rounded-lg border border-white/10 bg-white/5 text-gray-200 text-xs">???? ???</button>
+                                                {canCreateDraft ? <button onClick={() => createDraftFromCandidate.mutate(item)} disabled={createDraftFromCandidate.isPending} className="h-9 px-3 rounded-lg border border-emerald-500/30 bg-emerald-500/20 text-emerald-200 text-xs disabled:opacity-50">إنشاء خبر</button> : null}
+                                                <button
+                                                    onClick={() => createStoryMutation.mutate()}
+                                                    disabled={!documentId || createStoryMutation.isPending}
+                                                    className="h-9 px-3 rounded-lg border border-white/10 bg-white/5 text-gray-200 text-xs disabled:opacity-50"
+                                                >
+                                                    {createStoryMutation.isPending ? 'جارٍ إنشاء القصة...' : 'أنشئ قصة'}
+                                                </button>
                                             </div>
                                         </article>
                                     ))}
@@ -302,9 +399,9 @@ ${candidate.evidence}`,
                             )}
 
                             <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 space-y-3">
-                                <div className="text-sm font-semibold text-white">????? ??????? ??????</div>
+                                <div className="text-sm font-semibold text-white">زوايا تحريرية مقترحة</div>
                                 {overviewAngles.length === 0 ? (
-                                    <p className="text-sm text-gray-500">?? ???? ????? ????? ???? ??? ???? ?????? ??? ??????? ??????? ??????????.</p>
+                                    <p className="text-sm text-gray-500">لا توجد زوايا واضحة بعد، لكن يمكن البناء على الأخبار المرشحة والادعاءات.</p>
                                 ) : (
                                     <div className="space-y-3">{overviewAngles.map((angle: DocumentIntelStoryAngle, idx) => <div key={`${angle.title}-${idx}`} className="rounded-lg border border-white/10 bg-black/20 p-3"><div className="text-sm text-white font-medium leading-6">{angle.title}</div><div className="text-xs text-gray-400 leading-6 mt-1">{angle.why_it_matters}</div></div>)}</div>
                                 )}
@@ -313,19 +410,19 @@ ${candidate.evidence}`,
 
                         <div className="space-y-4">
                             <section className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-3">
-                                <div className="flex items-center gap-2 text-white font-semibold"><AlertTriangle className="w-4 h-4 text-amber-300" />Evidence & Data</div>
+                                <div className="flex items-center gap-2 text-white font-semibold"><AlertTriangle className="w-4 h-4 text-amber-300" />الأدلة والبيانات</div>
 
                                 <div className="space-y-2">
-                                    <div className="text-xs text-gray-400">????????? ?????????</div>
+                                    <div className="text-xs text-gray-400">الادعاءات المستخرجة</div>
                                     {overviewClaims.length === 0 ? (
-                                        <p className="text-sm text-gray-500">?? ??????? ??????? ????? ???.</p>
+                                        <p className="text-sm text-gray-500">لم تُستخرج ادعاءات واضحة بعد.</p>
                                     ) : (
                                         overviewClaims.map((claim: DocumentIntelClaim, idx) => (
                                             <div key={`${claim.text}-${idx}`} className="rounded-xl border border-white/10 bg-white/[0.03] p-3 space-y-2">
                                                 <div className="flex flex-wrap items-center gap-2">
                                                     <span className="px-2 py-1 rounded-full border border-cyan-500/20 bg-cyan-500/10 text-[11px] text-cyan-200">{claimTypeLabel(claim.type)}</span>
-                                                    <span className={`px-2 py-1 rounded-full border text-[11px] ${riskBadgeClass(claim.risk_level)}`}>{claim.risk_level === 'high' ? '????? ?????' : claim.risk_level === 'medium' ? '????? ??????' : '????? ??????'}</span>
-                                                    <span className="text-[11px] text-gray-400">??? {Math.round(claim.confidence * 100)}%</span>
+                                                    <span className={`px-2 py-1 rounded-full border text-[11px] ${riskBadgeClass(claim.risk_level)}`}>{claim.risk_level === 'high' ? 'مخاطر عالية' : claim.risk_level === 'medium' ? 'مخاطر متوسطة' : 'مخاطر منخفضة'}</span>
+                                                    <span className="text-[11px] text-gray-400">ثقة {Math.round(claim.confidence * 100)}%</span>
                                                 </div>
                                                 <p className="text-sm text-gray-200 leading-6">{claim.text}</p>
                                             </div>
@@ -334,18 +431,18 @@ ${candidate.evidence}`,
                                 </div>
 
                                 <div className="space-y-2">
-                                    <div className="text-xs text-gray-400">???????? ???????</div>
+                                    <div className="text-xs text-gray-400">الكيانات الظاهرة</div>
                                     {overviewEntities.length === 0 ? (
-                                        <p className="text-sm text-gray-500">?? ???? ?????? ????? ???.</p>
+                                        <p className="text-sm text-gray-500">لا توجد كيانات واضحة بعد.</p>
                                     ) : (
                                         <div className="flex flex-wrap gap-2">{overviewEntities.map((entity: DocumentIntelEntity) => <div key={`${entity.name}-${entity.type}`} className="px-3 py-2 rounded-xl border border-white/10 bg-white/[0.03] text-xs text-gray-200"><span className="font-medium text-white">{entity.name}</span><span className="text-gray-400"> - {entityTypeLabel(entity.type)}</span></div>)}</div>
                                     )}
                                 </div>
 
                                 <div className="space-y-2">
-                                    <div className="text-xs text-gray-400">?????? ???????</div>
+                                    <div className="text-xs text-gray-400">النقاط الرقمية</div>
                                     {result.data_points.length === 0 ? (
-                                        <p className="text-sm text-gray-500">?? ???? ???? ????? ?????.</p>
+                                        <p className="text-sm text-gray-500">لا توجد نقاط رقمية واضحة.</p>
                                     ) : (
                                         <div className="space-y-2 max-h-[260px] overflow-auto">{result.data_points.slice(0, 8).map((item) => <div key={item.rank} className="rounded-xl border border-white/10 bg-white/[0.03] p-3"><div className="text-xs text-cyan-300 mb-1">#{item.rank} - {item.category}</div><div className="text-xs text-gray-100">{item.value_tokens.join(' | ')}</div><div className="text-xs text-gray-400 mt-1 leading-5">{item.context}</div></div>)}</div>
                                     )}
@@ -356,38 +453,84 @@ ${candidate.evidence}`,
 
                     <section className="grid grid-cols-1 xl:grid-cols-[1.35fr_0.65fr] gap-4">
                         <section className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-3">
-                            <div className="flex items-center gap-2 text-white font-semibold"><ScanSearch className="w-4 h-4 text-cyan-300" />Document View</div>
-                            <pre className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-xs text-gray-300 leading-7 max-h-[520px] overflow-auto whitespace-pre-wrap">{result.preview_text || '?? ???? ?????? ????.'}</pre>
+                            <div className="flex items-center gap-2 text-white font-semibold"><ScanSearch className="w-4 h-4 text-cyan-300" />عرض الوثيقة</div>
+                            <pre className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-xs text-gray-300 leading-7 max-h-[520px] overflow-auto whitespace-pre-wrap">{result.preview_text || 'لا توجد معاينة نصية.'}</pre>
                         </section>
 
                         <section className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-3">
                             <div className="flex items-center justify-between gap-3">
-                                <div className="flex items-center gap-2 text-white font-semibold"><LibraryBig className="w-4 h-4 text-cyan-300" />???????? ???????</div>
-                                <button onClick={() => setShowTechDetails((prev) => !prev)} className="h-8 px-3 rounded-lg border border-white/10 bg-white/5 text-gray-200 text-xs">{showTechDetails ? '?????' : '?????'}</button>
+                                <div className="flex items-center gap-2 text-white font-semibold"><LibraryBig className="w-4 h-4 text-cyan-300" />التفاصيل التقنية</div>
+                                <button onClick={() => setShowTechDetails((prev) => !prev)} className="h-8 px-3 rounded-lg border border-white/10 bg-white/5 text-gray-200 text-xs">{showTechDetails ? 'إخفاء' : 'إظهار'}</button>
                             </div>
 
                             {showTechDetails ? (
                                 <div className="space-y-3">
                                     <div className="grid grid-cols-2 gap-2 text-xs">
-                                        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2 text-gray-300">???????: <span className="text-white">{result.parser_used}</span></div>
-                                        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2 text-gray-300">?????: <span className="text-white">{result.detected_language}</span></div>
-                                        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2 text-gray-300">???????: <span className="text-white">{result.stats.pages ?? '--'}</span></div>
-                                        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2 text-gray-300">???????: <span className="text-white">{result.stats.characters}</span></div>
-                                        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2 text-gray-300">???????: <span className="text-white">{result.stats.paragraphs}</span></div>
-                                        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2 text-gray-300">????????: <span className="text-white">{result.stats.headings}</span></div>
+                                        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2 text-gray-300">المعالج: <span className="text-white">{result.parser_used}</span></div>
+                                        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2 text-gray-300">اللغة: <span className="text-white">{result.detected_language}</span></div>
+                                        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2 text-gray-300">الصفحات: <span className="text-white">{result.stats.pages ?? '--'}</span></div>
+                                        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2 text-gray-300">المحارف: <span className="text-white">{result.stats.characters}</span></div>
+                                        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2 text-gray-300">الفقرات: <span className="text-white">{result.stats.paragraphs}</span></div>
+                                        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2 text-gray-300">العناوين: <span className="text-white">{result.stats.headings}</span></div>
                                     </div>
-                                    {result.headings.length > 0 ? <div className="space-y-2"><div className="text-xs text-gray-400">???????? ?????????</div><div className="space-y-2">{result.headings.slice(0, 10).map((heading, idx) => <div key={`${heading}-${idx}`} className="rounded-lg border border-white/10 bg-white/[0.03] p-2 text-xs text-gray-300">{heading}</div>)}</div></div> : null}
-                                    {result.warnings.length > 0 ? <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">{result.warnings.join(' | ')}</div> : <div className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200"><CheckCircle2 className="w-4 h-4" />?? ???? ??????? ????? ?????.</div>}
+                                    {result.headings.length > 0 ? <div className="space-y-2"><div className="text-xs text-gray-400">العناوين المستخرجة</div><div className="space-y-2">{result.headings.slice(0, 10).map((heading, idx) => <div key={`${heading}-${idx}`} className="rounded-lg border border-white/10 bg-white/[0.03] p-2 text-xs text-gray-300">{heading}</div>)}</div></div> : null}
+                                    {result.warnings.length > 0 ? <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">{result.warnings.join(' | ')}</div> : <div className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200"><CheckCircle2 className="w-4 h-4" />لا توجد تحذيرات تقنية بارزة.</div>}
                                 </div>
                             ) : (
-                                <p className="text-sm text-gray-500">???????? ??????? ????? ??? ?????? ??? ??? ???? ??????? ??????? ??????.</p>
+                                <p className="text-sm text-gray-500">التفاصيل التقنية متاحة عند الحاجة فقط حتى تبقى القراءة تحريرية وواضحة.</p>
                             )}
                         </section>
                     </section>
 
-                    {createdWorkId && <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">?? ????? ????? ????? ?????: {createdWorkId}</div>}
+                    <section className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                            <div className="text-white font-semibold">سجل استخدام الوثيقة</div>
+                            <div className="text-xs text-gray-500">يحفظ ما الذي فُعل بهذه الوثيقة ومن استخدمها.</div>
+                        </div>
+                        {actionsQuery.isLoading ? (
+                            <div className="text-sm text-gray-500">جارٍ تحميل السجل...</div>
+                        ) : (actionsQuery.data?.data || []).length === 0 ? (
+                            <div className="text-sm text-gray-500">لا توجد إجراءات مسجلة بعد لهذه الوثيقة.</div>
+                        ) : (
+                            <div className="space-y-2">
+                                {(actionsQuery.data?.data || []).slice(0, 8).map((action: DocumentIntelActionLogItem) => (
+                                    <div key={action.id} className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <div className="text-white">
+                                                {action.action_type === 'document_saved'
+                                                    ? 'تم حفظ الوثيقة'
+                                                    : action.action_type === 'story_created'
+                                                      ? 'تم إنشاء قصة'
+                                                      : action.action_type === 'memory_saved'
+                                                        ? 'تم الحفظ في الذاكرة'
+                                                        : action.action_type === 'factcheck_sent'
+                                                          ? 'تم تجهيز التحقق'
+                                                          : action.action_type}
+                                            </div>
+                                            <div className="text-xs text-gray-500">{new Date(action.created_at).toLocaleString('ar-DZ')}</div>
+                                        </div>
+                                        <div className="mt-1 text-xs text-gray-400">
+                                            {action.actor_username ? `بواسطة ${action.actor_username}` : 'إجراء نظام'}
+                                            {action.target_type ? ` - النوع: ${action.target_type}` : ''}
+                                            {action.target_id ? ` - المعرف: ${action.target_id}` : ''}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </section>
+
+                    {createdWorkId && <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">تم إنشاء مسودة جديدة بنجاح: {createdWorkId}</div>}
                 </>
             )}
         </div>
+    );
+}
+
+export default function DocumentIntelPage() {
+    return (
+        <Suspense fallback={<div className="space-y-5 app-theme-shell" dir="rtl"><div className="rounded-2xl border border-white/10 bg-black/20 p-6 text-sm text-gray-300">جارٍ تحميل مساحة تحليل الوثائق...</div></div>}>
+            <DocumentIntelPageContent />
+        </Suspense>
     );
 }
