@@ -16,6 +16,7 @@ class ProjectMemoryItem(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     memory_type = Column(String(24), nullable=False, index=True, default="operational")  # operational|knowledge|session
+    memory_subtype = Column(String(48), nullable=True, index=True)
     title = Column(String(512), nullable=False)
     content = Column(Text, nullable=False)
     tags = Column(JSON, nullable=False, default=list)
@@ -24,6 +25,8 @@ class ProjectMemoryItem(Base):
     article_id = Column(Integer, ForeignKey("articles.id"), nullable=True, index=True)
     status = Column(String(24), nullable=False, index=True, default="active")  # active|archived
     importance = Column(Integer, nullable=False, default=3)
+    freshness_status = Column(String(24), nullable=False, index=True, default="stable")  # stable|review_soon|expired
+    valid_until = Column(DateTime, nullable=True)
 
     created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     created_by_username = Column(String(64), nullable=True)
@@ -38,6 +41,7 @@ class ProjectMemoryItem(Base):
 
     __table_args__ = (
         Index("ix_project_memory_type_status_updated", "memory_type", "status", "updated_at"),
+        Index("ix_project_memory_subtype_freshness", "memory_subtype", "freshness_status"),
     )
 
 

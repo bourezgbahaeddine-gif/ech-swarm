@@ -19,6 +19,22 @@ function apiErrorMessage(error: unknown, fallback: string): string {
 
 const WRITE_ROLES = new Set(['director', 'editor_chief', 'journalist', 'social_media', 'print_editor']);
 const MANAGE_ROLES = new Set(['director', 'editor_chief']);
+const subtypeLabel: Record<string, string> = {
+    editorial_decision: 'قرار تحريري',
+    style_rule: 'قاعدة أسلوب',
+    fact_pattern: 'نمط تحقق',
+    coverage_lesson: 'درس تغطية',
+    source_note: 'ملاحظة مصدر',
+    story_context: 'سياق قصة',
+    event_playbook: 'Playbook حدث',
+    incident_postmortem: 'ما بعد الحادثة',
+    general: 'عام',
+};
+const freshnessLabel: Record<string, string> = {
+    stable: 'مستقرة',
+    review_soon: 'تراجع قريبًا',
+    expired: 'منتهية',
+};
 
 export default function MemoryPage() {
     const { user } = useAuth();
@@ -29,12 +45,17 @@ export default function MemoryPage() {
 
     const [q, setQ] = useState('');
     const [memoryType, setMemoryType] = useState<'all' | 'operational' | 'knowledge' | 'session'>('all');
+    const [memorySubtype, setMemorySubtype] = useState<'all' | 'general' | 'style_rule' | 'editorial_decision' | 'fact_pattern' | 'coverage_lesson' | 'source_note' | 'story_context' | 'event_playbook' | 'incident_postmortem'>('all');
     const [statusFilter, setStatusFilter] = useState<'active' | 'archived'>('active');
+    const [freshnessFilter, setFreshnessFilter] = useState<'all' | 'stable' | 'review_soon' | 'expired'>('all');
     const [selectedId, setSelectedId] = useState<number | null>(null);
     const [formType, setFormType] = useState<'operational' | 'knowledge' | 'session'>('operational');
+    const [formSubtype, setFormSubtype] = useState<'general' | 'style_rule' | 'editorial_decision' | 'fact_pattern' | 'coverage_lesson' | 'source_note' | 'story_context' | 'event_playbook' | 'incident_postmortem'>('editorial_decision');
     const [formTitle, setFormTitle] = useState('');
     const [formContent, setFormContent] = useState('');
     const [formTags, setFormTags] = useState('');
+    const [formFreshness, setFormFreshness] = useState<'stable' | 'review_soon' | 'expired'>('stable');
+    const [formValidUntil, setFormValidUntil] = useState('');
     const [message, setMessage] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
 
@@ -45,12 +66,14 @@ export default function MemoryPage() {
     });
 
     const { data: listData, isLoading } = useQuery({
-        queryKey: ['memory-items', q, memoryType, statusFilter],
+        queryKey: ['memory-items', q, memoryType, memorySubtype, statusFilter, freshnessFilter],
         queryFn: () =>
             memoryApi.list({
                 q: q || undefined,
                 memory_type: memoryType === 'all' ? undefined : memoryType,
+                memory_subtype: memorySubtype === 'all' ? undefined : memorySubtype,
                 status: statusFilter,
+                freshness_status: freshnessFilter === 'all' ? undefined : freshnessFilter,
                 per_page: 50,
                 page: 1,
             }),
@@ -69,18 +92,24 @@ export default function MemoryPage() {
         mutationFn: () =>
             memoryApi.create({
                 memory_type: formType,
+                memory_subtype: formSubtype,
                 title: formTitle,
                 content: formContent,
                 tags: formTags
                     .split(',')
                     .map((v) => v.trim())
                     .filter(Boolean),
+                freshness_status: formFreshness,
+                valid_until: formValidUntil ? `${formValidUntil}T00:00:00` : null,
             }),
         onSuccess: async (res) => {
             setSelectedId(res.data.id);
             setFormTitle('');
             setFormContent('');
             setFormTags('');
+            setFormSubtype('editorial_decision');
+            setFormFreshness('stable');
+            setFormValidUntil('');
             setError(null);
             setMessage('تمت إضافة عنصر جديد إلى ذاكرة المشروع.');
             await queryClient.invalidateQueries({ queryKey: ['memory-items'] });
@@ -167,6 +196,32 @@ export default function MemoryPage() {
                             <option value="active">نشط</option>
                             <option value="archived">مؤرشف</option>
                         </select>
+                        <select
+                            value={memorySubtype}
+                            onChange={(e) => setMemorySubtype(e.target.value as typeof memorySubtype)}
+                            className="h-10 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-gray-200"
+                        >
+                            <option value="all">كل الأغراض</option>
+                            <option value="editorial_decision">قرار تحريري</option>
+                            <option value="style_rule">قاعدة أسلوب</option>
+                            <option value="fact_pattern">نمط تحقق</option>
+                            <option value="coverage_lesson">درس تغطية</option>
+                            <option value="source_note">ملاحظة مصدر</option>
+                            <option value="story_context">سياق قصة</option>
+                            <option value="event_playbook">Playbook حدث</option>
+                            <option value="incident_postmortem">ما بعد الحادثة</option>
+                            <option value="general">عام</option>
+                        </select>
+                        <select
+                            value={freshnessFilter}
+                            onChange={(e) => setFreshnessFilter(e.target.value as typeof freshnessFilter)}
+                            className="h-10 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-gray-200"
+                        >
+                            <option value="all">كل الصلاحيات</option>
+                            <option value="stable">مستقرة</option>
+                            <option value="review_soon">تراجع قريبًا</option>
+                            <option value="expired">منتهية</option>
+                        </select>
                     </div>
 
                     <div className="space-y-2 max-h-[520px] overflow-auto pr-1">
@@ -195,6 +250,10 @@ export default function MemoryPage() {
                                     <p className="text-xs text-gray-400 mt-1 line-clamp-2">{item.content}</p>
                                     <div className="mt-2 flex flex-wrap gap-1">
                                         <span className="text-[10px] px-2 py-0.5 rounded border border-cyan-500/30 text-cyan-200 bg-cyan-500/10">{item.memory_type}</span>
+                                        {item.memory_subtype ? (
+                                            <span className="text-[10px] px-2 py-0.5 rounded border border-emerald-500/30 text-emerald-200 bg-emerald-500/10">{subtypeLabel[item.memory_subtype] || item.memory_subtype}</span>
+                                        ) : null}
+                                        <span className="text-[10px] px-2 py-0.5 rounded border border-amber-500/30 text-amber-200 bg-amber-500/10">{freshnessLabel[item.freshness_status] || item.freshness_status}</span>
                                         {item.tags.slice(0, 3).map((tag) => (
                                             <span key={tag} className="text-[10px] px-2 py-0.5 rounded border border-white/10 text-gray-300 bg-white/[0.04]">
                                                 {tag}
@@ -216,6 +275,10 @@ export default function MemoryPage() {
                             </div>
                             <p className="text-sm text-gray-200 whitespace-pre-wrap">{selectedItem.content}</p>
                             <div className="flex flex-wrap gap-1">
+                                {selectedItem.memory_subtype ? (
+                                    <span className="text-[10px] px-2 py-0.5 rounded border border-emerald-500/30 text-emerald-200 bg-emerald-500/10">{subtypeLabel[selectedItem.memory_subtype] || selectedItem.memory_subtype}</span>
+                                ) : null}
+                                <span className="text-[10px] px-2 py-0.5 rounded border border-amber-500/30 text-amber-200 bg-amber-500/10">{freshnessLabel[selectedItem.freshness_status] || selectedItem.freshness_status}</span>
                                 {selectedItem.tags.map((tag) => (
                                     <span key={tag} className="text-[10px] px-2 py-0.5 rounded border border-white/10 text-gray-300 bg-white/[0.04]">
                                         {tag}
@@ -274,6 +337,21 @@ export default function MemoryPage() {
                                 <option value="knowledge">معرفي</option>
                                 <option value="session">جلسة</option>
                             </select>
+                            <select
+                                value={formSubtype}
+                                onChange={(e) => setFormSubtype(e.target.value as typeof formSubtype)}
+                                className="w-full h-10 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-gray-200"
+                            >
+                                <option value="editorial_decision">قرار تحريري</option>
+                                <option value="style_rule">قاعدة أسلوب</option>
+                                <option value="fact_pattern">نمط تحقق</option>
+                                <option value="coverage_lesson">درس تغطية</option>
+                                <option value="source_note">ملاحظة مصدر</option>
+                                <option value="story_context">سياق قصة</option>
+                                <option value="event_playbook">Playbook حدث</option>
+                                <option value="incident_postmortem">ما بعد الحادثة</option>
+                                <option value="general">عام</option>
+                            </select>
                             <input
                                 value={formTitle}
                                 onChange={(e) => setFormTitle(e.target.value)}
@@ -295,6 +373,23 @@ export default function MemoryPage() {
                                 className="w-full h-10 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder:text-gray-500"
                                 dir="ltr"
                             />
+                            <div className="grid grid-cols-2 gap-2">
+                                <select
+                                    value={formFreshness}
+                                    onChange={(e) => setFormFreshness(e.target.value as typeof formFreshness)}
+                                    className="w-full h-10 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-gray-200"
+                                >
+                                    <option value="stable">مستقرة</option>
+                                    <option value="review_soon">تراجع قريبًا</option>
+                                    <option value="expired">منتهية</option>
+                                </select>
+                                <input
+                                    type="date"
+                                    value={formValidUntil}
+                                    onChange={(e) => setFormValidUntil(e.target.value)}
+                                    className="w-full h-10 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-gray-200"
+                                />
+                            </div>
                             <button
                                 onClick={() => createMutation.mutate()}
                                 disabled={createMutation.isPending || !formTitle.trim() || !formContent.trim()}

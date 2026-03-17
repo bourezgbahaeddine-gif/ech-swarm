@@ -31,6 +31,7 @@ import {
     competitorXrayApi,
     editorialApi,
     jobsApi,
+    memoryApi,
     msiApi,
     simApi,
     storiesApi,
@@ -38,6 +39,7 @@ import {
     type ClaimOverrideInput,
     type ArchiveSearchItem,
     type FactCheckClaim,
+    type ProjectMemoryRecommendation,
     type Source,
     type StoryControlCenterResponse,
     type StorySuggestion,
@@ -48,6 +50,8 @@ import { useAuth } from '@/lib/auth';
 import { cn, formatRelativeTime, truncate } from '@/lib/utils';
 import { WorkflowHelpPanel } from '@/components/workflow/WorkflowHelpPanel';
 import { RoleOnboardingBanner } from '@/components/workflow/RoleOnboardingBanner';
+import { MemoryRecommendationPanel } from '@/components/memory/MemoryRecommendationPanel';
+import { MemoryQuickCaptureModal } from '@/components/memory/MemoryQuickCaptureModal';
 import { trackNextAction, trackUiAction, useTrackSurfaceView } from '@/lib/ux-telemetry';
 
 type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
@@ -846,6 +850,7 @@ function WorkspaceDraftsPageContent() {
     const [selectedStoryId, setSelectedStoryId] = useState<number | null>(null);
     const [overrideOpen, setOverrideOpen] = useState(false);
     const [overrideNote, setOverrideNote] = useState('');
+    const [memoryCaptureOpen, setMemoryCaptureOpen] = useState(false);
     const lastSimplifiedWorkRef = useRef<string | null>(null);
     const lastSavedRef = useRef<{ title: string; body: string }>({ title: '', body: '' });
     const isWriteMode = viewMode === 'write';
@@ -952,13 +957,40 @@ function WorkspaceDraftsPageContent() {
     const versions = versionsData?.data || [];
     const constitutionTips = constitutionTipsData?.data?.tips || [];
     const articleContextId = context?.article?.id || null;
+    const memoryQueryText = useMemo(() => {
+        const parts = [
+            context?.article?.title_ar,
+            context?.article?.original_title,
+            context?.article?.summary,
+            title,
+        ].filter(Boolean);
+        return parts.join(' ').slice(0, 320);
+    }, [context?.article?.original_title, context?.article?.summary, context?.article?.title_ar, title]);
+    const memoryTags = useMemo(() => {
+        return [context?.article?.category, context?.article?.source_name]
+            .filter(Boolean)
+            .join(',');
+    }, [context?.article?.category, context?.article?.source_name]);
     const { data: storySuggestionsData, isLoading: storySuggestionsLoading } = useQuery({
         queryKey: ['smart-editor-story-suggest', articleContextId],
         queryFn: () => storiesApi.suggest(articleContextId!, { limit: 8 }),
         enabled: Boolean(articleContextId),
         staleTime: 1000 * 60 * 2,
     });
+    const memoryRecommendationsQuery = useQuery({
+        queryKey: ['workspace-memory-recommendations', articleContextId, memoryQueryText, memoryTags],
+        queryFn: () =>
+            memoryApi.recommendations({
+                article_id: articleContextId || undefined,
+                q: memoryQueryText || undefined,
+                tags: memoryTags || undefined,
+                limit: 4,
+            }),
+        enabled: Boolean(articleContextId || memoryQueryText.trim()),
+        staleTime: 1000 * 60 * 2,
+    });
     const storySuggestions = (storySuggestionsData?.data || []) as StorySuggestion[];
+    const memoryRecommendations = (memoryRecommendationsQuery.data?.data || []) as ProjectMemoryRecommendation[];
     useEffect(() => {
         if (!storySuggestions.length) {
             setSelectedStoryId(null);
@@ -968,6 +1000,41 @@ function WorkspaceDraftsPageContent() {
             setSelectedStoryId(storySuggestions[0].story_id);
         }
     }, [storySuggestions, selectedStoryId]);
+    const markMemoryUsedMutation = useMutation({
+        mutationFn: (itemId: number) => memoryApi.markUsed(itemId, 'استُخدم داخل المحرر أثناء التحرير'),
+        onSuccess: async () => {
+            setOk('تم تسجيل استخدام عنصر الذاكرة.');
+            await queryClient.invalidateQueries({ queryKey: ['workspace-memory-recommendations'] });
+        },
+        onError: () => setErr('تعذر تسجيل استخدام عنصر الذاكرة.'),
+    });
+    const quickCaptureMutation = useMutation({
+        mutationFn: (payload: {
+            memory_type: 'operational' | 'knowledge' | 'session';
+            memory_subtype: string;
+            title: string;
+            content: string;
+            tags: string[];
+            importance: number;
+            freshness_status: 'stable' | 'review_soon' | 'expired';
+            valid_until: string | null;
+            note: string | null;
+        }) =>
+            memoryApi.quickCapture({
+                ...payload,
+                article_id: articleContextId || articleNumericId || null,
+                source_type: 'workspace_draft',
+                source_ref: workId ? `workspace:${workId}` : articleContextId ? `article:${articleContextId}` : 'workspace',
+            }),
+        onSuccess: async () => {
+            setOk('تم حفظ الملاحظة في الذاكرة التحريرية.');
+            setMemoryCaptureOpen(false);
+            await queryClient.invalidateQueries({ queryKey: ['workspace-memory-recommendations'] });
+            await queryClient.invalidateQueries({ queryKey: ['memory-items'] });
+            await queryClient.invalidateQueries({ queryKey: ['memory-overview'] });
+        },
+        onError: () => setErr('تعذر حفظ الملاحظة في الذاكرة التحريرية.'),
+    });
 
     const { data: storyCenterData, isLoading: storyCenterLoading } = useQuery({
         queryKey: ['smart-editor-story-center', selectedStoryId],
@@ -2757,7 +2824,13 @@ function WorkspaceDraftsPageContent() {
                     </div>
 
                     {headerToolsOpen && (
-                        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
+                        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-4">
+                            <button
+                                onClick={() => setMemoryCaptureOpen(true)}
+                                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200"
+                            >
+                                حفظ في الذاكرة
+                            </button>
                             <button
                                 onClick={openWelcomeGuide}
                                 className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-200"
@@ -2852,7 +2925,13 @@ function WorkspaceDraftsPageContent() {
 
                         {headerToolsOpen && (
                             <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                                <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                                <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
+                                    <button
+                                        onClick={() => setMemoryCaptureOpen(true)}
+                                        className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200"
+                                    >
+                                        حفظ في الذاكرة
+                                    </button>
                                     <button
                                         onClick={openWelcomeGuide}
                                         className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-200"
@@ -2897,7 +2976,13 @@ function WorkspaceDraftsPageContent() {
 
                 {headerToolsOpen && (
                     <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3">
-                        <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                        <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
+                            <button
+                                onClick={() => setMemoryCaptureOpen(true)}
+                                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200"
+                            >
+                                حفظ في الذاكرة
+                            </button>
                             <button
                                 onClick={() => runWithGuide('manual_draft', () => setNewDraftOpen(true))}
                                 className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200"
@@ -3077,6 +3162,18 @@ function WorkspaceDraftsPageContent() {
                                 شرح هذه الخطوة
                             </button>
                         </div>
+
+                        <MemoryRecommendationPanel
+                            items={memoryRecommendations}
+                            isLoading={memoryRecommendationsQuery.isLoading}
+                            onMarkUsed={(itemId) => markMemoryUsedMutation.mutate(itemId)}
+                            onQuickCapture={() => setMemoryCaptureOpen(true)}
+                            onOpenLibrary={() => {
+                                if (typeof window !== 'undefined') {
+                                    window.open('/memory', '_blank', 'noopener,noreferrer');
+                                }
+                            }}
+                        />
 
                         <WorkflowHelpPanel title="كيف نستخدم هذا المحرر الآن؟" items={contextualGuideItems} />
 
@@ -4729,6 +4826,18 @@ function WorkspaceDraftsPageContent() {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {memoryCaptureOpen && (
+                <MemoryQuickCaptureModal
+                    open={memoryCaptureOpen}
+                    onClose={() => setMemoryCaptureOpen(false)}
+                    onSubmit={(payload) => quickCaptureMutation.mutate(payload)}
+                    isSubmitting={quickCaptureMutation.isPending}
+                    articleTitle={title || context?.article?.title_ar || context?.article?.original_title || null}
+                    sourceLabel={context?.article?.source_name || null}
+                    suggestedSubtype="editorial_decision"
+                />
             )}
 
             {guideOpen && <GuideModal type={guideType} action={guideAction} onClose={closeGuide} onConfirm={confirmGuide} />}

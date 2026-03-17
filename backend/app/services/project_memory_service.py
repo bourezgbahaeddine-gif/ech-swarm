@@ -6,11 +6,25 @@ import re
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import ProjectMemoryEvent, ProjectMemoryItem
+from app.models import Article, ProjectMemoryEvent, ProjectMemoryItem
 from app.models.user import User
 
 
 SPACE_RE = re.compile(r"\s+")
+TOKEN_RE = re.compile(r"[\w\u0600-\u06FF]{3,}", re.UNICODE)
+
+ALLOWED_SUBTYPES = {
+    "general",
+    "style_rule",
+    "editorial_decision",
+    "fact_pattern",
+    "coverage_lesson",
+    "source_note",
+    "story_context",
+    "event_playbook",
+    "incident_postmortem",
+}
+ALLOWED_FRESHNESS = {"stable", "review_soon", "expired"}
 
 
 class ProjectMemoryService:
@@ -30,6 +44,25 @@ class ProjectMemoryService:
             if clean not in out:
                 out.append(clean[:64])
         return out[:12]
+
+    @staticmethod
+    def _normalize_subtype(value: str | None) -> str:
+        candidate = SPACE_RE.sub("_", (value or "general").strip().lower())
+        return candidate if candidate in ALLOWED_SUBTYPES else "general"
+
+    @staticmethod
+    def _normalize_freshness(value: str | None) -> str:
+        candidate = (value or "stable").strip().lower()
+        return candidate if candidate in ALLOWED_FRESHNESS else "stable"
+
+    @staticmethod
+    def _tokenize(values: list[str | None]) -> list[str]:
+        seen: list[str] = []
+        for value in values:
+            for token in TOKEN_RE.findall((value or "").lower()):
+                if token not in seen:
+                    seen.append(token)
+        return seen[:18]
 
     async def log_event(
         self,
@@ -64,9 +97,13 @@ class ProjectMemoryService:
         source_ref: str | None,
         article_id: int | None,
         importance: int,
+        memory_subtype: str | None = None,
+        freshness_status: str | None = None,
+        valid_until: datetime | None = None,
     ) -> ProjectMemoryItem:
         item = ProjectMemoryItem(
             memory_type=memory_type,
+            memory_subtype=self._normalize_subtype(memory_subtype),
             title=self._normalize_text(title)[:512],
             content=self._normalize_text(content),
             tags=self._normalize_tags(tags),
@@ -74,6 +111,8 @@ class ProjectMemoryService:
             source_ref=self._normalize_text(source_ref)[:512] if source_ref else None,
             article_id=article_id,
             importance=importance,
+            freshness_status=self._normalize_freshness(freshness_status),
+            valid_until=valid_until,
             created_by_user_id=actor.id,
             created_by_username=actor.username,
             updated_by_user_id=actor.id,
@@ -92,12 +131,18 @@ class ProjectMemoryService:
         memory_type: str | None,
         status: str,
         tag: str | None,
+        memory_subtype: str | None,
+        freshness_status: str | None,
         page: int,
         per_page: int,
     ) -> tuple[list[ProjectMemoryItem], int]:
         filters = [ProjectMemoryItem.status == status]
         if memory_type:
             filters.append(ProjectMemoryItem.memory_type == memory_type)
+        if memory_subtype:
+            filters.append(ProjectMemoryItem.memory_subtype == self._normalize_subtype(memory_subtype))
+        if freshness_status:
+            filters.append(ProjectMemoryItem.freshness_status == self._normalize_freshness(freshness_status))
         if tag:
             filters.append(ProjectMemoryItem.tags.contains([tag.lower().strip()]))
         if q:
@@ -122,6 +167,117 @@ class ProjectMemoryService:
             .limit(per_page)
         )
         return list(rows.scalars().all()), total
+
+    async def recommend_items(
+        self,
+        db: AsyncSession,
+        *,
+        article_id: int | None,
+        q: str | None,
+        tags: list[str] | None,
+        memory_type: str | None,
+        limit: int,
+    ) -> list[dict]:
+        filters = [ProjectMemoryItem.status == "active"]
+        if memory_type:
+            filters.append(ProjectMemoryItem.memory_type == memory_type)
+
+        now = datetime.utcnow()
+        filters.append(or_(ProjectMemoryItem.valid_until.is_(None), ProjectMemoryItem.valid_until >= now))
+
+        rows = await db.execute(
+            select(ProjectMemoryItem)
+            .where(and_(*filters))
+            .order_by(ProjectMemoryItem.importance.desc(), ProjectMemoryItem.updated_at.desc())
+            .limit(250)
+        )
+        items = list(rows.scalars().all())
+        article = None
+        if article_id is not None:
+            article_row = await db.execute(select(Article).where(Article.id == article_id))
+            article = article_row.scalar_one_or_none()
+
+        normalized_tags = self._normalize_tags(tags)
+        article_tokens = self._tokenize(
+            [
+                article.title_ar if article else None,
+                article.original_title if article else None,
+                article.summary if article else None,
+                article.source_name if article else None,
+                q,
+            ]
+            + (article.keywords if article and isinstance(article.keywords, list) else [])
+        )
+
+        recommendations: list[dict] = []
+        for item in items:
+            score = float(item.importance or 0)
+            reasons: list[str] = []
+            matched_signals: list[str] = []
+
+            if article_id is not None and item.article_id == article_id:
+                score += 12.0
+                reasons.append("مرتبط مباشرة بهذه المادة")
+                matched_signals.append("same_article")
+
+            tag_overlap = len(set(item.tags or []).intersection(normalized_tags))
+            if tag_overlap:
+                score += tag_overlap * 2.5
+                reasons.append(f"يشارك {tag_overlap} وسم/وسوم مع المادة الحالية")
+                matched_signals.append("tag_overlap")
+
+            haystack = " ".join(
+                filter(
+                    None,
+                    [
+                        (item.title or "").lower(),
+                        (item.content or "").lower(),
+                        (item.source_ref or "").lower(),
+                        " ".join(item.tags or []),
+                    ],
+                )
+            )
+            token_hits = [token for token in article_tokens if token in haystack]
+            if token_hits:
+                score += min(len(token_hits), 4) * 1.5
+                reasons.append("يتقاطع مع موضوع أو كيان موجود في المادة الحالية")
+                matched_signals.append("topic_overlap")
+
+            if item.memory_subtype in {"style_rule", "editorial_decision"}:
+                score += 1.25
+            if item.freshness_status == "review_soon":
+                score -= 0.5
+
+            reason = reasons[0] if reasons else "مفيد كسياق تحريري قريب من المادة الحالية"
+            recommendations.append(
+                {
+                    "id": item.id,
+                    "memory_type": item.memory_type,
+                    "memory_subtype": item.memory_subtype,
+                    "title": item.title,
+                    "content": item.content,
+                    "tags": item.tags or [],
+                    "source_type": item.source_type,
+                    "source_ref": item.source_ref,
+                    "article_id": item.article_id,
+                    "status": item.status,
+                    "importance": item.importance,
+                    "freshness_status": item.freshness_status,
+                    "valid_until": item.valid_until,
+                    "created_by_user_id": item.created_by_user_id,
+                    "created_by_username": item.created_by_username,
+                    "updated_by_user_id": item.updated_by_user_id,
+                    "updated_by_username": item.updated_by_username,
+                    "created_at": item.created_at,
+                    "updated_at": item.updated_at,
+                    "recommendation_reason": reason,
+                    "recommendation_score": round(score, 2),
+                    "matched_signals": matched_signals,
+                }
+            )
+
+        recommendations.sort(key=lambda item: (item["recommendation_score"], item["updated_at"]), reverse=True)
+        return recommendations[:limit]
 
     async def overview(self, db: AsyncSession) -> dict[str, int]:
         total_active = int(

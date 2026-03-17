@@ -1303,6 +1303,7 @@ export interface UserActivityLogItem {
 export interface ProjectMemoryItem {
     id: number;
     memory_type: 'operational' | 'knowledge' | 'session' | string;
+    memory_subtype: 'general' | 'style_rule' | 'editorial_decision' | 'fact_pattern' | 'coverage_lesson' | 'source_note' | 'story_context' | 'event_playbook' | 'incident_postmortem' | string | null;
     title: string;
     content: string;
     tags: string[];
@@ -1311,6 +1312,8 @@ export interface ProjectMemoryItem {
     article_id: number | null;
     status: 'active' | 'archived' | string;
     importance: number;
+    freshness_status: 'stable' | 'review_soon' | 'expired' | string;
+    valid_until: string | null;
     created_by_user_id: number | null;
     created_by_username: string | null;
     updated_by_user_id: number | null;
@@ -1344,6 +1347,12 @@ export interface ProjectMemoryListResponse {
     page: number;
     per_page: number;
     pages: number;
+}
+
+export interface ProjectMemoryRecommendation extends ProjectMemoryItem {
+    recommendation_reason: string;
+    recommendation_score: number;
+    matched_signals: string[];
 }
 
 export type EventMemoScope = 'national' | 'international' | 'religious';
@@ -2090,14 +2099,24 @@ export const memoryApi = {
     list: (params?: {
         q?: string;
         memory_type?: string;
+        memory_subtype?: string;
         status?: string;
+        freshness_status?: string;
         tag?: string;
         page?: number;
         per_page?: number;
     }) => api.get<ProjectMemoryListResponse>('/memory/items', { params }),
     get: (itemId: number) => api.get<ProjectMemoryItem>(`/memory/items/${itemId}`),
+    recommendations: (params?: {
+        article_id?: number;
+        q?: string;
+        tags?: string;
+        memory_type?: string;
+        limit?: number;
+    }) => api.get<ProjectMemoryRecommendation[]>('/memory/recommendations', { params }),
     create: (payload: {
         memory_type: 'operational' | 'knowledge' | 'session';
+        memory_subtype?: string;
         title: string;
         content: string;
         tags?: string[];
@@ -2105,9 +2124,26 @@ export const memoryApi = {
         source_ref?: string | null;
         article_id?: number | null;
         importance?: number;
+        freshness_status?: 'stable' | 'review_soon' | 'expired';
+        valid_until?: string | null;
     }) => api.post<ProjectMemoryItem>('/memory/items', payload),
+    quickCapture: (payload: {
+        memory_type: 'operational' | 'knowledge' | 'session';
+        memory_subtype?: string;
+        title: string;
+        content: string;
+        tags?: string[];
+        source_type?: string | null;
+        source_ref?: string | null;
+        article_id?: number | null;
+        importance?: number;
+        freshness_status?: 'stable' | 'review_soon' | 'expired';
+        valid_until?: string | null;
+        note?: string | null;
+    }) => api.post<ProjectMemoryItem>('/memory/quick-capture', payload),
     update: (itemId: number, payload: Partial<{
         memory_type: 'operational' | 'knowledge' | 'session';
+        memory_subtype: string | null;
         title: string;
         content: string;
         tags: string[];
@@ -2116,6 +2152,8 @@ export const memoryApi = {
         article_id: number | null;
         importance: number;
         status: 'active' | 'archived';
+        freshness_status: 'stable' | 'review_soon' | 'expired';
+        valid_until: string | null;
     }>) => api.patch<ProjectMemoryItem>(`/memory/items/${itemId}`, payload),
     markUsed: (itemId: number, note?: string) =>
         api.post<ProjectMemoryEvent>(`/memory/items/${itemId}/use`, { note }),

@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { isAxiosError } from 'axios';
 import {
     editorialApi,
+    memoryApi,
     newsApi,
     type ArticleBrief,
     type ChiefPendingItem,
@@ -17,6 +18,7 @@ import { useAuth } from '@/lib/auth';
 import { AlertTriangle, CheckCircle2, RotateCcw, Send, ShieldCheck } from 'lucide-react';
 import { WorkflowCard } from '@/components/workflow/WorkflowCard';
 import { WorkflowHelpPanel } from '@/components/workflow/WorkflowHelpPanel';
+import { MemoryQuickCaptureModal } from '@/components/memory/MemoryQuickCaptureModal';
 import { getWorkflowStatusLabel } from '@/lib/workflow-language';
 import { trackNextAction, useTrackSurfaceView } from '@/lib/ux-telemetry';
 
@@ -101,6 +103,7 @@ export default function EditorialPage() {
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
     const [notesMap, setNotesMap] = useState<Record<number, string>>({});
+    const [memoryCaptureArticle, setMemoryCaptureArticle] = useState<ArticleBrief | ChiefPendingItem | null>(null);
     const surfaceDetails = useMemo(
         () => ({
             role: role || 'guest',
@@ -166,6 +169,34 @@ export default function EditorialPage() {
         queryFn: () => editorialApi.socialApprovedFeed(80),
         enabled: isSocial,
         refetchInterval: 30000,
+    });
+
+    const quickCaptureMutation = useMutation({
+        mutationFn: (payload: {
+            memory_type: 'operational' | 'knowledge' | 'session';
+            memory_subtype: string;
+            title: string;
+            content: string;
+            tags: string[];
+            importance: number;
+            freshness_status: 'stable' | 'review_soon' | 'expired';
+            valid_until: string | null;
+            note: string | null;
+        }) =>
+            memoryApi.quickCapture({
+                ...payload,
+                article_id: memoryCaptureArticle?.id || null,
+                source_type: 'editorial_queue',
+                source_ref: memoryCaptureArticle ? `editorial:${memoryCaptureArticle.id}` : 'editorial',
+            }),
+        onSuccess: async () => {
+            setSuccessMessage('تم حفظ الملاحظة في الذاكرة التحريرية.');
+            setErrorMessage(null);
+            setMemoryCaptureArticle(null);
+            await queryClient.invalidateQueries({ queryKey: ['memory-items'] });
+            await queryClient.invalidateQueries({ queryKey: ['memory-overview'] });
+        },
+        onError: (err) => setErrorMessage(getApiErrorMessage(err, 'تعذر حفظ الملاحظة في الذاكرة التحريرية.')),
     });
 
     const nominateMutation = useMutation({
@@ -335,12 +366,13 @@ export default function EditorialPage() {
                             </div>
                         )}
 
-                        <div className="grid grid-cols-1 gap-2 md:grid-cols-5">
+                        <div className="grid grid-cols-1 gap-2 md:grid-cols-6">
                             <a href={item.work_id ? `/workspace-drafts?article_id=${item.id}&work_id=${item.work_id}` : `/workspace-drafts?article_id=${item.id}`} className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-center text-xs text-gray-200 hover:text-white">افتح في المحرر</a>
                             <button onClick={() => submitChiefDecision(item, 'approve')} disabled={chiefDecisionMutation.isPending} className="flex items-center justify-center gap-1 rounded-xl border border-emerald-500/30 bg-emerald-500/20 px-3 py-2 text-xs text-emerald-200"><CheckCircle2 className="h-4 w-4" /> اعتماد نهائي</button>
                             <button onClick={() => submitChiefDecision(item, 'approve_with_reservations')} disabled={chiefDecisionMutation.isPending} className="rounded-xl border border-orange-500/30 bg-orange-500/20 px-3 py-2 text-xs text-orange-200">اعتماد بتحفظات</button>
                             <button onClick={() => submitChiefDecision(item, 'send_back')} disabled={chiefDecisionMutation.isPending} className="flex items-center justify-center gap-1 rounded-xl border border-amber-500/30 bg-amber-500/20 px-3 py-2 text-xs text-amber-200"><RotateCcw className="h-4 w-4" /> إعادة للمراجعة</button>
                             <button onClick={() => submitChiefDecision(item, 'reject')} disabled={chiefDecisionMutation.isPending} className="rounded-xl border border-red-500/30 bg-red-500/20 px-3 py-2 text-xs text-red-200">رفض</button>
+                            <button onClick={() => setMemoryCaptureArticle(item)} className="rounded-xl border border-amber-500/30 bg-amber-500/20 px-3 py-2 text-xs text-amber-200">حفظ في الذاكرة</button>
                         </div>
 
                         <input type="text" value={note} onChange={(e) => setNotesMap((prev) => ({ ...prev, [item.id]: e.target.value }))} placeholder="سبب القرار (إلزامي للتحفظات أو الرفض)..." className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white placeholder:text-gray-500" dir="rtl" />
@@ -384,7 +416,7 @@ export default function EditorialPage() {
                         {article.summary && (
                             <div className="text-xs text-gray-300" dir="rtl">{truncate(article.summary, 220)}</div>
                         )}
-                        <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                        <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
                             {action.href ? <a href={action.href} className="rounded-xl border border-cyan-500/30 bg-cyan-500/20 px-3 py-2 text-center text-xs text-cyan-200">{action.label}</a> : null}
                             {options?.nomination ? (
                                 <button onClick={() => nominateMutation.mutate(article.id)} disabled={!canNominate || nominateMutation.isPending} className="flex items-center justify-center gap-1 rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-xs text-gray-200 disabled:opacity-50"><Send className="h-4 w-4" /> ترشيح للتحرير</button>
@@ -396,6 +428,7 @@ export default function EditorialPage() {
                             ) : (
                                 <a href={article.original_url || '#'} target="_blank" rel="noreferrer" className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-center text-xs text-gray-300 hover:text-white">المصدر</a>
                             )}
+                            <button onClick={() => setMemoryCaptureArticle(article)} className="rounded-xl border border-amber-500/30 bg-amber-500/20 px-3 py-2 text-xs text-amber-200">حفظ في الذاكرة</button>
                         </div>
                     </div>
                 }
@@ -541,6 +574,18 @@ export default function EditorialPage() {
                     },
                 ]}
             />
+
+            {memoryCaptureArticle && (
+                <MemoryQuickCaptureModal
+                    open={Boolean(memoryCaptureArticle)}
+                    onClose={() => setMemoryCaptureArticle(null)}
+                    onSubmit={(payload) => quickCaptureMutation.mutate(payload)}
+                    isSubmitting={quickCaptureMutation.isPending}
+                    articleTitle={memoryCaptureArticle.title_ar || memoryCaptureArticle.original_title || null}
+                    sourceLabel={memoryCaptureArticle.source_name || null}
+                    suggestedSubtype="editorial_decision"
+                />
+            )}
         </div>
     );
 }

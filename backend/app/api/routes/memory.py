@@ -20,6 +20,8 @@ from app.schemas.memory import (
     MemoryItemResponse,
     MemoryListResponse,
     MemoryOverviewResponse,
+    MemoryQuickCaptureRequest,
+    MemoryRecommendationResponse,
     MemoryUpdateRequest,
 )
 from app.services.project_memory_service import project_memory_service
@@ -99,7 +101,9 @@ async def overview(
 async def list_items(
     q: str | None = Query(default=None),
     memory_type: str | None = Query(default=None, pattern="^(operational|knowledge|session)$"),
+    memory_subtype: str | None = Query(default=None),
     status_filter: str = Query(default="active", alias="status", pattern="^(active|archived)$"),
+    freshness_status: str | None = Query(default=None, pattern="^(stable|review_soon|expired)$"),
     tag: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     per_page: int = Query(default=20, ge=1, le=100),
@@ -114,6 +118,8 @@ async def list_items(
         memory_type=memory_type,
         status=status_filter,
         tag=tag,
+        memory_subtype=memory_subtype,
+        freshness_status=freshness_status,
         page=page,
         per_page=per_page,
     )
@@ -151,6 +157,9 @@ async def create_item(
         source_ref=payload.source_ref,
         article_id=payload.article_id,
         importance=payload.importance,
+        memory_subtype=payload.memory_subtype,
+        freshness_status=payload.freshness_status,
+        valid_until=payload.valid_until,
     )
     await db.commit()
     await db.refresh(item)
@@ -202,6 +211,8 @@ async def update_item(
 
     if "memory_type" in data:
         item.memory_type = data["memory_type"]
+    if "memory_subtype" in data:
+        item.memory_subtype = project_memory_service._normalize_subtype(data["memory_subtype"])
     if "title" in data:
         item.title = project_memory_service._normalize_text(data["title"])[:512]
     if "content" in data:
@@ -218,6 +229,10 @@ async def update_item(
         item.importance = data["importance"]
     if "status" in data:
         item.status = data["status"]
+    if "freshness_status" in data:
+        item.freshness_status = project_memory_service._normalize_freshness(data["freshness_status"])
+    if "valid_until" in data:
+        item.valid_until = data["valid_until"]
 
     item.updated_by_user_id = current_user.id
     item.updated_by_username = current_user.username
@@ -263,6 +278,69 @@ async def mark_item_used(
     )
     event = event_row.scalar_one()
     return MemoryEventResponse.model_validate(event)
+
+
+@router.get("/recommendations", response_model=list[MemoryRecommendationResponse])
+async def recommendations(
+    article_id: int | None = Query(default=None),
+    q: str | None = Query(default=None),
+    tags: str | None = Query(default=None, description="Comma-separated tags"),
+    memory_type: str | None = Query(default=None, pattern="^(operational|knowledge|session)$"),
+    limit: int = Query(default=5, ge=1, le=12),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _assert_read(current_user)
+    await _ensure_memory_tables(db)
+    results = await project_memory_service.recommend_items(
+        db,
+        article_id=article_id,
+        q=q,
+        tags=[part.strip() for part in (tags or "").split(",") if part.strip()],
+        memory_type=memory_type,
+        limit=limit,
+    )
+    return [MemoryRecommendationResponse(**item) for item in results]
+
+
+@router.post("/quick-capture", response_model=MemoryItemResponse, status_code=status.HTTP_201_CREATED)
+async def quick_capture(
+    payload: MemoryQuickCaptureRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _assert_write(current_user)
+    await _ensure_memory_tables(db)
+    if payload.article_id is not None:
+        article_exists = await db.execute(select(Article.id).where(Article.id == payload.article_id))
+        if article_exists.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="المقال المرتبط غير موجود.")
+
+    item = await project_memory_service.create_item(
+        db,
+        actor=current_user,
+        memory_type=payload.memory_type,
+        memory_subtype=payload.memory_subtype,
+        title=payload.title,
+        content=payload.content,
+        tags=payload.tags,
+        source_type=payload.source_type,
+        source_ref=payload.source_ref,
+        article_id=payload.article_id,
+        importance=payload.importance,
+        freshness_status=payload.freshness_status,
+        valid_until=payload.valid_until,
+    )
+    await project_memory_service.log_event(
+        db,
+        memory_id=item.id,
+        event_type="quick_capture",
+        actor=current_user,
+        note=payload.note or "quick capture",
+    )
+    await db.commit()
+    await db.refresh(item)
+    return MemoryItemResponse.model_validate(item)
 
 
 @router.get("/items/{item_id}/events", response_model=list[MemoryEventResponse])
