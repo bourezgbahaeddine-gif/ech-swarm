@@ -19,6 +19,7 @@ import {
     Film,
     FolderGit2,
     Gauge,
+    GitBranch,
     KeyRound,
     LayoutDashboard,
     Library,
@@ -84,185 +85,199 @@ function normalizeRole(role: string): Role | null {
 const navItems: NavItem[] = [
     {
         href: '/today',
-        label: 'اليوم',
+        label: 'Ø§Ù„ÙŠÙˆÙ…',
         icon: LayoutDashboard,
         roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor', 'fact_checker', 'observer'],
         section: 'primary',
     },
     {
+        href: '/how-editorial-os-works',
+        label: 'كيف تعمل المنصة؟',
+        icon: BookOpen,
+        roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor', 'fact_checker', 'observer'],
+        section: 'primary',
+    },
+    {
+        href: '/newsroom-flow',
+        label: 'مسار غرفة الأخبار',
+        icon: GitBranch,
+        roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor', 'fact_checker', 'observer'],
+        section: 'primary',
+    },
+    {
         href: '/',
-        label: 'الأداء',
+        label: 'Ø§Ù„Ø£Ø¯Ø§Ø¡',
         icon: Gauge,
         roles: ['director'],
         section: 'primary',
     },
     {
         href: '/news',
-        label: 'الأخبار',
+        label: 'Ø§Ù„Ø£Ø®Ø¨Ø§Ø±',
         icon: Newspaper,
         roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor', 'fact_checker'],
         section: 'primary',
     },
     {
         href: '/workspace-drafts',
-        label: 'المسودات',
+        label: 'Ø§Ù„Ù…Ø³ÙˆØ¯Ø§Øª',
         icon: FolderGit2,
         roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
         section: 'primary',
     },
     {
         href: '/editorial',
-        label: 'الاعتماد',
+        label: 'Ø§Ù„Ø§Ø¹ØªÙ…Ø§Ø¯',
         icon: UserCheck,
         roles: ['director', 'editor_chief', 'social_media'],
         section: 'primary',
         roleLabels: {
-            social_media: 'نشر واعتماد',
+            social_media: 'Ù†Ø´Ø± ÙˆØ§Ø¹ØªÙ…Ø§Ø¯',
         },
     },
     {
         href: '/stories',
-        label: 'القصص',
+        label: 'Ø§Ù„Ù‚ØµØµ',
         icon: Library,
         roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
         section: 'primary',
     },
     {
         href: '/events',
-        label: 'التغطيات',
+        label: 'Ø§Ù„ØªØºØ·ÙŠØ§Øª',
         icon: CalendarClock,
         roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
         section: 'primary',
     },
     {
         href: '/archive',
-        label: 'الأرشيف',
+        label: 'Ø§Ù„Ø£Ø±Ø´ÙŠÙ',
         icon: Archive,
         roles: ['editor_chief', 'journalist', 'social_media', 'print_editor', 'fact_checker'],
         section: 'primary',
     },
     {
         href: '/',
-        label: 'الأداء',
+        label: 'Ø§Ù„Ø£Ø¯Ø§Ø¡',
         icon: Gauge,
         roles: ['editor_chief'],
         section: 'ops',
     },
     {
         href: '/archive',
-        label: 'الأرشيف',
+        label: 'Ø§Ù„Ø£Ø±Ø´ÙŠÙ',
         icon: Archive,
         roles: ['director'],
         section: 'knowledge',
     },
     {
         href: '/digital',
-        label: 'التغطية الرقمية',
+        label: 'Ø§Ù„ØªØºØ·ÙŠØ© Ø§Ù„Ø±Ù‚Ù…ÙŠØ©',
         icon: Megaphone,
         roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
         section: 'tools',
     },
     {
         href: '/constitution',
-        label: 'الدستور التحريري',
+        label: 'Ø§Ù„Ø¯Ø³ØªÙˆØ± Ø§Ù„ØªØ­Ø±ÙŠØ±ÙŠ',
         icon: FileText,
         roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor', 'fact_checker'],
         section: 'knowledge',
     },
     {
         href: '/memory',
-        label: 'الذاكرة التحريرية',
+        label: 'Ø§Ù„Ø°Ø§ÙƒØ±Ø© Ø§Ù„ØªØ­Ø±ÙŠØ±ÙŠØ©',
         icon: BookOpen,
         roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
         section: 'knowledge',
     },
     {
         href: '/services/document-intel',
-        label: 'تحليل الوثائق',
+        label: 'ØªØ­Ù„ÙŠÙ„ Ø§Ù„ÙˆØ«Ø§Ø¦Ù‚',
         icon: FileSearch,
         roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
         section: 'knowledge',
     },
     {
         href: '/services/media-logger',
-        label: 'تفريغ التسجيلات',
+        label: 'ØªÙØ±ÙŠØº Ø§Ù„ØªØ³Ø¬ÙŠÙ„Ø§Øª',
         icon: Mic2,
         roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
         section: 'knowledge',
     },
     {
         href: '/services/multimedia',
-        label: 'الوسائط',
+        label: 'Ø§Ù„ÙˆØ³Ø§Ø¦Ø·',
         icon: Film,
         roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
         section: 'tools',
     },
     {
         href: '/services/fact-check',
-        label: 'التحقق والاستقصاء',
+        label: 'Ø§Ù„ØªØ­Ù‚Ù‚ ÙˆØ§Ù„Ø§Ø³ØªÙ‚ØµØ§Ø¡',
         icon: ShieldCheck,
         roles: ['director', 'editor_chief', 'journalist', 'social_media', 'fact_checker', 'print_editor'],
         section: 'tools',
     },
     {
         href: '/scripts',
-        label: 'السكربت',
+        label: 'Ø§Ù„Ø³ÙƒØ±Ø¨Øª',
         icon: ScrollText,
         roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
         section: 'tools',
     },
     {
         href: '/trends',
-        label: 'الترندات',
+        label: 'Ø§Ù„ØªØ±Ù†Ø¯Ø§Øª',
         icon: TrendingUp,
         roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
         section: 'tools',
     },
     {
         href: '/simulator',
-        label: 'محاكاة التفاعل',
+        label: 'Ù…Ø­Ø§ÙƒØ§Ø© Ø§Ù„ØªÙØ§Ø¹Ù„',
         icon: MessagesSquare,
         roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
         section: 'tools',
     },
     {
         href: '/competitor-xray',
-        label: 'رصد المنافسين',
+        label: 'Ø±ØµØ¯ Ø§Ù„Ù…Ù†Ø§ÙØ³ÙŠÙ†',
         icon: Radar,
         roles: ['director', 'editor_chief', 'journalist', 'social_media', 'print_editor'],
         section: 'tools',
     },
     {
         href: '/ux-insights',
-        label: 'سلوك الاستخدام',
+        label: 'Ø³Ù„ÙˆÙƒ Ø§Ù„Ø§Ø³ØªØ®Ø¯Ø§Ù…',
         icon: MousePointerClick,
         roles: ['director', 'editor_chief'],
         section: 'ops',
     },
     {
         href: '/team',
-        label: 'فريق التحرير',
+        label: 'ÙØ±ÙŠÙ‚ Ø§Ù„ØªØ­Ø±ÙŠØ±',
         icon: Users,
         roles: ['director'],
         section: 'ops',
     },
     {
         href: '/sources',
-        label: 'المصادر',
+        label: 'Ø§Ù„Ù…ØµØ§Ø¯Ø±',
         icon: Rss,
         roles: ['director'],
         section: 'ops',
     },
     {
         href: '/agents',
-        label: 'مراقبة النظام',
+        label: 'Ù…Ø±Ø§Ù‚Ø¨Ø© Ø§Ù„Ù†Ø¸Ø§Ù…',
         icon: Activity,
         roles: ['director'],
         section: 'ops',
     },
     {
         href: '/settings',
-        label: 'إعدادات APIs',
+        label: 'Ø¥Ø¹Ø¯Ø§Ø¯Ø§Øª APIs',
         icon: KeyRound,
         roles: ['director'],
         section: 'ops',
@@ -270,9 +285,9 @@ const navItems: NavItem[] = [
 ];
 
 const sectionLabels: Array<{ key: Exclude<NavSection, 'primary'>; label: string }> = [
-    { key: 'knowledge', label: 'معرفة مساندة' },
-    { key: 'tools', label: 'أدوات إضافية' },
-    { key: 'ops', label: 'تشغيل وإدارة' },
+    { key: 'knowledge', label: 'Ù…Ø¹Ø±ÙØ© Ù…Ø³Ø§Ù†Ø¯Ø©' },
+    { key: 'tools', label: 'Ø£Ø¯ÙˆØ§Øª Ø¥Ø¶Ø§ÙÙŠØ©' },
+    { key: 'ops', label: 'ØªØ´ØºÙŠÙ„ ÙˆØ¥Ø¯Ø§Ø±Ø©' },
 ];
 
 export default function Sidebar({
@@ -350,8 +365,8 @@ export default function Sidebar({
                     </div>
                     {!collapsed && (
                         <div className="overflow-hidden">
-                            <h1 className="text-sm font-bold truncate text-[#F8FAFC]">غرفة الشروق</h1>
-                            <p className="text-[10px] font-medium text-[#CBD5E1]">تجربة عمل مبسطة حسب الدور</p>
+                            <h1 className="text-sm font-bold truncate text-[#F8FAFC]">ØºØ±ÙØ© Ø§Ù„Ø´Ø±ÙˆÙ‚</h1>
+                            <p className="text-[10px] font-medium text-[#CBD5E1]">ØªØ¬Ø±Ø¨Ø© Ø¹Ù…Ù„ Ù…Ø¨Ø³Ø·Ø© Ø­Ø³Ø¨ Ø§Ù„Ø¯ÙˆØ±</p>
                         </div>
                     )}
                 </div>
@@ -371,7 +386,7 @@ export default function Sidebar({
                                 >
                                     <span className="inline-flex items-center gap-2">
                                         <Wrench className="w-4 h-4" />
-                                        المزيد من الأدوات
+                                        Ø§Ù„Ù…Ø²ÙŠØ¯ Ù…Ù† Ø§Ù„Ø£Ø¯ÙˆØ§Øª
                                     </span>
                                     <ChevronDown className={cn('w-4 h-4 transition-transform', secondaryOpen && 'rotate-180')} />
                                 </button>
@@ -401,7 +416,7 @@ export default function Sidebar({
                     <div className="px-3 py-3 mx-2 mb-3 rounded-xl border bg-white/[0.03] border-white/10">
                         <div className="flex items-center gap-2">
                             <Activity className="w-4 h-4 text-[#2563EB]" />
-                            <span className="text-xs text-[#CBD5E1]">النظام يعمل</span>
+                            <span className="text-xs text-[#CBD5E1]">Ø§Ù„Ù†Ø¸Ø§Ù… ÙŠØ¹Ù…Ù„</span>
                             <span className="w-2 h-2 rounded-full animate-pulse mr-auto bg-[#2563EB]" />
                         </div>
                     </div>
