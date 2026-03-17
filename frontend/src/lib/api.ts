@@ -1969,6 +1969,23 @@ export interface DocumentIntelNewsItem {
     entities: string[];
 }
 
+export interface DocumentIntelClaim {
+    text: string;
+    type: 'factual' | 'legal' | 'statistical' | 'attribution' | string;
+    confidence: number;
+    risk_level: 'low' | 'medium' | 'high' | string;
+}
+
+export interface DocumentIntelEntity {
+    name: string;
+    type: 'person' | 'organization' | 'location' | string;
+}
+
+export interface DocumentIntelStoryAngle {
+    title: string;
+    why_it_matters: string;
+}
+
 export interface DocumentIntelDataPoint {
     rank: number;
     category: string;
@@ -1982,8 +1999,13 @@ export interface DocumentIntelExtractResult {
     language_hint: string;
     detected_language: string;
     stats: DocumentIntelStats;
+    document_summary: string;
+    document_type: string;
     headings: string[];
     news_candidates: DocumentIntelNewsItem[];
+    claims: DocumentIntelClaim[];
+    entities: DocumentIntelEntity[];
+    story_angles: DocumentIntelStoryAngle[];
     data_points: DocumentIntelDataPoint[];
     warnings: string[];
     preview_text: string;

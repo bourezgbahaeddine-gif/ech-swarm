@@ -102,6 +102,55 @@ _ENTITY_PATTERNS = (
 
 _NUMBER_PATTERN = re.compile(r"\d[\d,.\u0660-\u0669]*%?")
 _DATE_PATTERN = re.compile(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b|\b\d{4}[/-]\d{1,2}[/-]\d{1,2}\b")
+_DOCUMENT_TYPE_HINTS = {
+    "official_gazette": (
+        "الجريدة الرسمية",
+        "مرسوم",
+        "قرار وزاري",
+        "décret",
+        "journal officiel",
+        "official gazette",
+    ),
+    "statement": (
+        "بيان",
+        "تصريح",
+        "أعلن",
+        "اعلن",
+        "communiqué",
+        "communique",
+        "statement",
+        "press release",
+    ),
+    "report": (
+        "تقرير",
+        "إحصاء",
+        "احصاء",
+        "دراسة",
+        "rapport",
+        "report",
+        "analysis",
+    ),
+}
+_ARABIC_CLAIM_VERBS = (
+    "أكد",
+    "اكد",
+    "أعلن",
+    "اعلن",
+    "قال",
+    "أوضح",
+    "اوضح",
+    "ذكر",
+    "كشف",
+    "قرر",
+    "صادق",
+    "وقع",
+    "يتضمن",
+    "ينص",
+    "حدد",
+)
+_STATISTICAL_HINTS = ("%", "نسبة", "مليون", "مليار", "دينار", "دولار", "يورو", "عدد", "إحصاء", "احصاء")
+_LEGAL_HINTS = ("قانون", "مرسوم", "قرار", "المادة", "ينص", "يتضمن", "يلغى", "يعدل")
+_ATTRIBUTION_HINTS = ("قال", "أوضح", "أكد", "ذكر", "صرح", "according to", "stated", "declared", "selon")
 
 
 @dataclass
@@ -209,6 +258,30 @@ class DocumentIntelService:
             detected_language=detected_language,
             language_hint=self._normalize_lang(language_hint),
         )
+        document_summary = self.summarize_document(
+            normalized_text,
+            headings=headings,
+            news_candidates=news_candidates,
+        )
+        document_type = self.classify_document_type(
+            normalized_text,
+            filename=safe_name,
+            headings=headings,
+        )
+        claims = self.extract_claims(
+            paragraphs,
+            document_type=document_type,
+            max_claims=max(4, min(12, max_news_items + 4)),
+        )
+        entities = self.extract_entities(paragraphs, max_entities=14)
+        story_angles = self.generate_story_angles(
+            normalized_text,
+            document_type=document_type,
+            news_candidates=news_candidates,
+            claims=claims,
+            entities=entities,
+            max_angles=4,
+        )
         data_points = self._extract_data_points(paragraphs, max_data_points=max_data_points)
 
         return {
@@ -222,8 +295,13 @@ class DocumentIntelService:
                 "paragraphs": len(paragraphs),
                 "headings": len(headings),
             },
+            "document_summary": document_summary,
+            "document_type": document_type,
             "headings": headings,
             "news_candidates": news_candidates,
+            "claims": claims,
+            "entities": entities,
+            "story_angles": story_angles,
             "data_points": data_points,
             "warnings": warnings,
             "preview_text": normalized_text[:2500],
@@ -782,6 +860,201 @@ print(json.dumps({"text": text, "markdown": markdown, "pages": pages}, ensure_as
             if len(items) >= max_data_points:
                 break
         return items
+
+    def summarize_document(
+        self,
+        text: str,
+        *,
+        headings: list[str],
+        news_candidates: list[dict],
+    ) -> str:
+        opening = self._split_paragraphs(text)[:3]
+        summary_parts: list[str] = []
+        if headings:
+            summary_parts.append(f"الوثيقة تركز على: {headings[0]}.")
+        if news_candidates:
+            top = news_candidates[0]
+            summary_parts.append(
+                f"أبرز ما فيها: {top.get('headline') or 'مادة خبرية رئيسية'}."
+            )
+        if opening:
+            first = opening[0][:260].strip()
+            if first:
+                summary_parts.append(first)
+        if len(summary_parts) < 2 and len(opening) > 1:
+            second = opening[1][:220].strip()
+            if second:
+                summary_parts.append(second)
+        merged = " ".join(part.strip() for part in summary_parts if part and part.strip())
+        merged = re.sub(r"\s+", " ", merged).strip()
+        return merged[:700]
+
+    def classify_document_type(self, text: str, *, filename: str, headings: list[str]) -> str:
+        lower_name = (filename or "").lower()
+        normalized_text = self._normalize_latin((text or "")[:4000]).lower()
+        normalized_headings = self._normalize_latin(" ".join(headings or [])).lower()
+        combined = f"{normalized_text}\n{normalized_headings}\n{lower_name}"
+
+        for doc_type, hints in _DOCUMENT_TYPE_HINTS.items():
+            for hint in hints:
+                hint_norm = self._normalize_latin(hint).lower()
+                if hint_norm and hint_norm in combined:
+                    return doc_type
+
+        if len(text or "") < 800 and ("بيان" in text or "statement" in combined):
+            return "statement"
+        if len(_NUMBER_PATTERN.findall(text or "")) >= 12:
+            return "report"
+        if not (text or "").strip():
+            return "scanned_document"
+        return "report"
+
+    def extract_claims(self, paragraphs: list[str], *, document_type: str, max_claims: int) -> list[dict]:
+        claims: list[dict] = []
+        rank = 0
+        for para in paragraphs:
+            paragraph = re.sub(r"\s+", " ", para).strip()
+            if len(paragraph) < 60:
+                continue
+            if not self._looks_like_claim(paragraph):
+                continue
+            claim_type = self._classify_claim_type(paragraph, document_type=document_type)
+            risk_level = self._claim_risk_level(paragraph, claim_type=claim_type, document_type=document_type)
+            confidence = self._claim_confidence(paragraph, claim_type=claim_type)
+            claims.append(
+                {
+                    "text": paragraph[:420],
+                    "type": claim_type,
+                    "confidence": confidence,
+                    "risk_level": risk_level,
+                }
+            )
+            rank += 1
+            if rank >= max_claims:
+                break
+        return claims
+
+    def extract_entities(self, paragraphs: list[str], *, max_entities: int = 12) -> list[dict]:
+        collected: list[dict] = []
+        seen: set[str] = set()
+        for para in paragraphs:
+            for entity in self._extract_entities(para):
+                key = entity.strip().lower()
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                collected.append(
+                    {
+                        "name": entity,
+                        "type": self._entity_type(entity),
+                    }
+                )
+                if len(collected) >= max_entities:
+                    return collected
+        return collected
+
+    def generate_story_angles(
+        self,
+        text: str,
+        *,
+        document_type: str,
+        news_candidates: list[dict],
+        claims: list[dict],
+        entities: list[dict],
+        max_angles: int,
+    ) -> list[dict]:
+        angles: list[dict] = []
+        if news_candidates:
+            lead = news_candidates[0]
+            angles.append(
+                {
+                    "title": f"ما الذي تغيّره الوثيقة حول: {lead.get('headline', 'الملف الرئيسي')}",
+                    "why_it_matters": "لأن الوثيقة تحتوي على مادة قابلة للتحويل إلى خبر أو متابعة مباشرة.",
+                }
+            )
+        if claims:
+            high_risk = next((claim for claim in claims if claim["risk_level"] == "high"), None)
+            if high_risk:
+                angles.append(
+                    {
+                        "title": "ما الادعاءات التي تحتاج تحققًا قبل النشر؟",
+                        "why_it_matters": "لأن بعض ما ورد في الوثيقة يحمل حساسية تحريرية أو قانونية ويحتاج تدقيقًا إضافيًا.",
+                    }
+                )
+        if document_type == "official_gazette":
+            angles.append(
+                {
+                    "title": "ما القرارات أو المواد التي ستؤثر عمليًا على الجمهور أو المؤسسات؟",
+                    "why_it_matters": "لأن الوثائق الرسمية لا تهم بصيغتها فقط، بل بأثرها التنفيذي المباشر.",
+                }
+            )
+        elif document_type == "statement":
+            angles.append(
+                {
+                    "title": "ما الرسالة السياسية أو المؤسسية الأساسية في هذا البيان؟",
+                    "why_it_matters": "لأن قيمة البيان التحريرية تكمن في الرسالة والجهة والهدف من الإعلان.",
+                }
+            )
+        elif entities:
+            angles.append(
+                {
+                    "title": f"ما دور الجهات الواردة مثل {entities[0]['name']} في هذه الوثيقة؟",
+                    "why_it_matters": "لأن تتبع الأطراف الفاعلة يساعد على توسيع المادة إلى قصة أو متابعة أعمق.",
+                }
+            )
+        return angles[:max_angles]
+
+    def _looks_like_claim(self, paragraph: str) -> bool:
+        if _DATE_PATTERN.search(paragraph) or _NUMBER_PATTERN.search(paragraph):
+            return True
+        if any(hint in paragraph for hint in _ARABIC_CLAIM_VERBS):
+            return True
+        normalized = self._normalize_latin(paragraph).lower()
+        return any(token in normalized for token in ("announced", "confirmed", "stated", "selon", "rapport"))
+
+    def _classify_claim_type(self, paragraph: str, *, document_type: str) -> str:
+        normalized = self._normalize_latin(paragraph).lower()
+        if any(token in paragraph for token in _LEGAL_HINTS):
+            return "legal"
+        if any(token in paragraph for token in _STATISTICAL_HINTS) or _NUMBER_PATTERN.search(paragraph):
+            return "statistical"
+        if any(token in paragraph for token in _ATTRIBUTION_HINTS) or any(token in normalized for token in ("according to", "selon", "stated", "declared")):
+            return "attribution"
+        if document_type == "official_gazette":
+            return "legal"
+        return "factual"
+
+    def _claim_risk_level(self, paragraph: str, *, claim_type: str, document_type: str) -> str:
+        if claim_type == "legal" or document_type == "official_gazette":
+            return "high"
+        if claim_type == "attribution":
+            return "medium"
+        if claim_type == "statistical":
+            return "medium"
+        if len(paragraph) > 240:
+            return "medium"
+        return "low"
+
+    def _claim_confidence(self, paragraph: str, *, claim_type: str) -> float:
+        score = 0.54
+        if _NUMBER_PATTERN.search(paragraph):
+            score += 0.12
+        if _DATE_PATTERN.search(paragraph):
+            score += 0.08
+        if self._extract_entities(paragraph):
+            score += 0.08
+        if claim_type in {"legal", "statistical"}:
+            score += 0.08
+        return round(min(score, 0.94), 2)
+
+    @staticmethod
+    def _entity_type(value: str) -> str:
+        lowered = value.lower()
+        if any(token in lowered for token in ("وزارة", "حكومة", "government", "ministry", "ministere", "مجلس", "parliament", "رئاسة")):
+            return "organization"
+        if any(token in lowered for token in ("الجزائر", "france", "paris", "oran", "constantine")):
+            return "location"
+        return "organization"
 
     @staticmethod
     def _headline_from_paragraph(paragraph: str) -> str:
