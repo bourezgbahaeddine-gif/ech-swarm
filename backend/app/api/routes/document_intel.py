@@ -12,6 +12,8 @@ from app.models.user import User, UserRole
 from app.schemas.document_intel import (
     DocumentIntelActionLogItem,
     DocumentIntelActionResponse,
+    DocumentIntelCreateDraftRequest,
+    DocumentIntelCreateStoryRequest,
     DocumentExtractJobStatusResponse,
     DocumentExtractResponse,
     DocumentExtractSubmitResponse,
@@ -246,6 +248,7 @@ async def list_document_actions(
 @router.post("/documents/{document_id}/create-story", response_model=DocumentIntelActionResponse)
 async def create_story_from_document(
     document_id: int,
+    payload: DocumentIntelCreateStoryRequest | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -254,7 +257,13 @@ async def create_story_from_document(
     document = await document_intel_workspace_service.get_document(db, document_id)
     if not document:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document Intel document not found")
-    story = await document_intel_workspace_service.create_story(db, document=document, actor=current_user)
+    story = await document_intel_workspace_service.create_story(
+        db,
+        document=document,
+        actor=current_user,
+        angle_title=(payload.angle_title if payload else None),
+        angle_why_it_matters=(payload.angle_why_it_matters if payload else None),
+    )
     await db.commit()
     return DocumentIntelActionResponse(
         document_id=document.id,
@@ -263,6 +272,38 @@ async def create_story_from_document(
         target_id=str(story["story_id"]),
         message="تم إنشاء قصة من الوثيقة.",
         payload=story,
+    )
+
+
+@router.post("/documents/{document_id}/create-draft", response_model=DocumentIntelActionResponse)
+async def create_draft_from_document(
+    document_id: int,
+    payload: DocumentIntelCreateDraftRequest | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_access(current_user)
+    await _ensure_document_intel_tables(db)
+    document = await document_intel_workspace_service.get_document(db, document_id)
+    if not document:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document Intel document not found")
+    draft = await document_intel_workspace_service.create_workspace_draft(
+        db,
+        document=document,
+        actor=current_user,
+        angle_title=(payload.angle_title if payload else None),
+        claim_indexes=(payload.claim_indexes if payload else None),
+        category=(payload.category if payload else "international"),
+        urgency=(payload.urgency if payload else "normal"),
+    )
+    await db.commit()
+    return DocumentIntelActionResponse(
+        document_id=document.id,
+        action_type="create_draft",
+        target_type="workspace_draft",
+        target_id=str(draft["work_id"]),
+        message="تم فتح الوثيقة داخل المحرر الذكي مع أهم الأدلة والادعاءات.",
+        payload=draft,
     )
 
 

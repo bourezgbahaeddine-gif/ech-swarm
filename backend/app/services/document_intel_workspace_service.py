@@ -8,11 +8,14 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import DocumentIntelAction, DocumentIntelClaim, DocumentIntelDocument, ProjectMemoryItem
+from app.models import Article, DocumentIntelAction, DocumentIntelClaim, DocumentIntelDocument, EditorialDraft, ProjectMemoryItem
+from app.models.news import NewsCategory, NewsStatus, UrgencyLevel
 from app.models.user import User
 from app.repositories.story_repository import story_repository
 from app.services.audit_service import audit_service
+from app.services.article_index_service import article_index_service
 from app.services.project_memory_service import project_memory_service
+from app.services.smart_editor_service import smart_editor_service
 
 
 class DocumentIntelWorkspaceService:
@@ -120,14 +123,25 @@ class DocumentIntelWorkspaceService:
         *,
         document: DocumentIntelDocument,
         actor: User,
+        angle_title: str | None = None,
+        angle_why_it_matters: str | None = None,
     ) -> dict:
-        story_title = self._story_title(document)
+        claims = await self._load_claims(db, document.id)
+        story_title = self._story_title(document, angle_title=angle_title)
         story_key = f"STY-{datetime.utcnow():%Y%m%d}-{uuid4().hex[:8].upper()}"
+        brief_lines = []
+        if angle_why_it_matters:
+            brief_lines.append(angle_why_it_matters.strip())
+        elif document.document_summary:
+            brief_lines.append(document.document_summary.strip())
+        if claims:
+            brief_lines.append("أهم ما يستحق المتابعة:")
+            brief_lines.extend(f"- {claim.text}" for claim in claims[:3])
         story = await story_repository.create_story(
             db,
             story_key=story_key,
             title=story_title,
-            summary=document.document_summary or None,
+            summary="\n".join(line for line in brief_lines if line).strip() or document.document_summary or None,
             category="document_intel",
             geography=None,
             priority=6,
@@ -151,7 +165,91 @@ class DocumentIntelWorkspaceService:
             actor=actor,
             details={"story_id": story.id, "story_key": story.story_key},
         )
-        return {"story_id": story.id, "story_key": story.story_key, "title": story.title}
+        return {
+            "story_id": story.id,
+            "story_key": story.story_key,
+            "title": story.title,
+            "brief": "\n".join(line for line in brief_lines if line).strip() or document.document_summary or "",
+        }
+
+    async def create_workspace_draft(
+        self,
+        db: AsyncSession,
+        *,
+        document: DocumentIntelDocument,
+        actor: User,
+        angle_title: str | None = None,
+        claim_indexes: list[int] | None = None,
+        category: str | None = "international",
+        urgency: str | None = "normal",
+    ) -> dict:
+        claims = await self._load_claims(db, document.id)
+        selected_claims = self._select_claims(claims, claim_indexes)
+        title = angle_title or self._story_title(document)
+        body_html = self._build_workspace_body(document, selected_claims=selected_claims, angle_title=angle_title)
+        work_id = self._new_work_id()
+        summary = (document.document_summary or "").strip()[:1000] or None
+        article = Article(
+            unique_hash=f"document-intel:{document.id}:{uuid4().hex}",
+            original_title=title,
+            original_url=f"document-intel://document/{document.id}",
+            original_content=smart_editor_service.html_to_text(body_html),
+            source_id=None,
+            source_name="document_intel",
+            title_ar=title,
+            summary=summary,
+            body_html=body_html,
+            category=self._normalize_category(category),
+            importance_score=68,
+            urgency=self._normalize_urgency(urgency),
+            is_breaking=False,
+            status=NewsStatus.DRAFT_GENERATED,
+            reviewed_by=actor.full_name_ar,
+            reviewed_at=datetime.utcnow(),
+        )
+        db.add(article)
+        await db.flush()
+
+        draft = EditorialDraft(
+            article_id=article.id,
+            work_id=work_id,
+            source_action="document_intel_workspace",
+            change_origin="manual",
+            title=title,
+            body=body_html,
+            note=f"document_intel:{document.id}",
+            status="draft",
+            version=1,
+            created_by=actor.full_name_ar,
+            updated_by=actor.full_name_ar,
+        )
+        db.add(draft)
+        await db.flush()
+
+        try:
+            await article_index_service.upsert_article(db, article)
+        except Exception:
+            pass
+
+        await self.log_action(
+            db,
+            document=document,
+            action_type="draft_created",
+            actor=actor,
+            target_type="workspace_draft",
+            target_id=work_id,
+            note="opened_in_smart_editor",
+            payload={"article_id": article.id, "work_id": work_id, "title": title},
+        )
+        await audit_service.log_action(
+            db,
+            action="document_intel_create_draft",
+            entity_type="document_intel_document",
+            entity_id=document.id,
+            actor=actor,
+            details={"article_id": article.id, "work_id": work_id},
+        )
+        return {"article_id": article.id, "work_id": work_id, "title": title}
 
     async def save_memory(
         self,
@@ -237,7 +335,9 @@ class DocumentIntelWorkspaceService:
         return filename[:512] or None
 
     @staticmethod
-    def _story_title(document: DocumentIntelDocument) -> str:
+    def _story_title(document: DocumentIntelDocument, *, angle_title: str | None = None) -> str:
+        if angle_title and angle_title.strip():
+            return angle_title.strip()[:1024]
         if document.story_angles and isinstance(document.story_angles, list):
             first = document.story_angles[0]
             if isinstance(first, dict) and first.get("title"):
@@ -245,6 +345,65 @@ class DocumentIntelWorkspaceService:
         if document.title:
             return str(document.title)[:1024]
         return f"قصة من الوثيقة {document.filename}"[:1024]
+
+    @staticmethod
+    def _new_work_id() -> str:
+        return f"WRK-{datetime.utcnow():%Y%m%d}-{uuid4().hex[:10].upper()}"
+
+    @staticmethod
+    def _select_claims(claims: list[DocumentIntelClaim], claim_indexes: list[int] | None) -> list[DocumentIntelClaim]:
+        if not claim_indexes:
+            return claims[:4]
+        index_set = {idx for idx in claim_indexes if idx >= 1}
+        chosen = [claim for claim in claims if claim.rank in index_set]
+        return chosen or claims[:4]
+
+    @staticmethod
+    def _build_workspace_body(
+        document: DocumentIntelDocument,
+        *,
+        selected_claims: list[DocumentIntelClaim],
+        angle_title: str | None,
+    ) -> str:
+        title = angle_title or document.title or document.filename
+        lines = [f"<h1>{title}</h1>"]
+        if document.document_summary:
+            lines.append(f"<p><strong>خلاصة الوثيقة:</strong> {document.document_summary}</p>")
+        if document.story_angles:
+            first_angle = document.story_angles[0] if isinstance(document.story_angles, list) and document.story_angles else None
+            if isinstance(first_angle, dict) and first_angle.get("why_it_matters"):
+                lines.append(f"<p><strong>لماذا تهم؟</strong> {first_angle['why_it_matters']}</p>")
+        if selected_claims:
+            lines.append("<h2>ادعاءات ومحاور قابلة للاستخدام</h2>")
+            lines.append("<ul>")
+            for claim in selected_claims:
+                lines.append(f"<li>{claim.text}</li>")
+            lines.append("</ul>")
+        if document.entities:
+            names = []
+            for entity in document.entities[:6]:
+                if isinstance(entity, dict) and entity.get("name"):
+                    names.append(str(entity["name"]))
+            if names:
+                lines.append(f"<p><strong>جهات وأسماء بارزة:</strong> {'، '.join(names)}</p>")
+        lines.append("<p>ابدأ من هذه الخلاصة ثم ابنِ الخبر بصياغة تحريرية واضحة، مع توثيق الادعاءات وربطها بالمصدر الأصلي للوثيقة.</p>")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _normalize_category(value: str | None) -> NewsCategory:
+        raw = (value or "").strip().lower()
+        try:
+            return NewsCategory(raw)
+        except Exception:
+            return NewsCategory.INTERNATIONAL
+
+    @staticmethod
+    def _normalize_urgency(value: str | None) -> UrgencyLevel:
+        raw = (value or "").strip().lower()
+        try:
+            return UrgencyLevel(raw)
+        except Exception:
+            return UrgencyLevel.NORMAL
 
 
 document_intel_workspace_service = DocumentIntelWorkspaceService()

@@ -2032,6 +2032,18 @@ export interface DocumentIntelActionLogItem {
     created_at: string;
 }
 
+export interface DocumentIntelCreateDraftPayload {
+    angle_title?: string;
+    claim_indexes?: number[];
+    category?: string;
+    urgency?: string;
+}
+
+export interface DocumentIntelCreateStoryPayload {
+    angle_title?: string;
+    angle_why_it_matters?: string;
+}
+
 export interface DocumentIntelExtractSubmitResult {
     job_id: string;
     status: string;
@@ -2563,7 +2575,10 @@ export const documentIntelApi = {
             timeout: 180000,
         });
     },
-    createStory: (documentId: number) => api.post<DocumentIntelActionResult>(`/document-intel/documents/${documentId}/create-story`),
+    createDraft: (documentId: number, payload?: DocumentIntelCreateDraftPayload) =>
+        api.post<DocumentIntelActionResult>(`/document-intel/documents/${documentId}/create-draft`, payload || {}),
+    createStory: (documentId: number, payload?: DocumentIntelCreateStoryPayload) =>
+        api.post<DocumentIntelActionResult>(`/document-intel/documents/${documentId}/create-story`, payload || {}),
     saveToMemory: (documentId: number) => api.post<DocumentIntelActionResult>(`/document-intel/documents/${documentId}/save-memory`),
     sendToFactcheck: (documentId: number) =>
         api.post<DocumentIntelActionResult>(`/document-intel/documents/${documentId}/send-to-factcheck`),

@@ -86,6 +86,18 @@ class DocumentIntelActionLogItem(BaseModel):
     created_at: datetime
 
 
+class DocumentIntelCreateDraftRequest(BaseModel):
+    angle_title: str | None = None
+    claim_indexes: list[int] = Field(default_factory=list)
+    category: str | None = "international"
+    urgency: str | None = "normal"
+
+
+class DocumentIntelCreateStoryRequest(BaseModel):
+    angle_title: str | None = None
+    angle_why_it_matters: str | None = None
+
+
 class DocumentExtractSubmitResponse(BaseModel):
     job_id: str
     status: str
