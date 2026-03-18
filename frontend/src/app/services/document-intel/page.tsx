@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
@@ -117,6 +118,162 @@ function actionLabel(action: string): string {
     }
 }
 
+type DocumentIntelSuggestedActionKey = 'create_draft' | 'send_factcheck' | 'create_story' | 'save_memory';
+
+interface DocumentIntelPromptSuggestion {
+    taskKey: DocumentIntelSuggestedActionKey;
+    taskLabel: string;
+    templateTitle: string;
+    playbookHref: string;
+    reason: string;
+    rationale: string[];
+    autoFilledFields: Array<{ label: string; value: string }>;
+    promptPreview: string;
+    actionLabel: string;
+}
+
+function buildDocumentIntelSuggestion(
+    result: DocumentIntelExtractResult | null,
+    actions: DocumentIntelActionLogItem[],
+    canCreateDraft: boolean,
+): DocumentIntelPromptSuggestion | null {
+    if (!result) return null;
+    const actionSet = new Set((actions || []).map((item) => item.action_type));
+    const topHeadline = result.news_candidates[0]?.headline?.trim() || '';
+    const topAngle = result.story_angles[0];
+    const highRiskClaims = result.claims.filter((claim) => ['high', 'medium'].includes((claim.risk_level || '').toLowerCase()));
+    const entityPreview = result.entities.slice(0, 3).map((item) => item.name).filter(Boolean).join('، ');
+
+    if (canCreateDraft && result.news_candidates.length > 0 && !actionSet.has('draft_created')) {
+        return {
+            taskKey: 'create_draft',
+            taskLabel: 'حوّل الوثيقة إلى مسودة أولى',
+            templateTitle: 'Scribe — مسودة أولى من وثيقة محللة',
+            playbookHref: '/prompt-playbook',
+            reason: 'لأن الوثيقة أنتجت خلاصة خبرية ومرشحًا واضحًا يمكن أن يتحول مباشرة إلى مسودة قابلة للتحرير.',
+            rationale: [
+                `عدد الأخبار المرشحة: ${result.news_candidates.length}`,
+                `أبرز عنوان مرشح: ${topHeadline || 'غير متوفر'}`,
+                `الادعاءات الجاهزة للاستخدام: ${Math.min(result.claims.length, 3)}`,
+            ],
+            autoFilledFields: [
+                { label: 'نوع الوثيقة', value: documentTypeLabel(result.document_type) },
+                { label: 'العنوان المبدئي', value: topHeadline || 'سيبنى من الخلاصة الحالية' },
+                { label: 'أهم الكيانات', value: entityPreview || 'لا توجد كيانات بارزة' },
+                { label: 'الوقائع المؤكدة', value: String(Math.min(result.claims.length, 3)) },
+            ],
+            promptPreview: [
+                'المهمة: أنشئ مسودة أولى قابلة للتحرير من وثيقة محللة.',
+                `نوع الوثيقة: ${documentTypeLabel(result.document_type)}`,
+                `الخلاصة: ${result.document_summary || 'لا توجد خلاصة كافية بعد.'}`,
+                topHeadline ? `العنوان المقترح: ${topHeadline}` : null,
+                result.claims.length
+                    ? `أهم الوقائع: ${result.claims
+                          .slice(0, 3)
+                          .map((claim, index) => `${index + 1}) ${claim.text}`)
+                          .join(' | ')}`
+                    : 'أهم الوقائع: استخرجها من النص الحالي دون إضافة معلومات.',
+                'القيود: لا تضف معلومات غير موجودة في الوثيقة، وابدأ بأقوى معلومة خبرية.',
+            ]
+                .filter(Boolean)
+                .join('\n'),
+            actionLabel: 'افتحها في المحرر',
+        };
+    }
+
+    if (highRiskClaims.length > 0 && !actionSet.has('factcheck_sent')) {
+        return {
+            taskKey: 'send_factcheck',
+            taskLabel: 'شغّل التحقق على الادعاءات الحرجة',
+            templateTitle: 'Quality Gates — إرسال الادعاءات للتحقق',
+            playbookHref: '/prompt-playbook',
+            reason: 'لأن الوثيقة تحتوي ادعاءات متوسطة أو عالية المخاطر تحتاج تحققًا قبل تحويلها إلى خبر أو قصة.',
+            rationale: [
+                `الادعاءات الحرجة: ${highRiskClaims.length}`,
+                `إجمالي الادعاءات المستخرجة: ${result.claims.length}`,
+                'هذا يقلل مخاطر نقل أرقام أو نسب أو تصريحات غير محققة إلى المحرر.',
+            ],
+            autoFilledFields: [
+                { label: 'الادعاءات عالية المخاطر', value: String(highRiskClaims.length) },
+                { label: 'نوع الوثيقة', value: documentTypeLabel(result.document_type) },
+                { label: 'المرجع', value: result.filename },
+            ],
+            promptPreview: [
+                'المهمة: جهّز Packet للتحقق من الوثيقة الحالية.',
+                `الخلاصة: ${result.document_summary || 'لا توجد خلاصة كافية بعد.'}`,
+                `الادعاءات المطلوب التحقق منها: ${highRiskClaims
+                    .slice(0, 4)
+                    .map((claim, index) => `${index + 1}) ${claim.text}`)
+                    .join(' | ')}`,
+                'النتيجة المطلوبة: فتح خدمة التحقق مع النص المرجعي والادعاءات الحرجة فقط.',
+            ].join('\n'),
+            actionLabel: 'أرسل للتحقق',
+        };
+    }
+
+    if (result.story_angles.length > 0 && !actionSet.has('story_created')) {
+        return {
+            taskKey: 'create_story',
+            taskLabel: 'حوّل أفضل زاوية إلى Story Brief',
+            templateTitle: 'Stories — Brief تلقائي من الوثيقة',
+            playbookHref: '/prompt-playbook',
+            reason: 'لأن الوثيقة تقدم زوايا متابعة واضحة ويمكن تحويلها إلى قصة تحريرية بدل الاكتفاء بخبر واحد.',
+            rationale: [
+                `عدد الزوايا المقترحة: ${result.story_angles.length}`,
+                `أقرب زاوية الآن: ${topAngle?.title || 'غير متوفرة'}`,
+                'هذا مناسب عندما تكون قيمة الوثيقة في المتابعة والتطوير لا في خبر واحد فقط.',
+            ],
+            autoFilledFields: [
+                { label: 'الزاوية المقترحة', value: topAngle?.title || 'غير متوفرة' },
+                { label: 'لماذا تهم', value: topAngle?.why_it_matters || 'سنستخدم الخلاصة الحالية' },
+                { label: 'أهم الكيانات', value: entityPreview || 'لا توجد كيانات بارزة' },
+            ],
+            promptPreview: [
+                'المهمة: أنشئ Story Brief من هذه الوثيقة.',
+                `الزاوية: ${topAngle?.title || 'استخرج الزاوية الأوضح من الخلاصة'}`,
+                `لماذا تهم: ${topAngle?.why_it_matters || result.document_summary || 'استخدم أبرز ما في الوثيقة'}`,
+                entityPreview ? `الجهات الرئيسية: ${entityPreview}` : null,
+                'النتيجة المطلوبة: قصة مختصرة قابلة للمتابعة التحريرية وليست خبرًا مباشرًا فقط.',
+            ]
+                .filter(Boolean)
+                .join('\n'),
+            actionLabel: 'أنشئ قصة',
+        };
+    }
+
+    if (!actionSet.has('memory_saved')) {
+        return {
+            taskKey: 'save_memory',
+            taskLabel: 'احفظها كمرجع في الذاكرة التحريرية',
+            templateTitle: 'Memory — Source Note من وثيقة',
+            playbookHref: '/prompt-playbook',
+            reason: 'لأن الوثيقة تحتوي خلاصة وادعاءات وكيانات قد نحتاجها لاحقًا حتى لو لم نفتح منها مادة الآن.',
+            rationale: [
+                `نوع الوثيقة: ${documentTypeLabel(result.document_type)}`,
+                `الكيانات المستخرجة: ${result.entities.length}`,
+                'هذا يحافظ على أثر الوثيقة داخل الذاكرة بدل ضياعها بعد القراءة الأولى.',
+            ],
+            autoFilledFields: [
+                { label: 'اسم الملف', value: result.filename },
+                { label: 'الخلاصة المحفوظة', value: (result.document_summary || 'لا توجد خلاصة كافية').slice(0, 90) },
+                { label: 'الكيانات', value: entityPreview || 'لا توجد كيانات بارزة' },
+            ],
+            promptPreview: [
+                'المهمة: احفظ الوثيقة كملاحظة مصدر داخل الذاكرة التحريرية.',
+                `اسم الملف: ${result.filename}`,
+                `الخلاصة: ${result.document_summary || 'لا توجد خلاصة كافية بعد.'}`,
+                entityPreview ? `الكيانات: ${entityPreview}` : null,
+                'الهدف: إبقاء الوثيقة متاحة كسياق تحريري أو مرجع مستقبلي.',
+            ]
+                .filter(Boolean)
+                .join('\n'),
+            actionLabel: 'احفظ في الذاكرة',
+        };
+    }
+
+    return null;
+}
+
 function DocumentIntelPageContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -199,6 +356,11 @@ function DocumentIntelPageContent() {
     const overviewClaims = useMemo(() => (result?.claims || []).slice(0, 5), [result]);
     const overviewEntities = useMemo(() => (result?.entities || []).slice(0, 8), [result]);
     const overviewAngles = useMemo(() => (result?.story_angles || []).slice(0, 4), [result]);
+    const actionLog = useMemo(() => (actionsQuery.data?.data || []) as DocumentIntelActionLogItem[], [actionsQuery.data?.data]);
+    const documentSuggestion = useMemo(
+        () => buildDocumentIntelSuggestion(result, actionLog, canCreateDraft),
+        [actionLog, canCreateDraft, result],
+    );
 
     const refreshActionLog = () => {
         if (documentId) queryClient.invalidateQueries({ queryKey: ['document-intel-actions', documentId] });
@@ -306,6 +468,35 @@ function DocumentIntelPageContent() {
                 : extractStatus === 'failed' || extractStatus === 'dead_lettered'
                   ? 'فشل التحليل'
                   : null;
+    const actionPending =
+        createDocumentDraftMutation.isPending ||
+        createStoryMutation.isPending ||
+        saveToMemoryMutation.isPending ||
+        sendToFactcheckMutation.isPending;
+
+    const runSuggestedDocumentAction = () => {
+        if (!documentSuggestion) return;
+        if (documentSuggestion.taskKey === 'create_draft') {
+            createDocumentDraftMutation.mutate({
+                angle_title: result?.news_candidates[0]?.headline || overviewAngles[0]?.title,
+                claim_indexes: overviewClaims.slice(0, 3).map((_, index) => index + 1),
+            });
+            return;
+        }
+        if (documentSuggestion.taskKey === 'send_factcheck') {
+            sendToFactcheckMutation.mutate();
+            return;
+        }
+        if (documentSuggestion.taskKey === 'create_story') {
+            createStoryMutation.mutate(
+                overviewAngles[0]
+                    ? { angle_title: overviewAngles[0].title, angle_why_it_matters: overviewAngles[0].why_it_matters }
+                    : undefined,
+            );
+            return;
+        }
+        saveToMemoryMutation.mutate();
+    };
 
     return (
         <div className="space-y-5 app-theme-shell" dir="rtl">
@@ -379,6 +570,43 @@ function DocumentIntelPageContent() {
                                 </div>
                             </div>
                         </div>
+
+                        {documentSuggestion ? (
+                            <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div className="space-y-2">
+                                        <div className="text-xs text-cyan-300">القالب الذكي المقترح الآن</div>
+                                        <h3 className="text-base font-semibold text-white">{documentSuggestion.taskLabel}</h3>
+                                        <p className="text-sm leading-6 text-slate-300">{documentSuggestion.reason}</p>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={runSuggestedDocumentAction}
+                                            disabled={!documentId || actionPending}
+                                            className="inline-flex h-10 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/15 px-4 text-sm text-cyan-100 disabled:opacity-50"
+                                        >
+                                            {actionPending ? 'جارٍ التنفيذ...' : documentSuggestion.actionLabel}
+                                        </button>
+                                        <Link href={documentSuggestion.playbookHref} className="inline-flex h-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 px-4 text-sm text-slate-200">
+                                            افتح دليل البرومبت
+                                        </Link>
+                                    </div>
+                                </div>
+                                <div className="mt-3 grid gap-2 md:grid-cols-3">
+                                    {documentSuggestion.autoFilledFields.map((field) => (
+                                        <div key={field.label} className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs">
+                                            <div className="text-slate-400">{field.label}</div>
+                                            <div className="mt-1 text-sm text-white">{field.value}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <details className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3">
+                                    <summary className="cursor-pointer text-sm text-cyan-200">كيف يملأ النظام هذا القالب تلقائيًا؟</summary>
+                                    <pre className="mt-3 whitespace-pre-wrap text-xs leading-6 text-slate-300">{documentSuggestion.promptPreview}</pre>
+                                </details>
+                            </div>
+                        ) : null}
 
                         <div className="grid grid-cols-2 gap-3 text-xs lg:grid-cols-5">
                             <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3"><div className="text-gray-400">الأخبار المرشحة</div><div className="mt-1 text-xl font-semibold text-white">{result.news_candidates.length}</div></div>

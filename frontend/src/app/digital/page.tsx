@@ -1,5 +1,6 @@
 ﻿'use client';
 
+import Link from 'next/link';
 import { startTransition, useEffect, useMemo, useState } from 'react';
 import { isAxiosError } from 'axios';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -118,6 +119,212 @@ function postStatusClass(status: string): string {
     if (status === 'failed') return 'border-rose-500/30 bg-rose-500/10 text-rose-200';
     if (status === 'approved') return 'border-amber-500/30 bg-amber-500/10 text-amber-200';
     return 'border-blue-500/30 bg-blue-500/10 text-blue-200';
+}
+
+type DigitalComposeSuggestionKey = 'compose_post' | 'save_post' | 'generate_bundle' | 'regenerate_post' | 'run_next_action';
+
+interface DigitalComposeSuggestion {
+    taskKey: DigitalComposeSuggestionKey;
+    taskLabel: string;
+    templateTitle: string;
+    playbookHref: string;
+    reason: string;
+    rationale: string[];
+    autoFilledFields: Array<{ label: string; value: string }>;
+    promptPreview: string;
+    actionLabel: string;
+    postId?: number;
+}
+
+function buildDigitalComposeSuggestion(args: {
+    selectedTask: DigitalTask | null;
+    selectedTaskAction: DigitalTaskActionItem | null;
+    posts: DigitalPost[];
+    postContent: string;
+    postPlatform: string;
+    bundlePlaybookKey: string;
+    composerGenerated: Record<string, { text: string; hashtags: string[] }>;
+}): DigitalComposeSuggestion | null {
+    const { selectedTask, selectedTaskAction, posts, postContent, postPlatform, bundlePlaybookKey, composerGenerated } = args;
+    if (!selectedTask) return null;
+
+    const failedPost = posts.find((post) => post.status === 'failed');
+    const generatedPlatforms = Object.keys(composerGenerated || {}).filter((platform) => composerGenerated[platform]?.text?.trim());
+    const readyDraft = postContent.trim();
+    const approvedPosts = posts.filter((post) => post.status === 'approved' || post.status === 'scheduled' || post.status === 'published');
+
+    if (failedPost) {
+        return {
+            taskKey: 'regenerate_post',
+            taskLabel: `استعد المنشور الفاشل لمنصة ${normalizePlatform(failedPost.platform)}`,
+            templateTitle: 'Digital Compose — استرجاع نسخة منصة محددة',
+            playbookHref: '/prompt-playbook',
+            reason: 'لأن هناك منشورًا فشل سابقًا، وأسرع طريقة لإعادة الدفع هي إعادة توليده بدل البدء من الصفر.',
+            rationale: [
+                `المنصة المتأثرة: ${normalizePlatform(failedPost.platform)}`,
+                `عدد المنشورات الفاشلة: ${posts.filter((post) => post.status === 'failed').length}`,
+                selectedTaskAction?.why_now || 'المهمة ما زالت ضمن نافذة العمل الحالية.',
+            ],
+            autoFilledFields: [
+                { label: 'المهمة', value: selectedTask.title },
+                { label: 'المنصة', value: normalizePlatform(failedPost.platform) },
+                { label: 'الهدف', value: taskObjectiveLabel(selectedTask.task_type) },
+            ],
+            promptPreview: [
+                'المهمة: أعد توليد نسخة رقمية لمنصة واحدة بعد فشل سابق.',
+                `العنوان: ${selectedTask.title}`,
+                `المنصة: ${normalizePlatform(failedPost.platform)}`,
+                `الهدف: ${taskObjectiveLabel(selectedTask.task_type)}`,
+                `السبب: ${selectedTaskAction?.why_now || 'استعادة النسخة الفاشلة بأسرع وقت.'}`,
+            ].join('\n'),
+            actionLabel: 'أعد توليد المنشور',
+            postId: failedPost.id,
+        };
+    }
+
+    if (!posts.length && !readyDraft) {
+        const shouldBundle = selectedTask.task_type !== 'manual' && selectedTaskAction?.next_best_action_code === 'generate_posts';
+        return {
+            taskKey: shouldBundle ? 'generate_bundle' : 'compose_post',
+            taskLabel: shouldBundle ? 'أنشئ حزمة نشر أولية للمهمة' : `ولّد أول نسخة لمنصة ${normalizePlatform(postPlatform)}`,
+            templateTitle: shouldBundle ? 'Digital Compose — حزمة نسخ متعددة' : 'Digital Compose — منشور أولي لمنصة واحدة',
+            playbookHref: '/prompt-playbook',
+            reason: shouldBundle
+                ? 'لأن المهمة لا تملك منشورات بعد، والحزمة الرقمية ستنتج عدة نسخ قابلة للمراجعة بسرعة.'
+                : 'لأن المهمة لا تملك بعد أي نسخة منشورة أو محفوظة، وأسرع خطوة الآن هي صياغة أول منشور.',
+            rationale: [
+                selectedTaskAction?.why_now || 'المهمة محددة الآن داخل Compose.',
+                `المنصة الافتراضية: ${normalizePlatform(postPlatform)}`,
+                `نوع المهمة: ${taskObjectiveLabel(selectedTask.task_type)}`,
+            ],
+            autoFilledFields: [
+                { label: 'العنوان', value: selectedTask.title },
+                { label: 'المنصة', value: shouldBundle ? `Bundle: ${bundlePlaybookKey}` : normalizePlatform(postPlatform) },
+                { label: 'المرجع', value: selectedTaskAction?.source_ref || 'task' },
+            ],
+            promptPreview: [
+                shouldBundle ? 'المهمة: أنشئ باقة رقمية متعددة النسخ لهذه المهمة.' : 'المهمة: صياغة أول منشور رقمي للمهمة الحالية.',
+                `العنوان: ${selectedTask.title}`,
+                selectedTask.brief ? `الـ brief: ${selectedTask.brief}` : null,
+                `الهدف: ${taskObjectiveLabel(selectedTask.task_type)}`,
+                shouldBundle ? `Playbook: ${bundlePlaybookKey}` : `المنصة: ${normalizePlatform(postPlatform)}`,
+                'القيود: لا تغيّر الوقائع، واجعل النسخة قابلة للتحرير والحفظ فورًا.',
+            ]
+                .filter(Boolean)
+                .join('\n'),
+            actionLabel: shouldBundle ? 'ولّد الباقة' : 'صياغة تلقائية',
+        };
+    }
+
+    if (readyDraft && !posts.length) {
+        return {
+            taskKey: 'save_post',
+            taskLabel: 'احفظ النسخة التي ولّدناها الآن',
+            templateTitle: 'Digital Compose — حفظ النسخة الجاهزة',
+            playbookHref: '/prompt-playbook',
+            reason: 'لأن النص الحالي جاهز تقريبًا، وأفضل خطوة الآن هي حفظه كمادة رقمية بدل فقدانه أو إعادة توليده.',
+            rationale: [
+                `طول النص الحالي: ${postLengthState(postPlatform, postContent).count} حرفًا`,
+                `المنصة: ${normalizePlatform(postPlatform)}`,
+                'بعد الحفظ ستدخل النسخة إلى مسار الجاهزية/الاعتماد.',
+            ],
+            autoFilledFields: [
+                { label: 'المهمة', value: selectedTask.title },
+                { label: 'المنصة', value: normalizePlatform(postPlatform) },
+                { label: 'أول سطر', value: postContent.trim().slice(0, 90) },
+            ],
+            promptPreview: [
+                'المهمة: ثبت النسخة الحالية كمسودة محفوظة داخل Digital Compose.',
+                `المنصة: ${normalizePlatform(postPlatform)}`,
+                `النص: ${postContent.trim().slice(0, 180)}`,
+            ].join('\n'),
+            actionLabel: 'احفظ المادة',
+        };
+    }
+
+    if (generatedPlatforms.length > 0) {
+        return {
+            taskKey: 'save_post',
+            taskLabel: 'احفظ كل النسخ المولدة عبر المنصات',
+            templateTitle: 'Digital Compose — حفظ الحزمة المولدة',
+            playbookHref: '/prompt-playbook',
+            reason: 'لأن لدينا نسخًا مولدة جاهزة، والخطوة الصحيحة الآن هي تثبيتها داخل المهمة بدل إبقائها مؤقتة في واجهة Compose.',
+            rationale: [
+                `المنصات الجاهزة: ${generatedPlatforms.join('، ')}`,
+                `عدد النسخ الجاهزة: ${generatedPlatforms.length}`,
+                'بعد الحفظ يمكن مراجعتها أو اعتمادها أو جدولتها مباشرة.',
+            ],
+            autoFilledFields: [
+                { label: 'المهمة', value: selectedTask.title },
+                { label: 'المنصات', value: generatedPlatforms.join('، ') },
+                { label: 'Playbook', value: bundlePlaybookKey },
+            ],
+            promptPreview: [
+                'المهمة: احفظ الحزمة الرقمية المولدة داخل المهمة الحالية.',
+                `المنصات: ${generatedPlatforms.join('، ')}`,
+                `Playbook: ${bundlePlaybookKey}`,
+            ].join('\n'),
+            actionLabel: 'حفظ كل الصياغات',
+        };
+    }
+
+    if (selectedTaskAction) {
+        return {
+            taskKey: 'run_next_action',
+            taskLabel: selectedTaskAction.next_best_action,
+            templateTitle: 'Digital Compose — الإجراء التالي حسب حالة المهمة',
+            playbookHref: '/prompt-playbook',
+            reason: selectedTaskAction.why_now,
+            rationale: [
+                `الكود التشغيلي: ${selectedTaskAction.next_best_action_code}`,
+                `المصدر: ${selectedTaskAction.source_type}`,
+                `الأعلام الحرجة: ${(selectedTaskAction.risk_flags || []).join('، ') || 'لا توجد'}`,
+            ],
+            autoFilledFields: [
+                { label: 'المهمة', value: selectedTask.title },
+                { label: 'الإجراء', value: selectedTaskAction.next_best_action },
+                { label: 'النافذة', value: selectedTaskAction.trigger_window || '—' },
+            ],
+            promptPreview: [
+                'المهمة: نفّذ الخطوة التالية الأنسب داخل سير عمل الديجيتال.',
+                `العنوان: ${selectedTask.title}`,
+                `الإجراء التالي: ${selectedTaskAction.next_best_action}`,
+                `السبب: ${selectedTaskAction.why_now}`,
+            ].join('\n'),
+            actionLabel: selectedTaskAction.next_best_action,
+        };
+    }
+
+    if (!approvedPosts.length && selectedTask.task_type !== 'manual') {
+        return {
+            taskKey: 'generate_bundle',
+            taskLabel: 'وسّع المهمة إلى باقة نشر متعددة المنصات',
+            templateTitle: 'Digital Compose — Bundle generation',
+            playbookHref: '/prompt-playbook',
+            reason: 'لأن لدينا نسخة أو أكثر، لكن لا توجد بعد حزمة مكتملة تغطي المنصات الأساسية لهذه المهمة.',
+            rationale: [
+                `عدد المواد الحالية: ${posts.length}`,
+                `Playbook الحالي: ${bundlePlaybookKey}`,
+                `نوع المهمة: ${taskObjectiveLabel(selectedTask.task_type)}`,
+            ],
+            autoFilledFields: [
+                { label: 'المهمة', value: selectedTask.title },
+                { label: 'المنصات الحالية', value: posts.map((post) => normalizePlatform(post.platform)).join('، ') || 'لا توجد' },
+                { label: 'Playbook', value: bundlePlaybookKey },
+            ],
+            promptPreview: [
+                'المهمة: أنشئ Bundle متعددة المنصات للمهمة الحالية.',
+                `العنوان: ${selectedTask.title}`,
+                selectedTask.brief ? `الـ brief: ${selectedTask.brief}` : null,
+                `Playbook: ${bundlePlaybookKey}`,
+            ]
+                .filter(Boolean)
+                .join('\n'),
+            actionLabel: 'ولّد الباقة',
+        };
+    }
+
+    return null;
 }
 
 function actionCodeLabel(code: string): string {
@@ -428,6 +635,19 @@ export default function DigitalPage() {
                 postLengthState(platform, value.text || '').over
             ),
         [composerGenerated]
+    );
+    const composeSuggestion = useMemo(
+        () =>
+            buildDigitalComposeSuggestion({
+                selectedTask,
+                selectedTaskAction,
+                posts,
+                postContent,
+                postPlatform,
+                bundlePlaybookKey,
+                composerGenerated,
+            }),
+        [bundlePlaybookKey, composerGenerated, postContent, postPlatform, posts, selectedTask, selectedTaskAction]
     );
 
     const buildProgramDrafts = async (): Promise<{
@@ -867,6 +1087,39 @@ export default function DigitalPage() {
         },
         onError: (err) => setError(apiErrorMessage(err, 'تعذر تنفيذ الإجراء التالي.')),
     });
+
+    const composeSuggestionPending =
+        composePostMutation.isPending ||
+        createPostMutation.isPending ||
+        generateBundleMutation.isPending ||
+        regeneratePostMutation.isPending ||
+        runNextActionMutation.isPending ||
+        saveGeneratedPostsMutation.isPending;
+
+    const runComposeSuggestion = () => {
+        if (!composeSuggestion) return;
+        if (composeSuggestion.taskKey === 'compose_post') {
+            composePostMutation.mutate();
+            return;
+        }
+        if (composeSuggestion.taskKey === 'generate_bundle') {
+            generateBundleMutation.mutate();
+            return;
+        }
+        if (composeSuggestion.taskKey === 'regenerate_post' && composeSuggestion.postId) {
+            regeneratePostMutation.mutate(composeSuggestion.postId);
+            return;
+        }
+        if (composeSuggestion.taskKey === 'run_next_action' && selectedTaskAction) {
+            runNextActionMutation.mutate(selectedTaskAction);
+            return;
+        }
+        if (Object.keys(composerGenerated || {}).length) {
+            saveGeneratedPostsMutation.mutate();
+            return;
+        }
+        createPostMutation.mutate();
+    };
 
     const saveScopeMutation = useMutation({
         mutationFn: () =>
@@ -1403,6 +1656,41 @@ export default function DigitalPage() {
                 {selectedTask && (
                     <div className="space-y-3">
                         <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-3 text-sm text-slate-200">{selectedTask.title}</div>
+                        {composeSuggestion && (
+                            <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-3 space-y-3">
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div className="space-y-1">
+                                        <div className="text-xs text-cyan-300">القالب الذكي المقترح الآن</div>
+                                        <div className="text-sm font-semibold text-white">{composeSuggestion.taskLabel}</div>
+                                        <div className="text-sm leading-6 text-slate-200">{composeSuggestion.reason}</div>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        <button
+                                            onClick={runComposeSuggestion}
+                                            disabled={!canWrite || composeSuggestionPending}
+                                            className="h-10 rounded-xl border border-cyan-500/30 bg-cyan-500/15 px-4 text-sm text-cyan-100 disabled:opacity-50"
+                                        >
+                                            {composeSuggestionPending ? 'جارٍ التنفيذ...' : composeSuggestion.actionLabel}
+                                        </button>
+                                        <Link href={composeSuggestion.playbookHref} className="inline-flex h-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 px-4 text-sm text-slate-200">
+                                            افتح دليل البرومبت
+                                        </Link>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-1 gap-2 md:grid-cols-3 text-xs">
+                                    {composeSuggestion.autoFilledFields.map((field) => (
+                                        <div key={field.label} className="rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2">
+                                            <div className="text-slate-400">{field.label}</div>
+                                            <div className="mt-1 text-sm text-white">{field.value}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <details className="rounded-lg border border-slate-700 bg-slate-950/50 p-3">
+                                    <summary className="cursor-pointer text-xs text-cyan-200">كيف يملأ النظام هذا القالب تلقائيًا؟</summary>
+                                    <pre className="mt-3 whitespace-pre-wrap text-xs leading-6 text-slate-300">{composeSuggestion.promptPreview}</pre>
+                                </details>
+                            </div>
+                        )}
                         {actionDeskItems.get(selectedTask.id) && (
                             <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-3 space-y-2">
                                 <div className="text-xs text-slate-300">سبب الإنشاء / Why now</div>

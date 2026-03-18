@@ -43,6 +43,203 @@ const PLATFORM_OPTIONS = ['instagram_reels', 'youtube', 'youtube_shorts', 'faceb
 
 type VideoWorkspaceModel = ReturnType<typeof toVideoWorkspace>;
 
+type VideoSuggestedTaskKey = 'regenerate_project' | 'regenerate_scene' | 'open_assets' | 'export_delivery';
+
+interface VideoPromptSuggestion {
+  taskKey: VideoSuggestedTaskKey;
+  taskLabel: string;
+  templateTitle: string;
+  playbookHref: string;
+  reason: string;
+  rationale: string[];
+  autoFilledFields: Array<{ label: string; value: string }>;
+  promptPreview: string;
+  actionLabel: string;
+  sceneIdx?: number;
+}
+
+function buildVideoPromptSuggestion(
+  project: ScriptProjectRecord | undefined,
+  video: VideoWorkspaceModel | null,
+  canReview: boolean,
+): VideoPromptSuggestion | null {
+  if (!project || !video) return null;
+  const blockers = project.video_workspace?.blockers || [];
+  const warnings = project.video_workspace?.warnings || [];
+  const firstUnlockedScene = video.scenes.find((scene) => !scene.locked);
+  const firstIncompleteScene = video.scenes.find(
+    (scene) => !scene.locked && (!scene.duration_s || !String(scene.vo_line || '').trim() || !String(scene.on_screen_text || '').trim()),
+  );
+  const firstMissingAsset = video.scenes.find((scene) => String(scene.asset_status || 'missing') === 'missing');
+  const deliveryStatus = String(video.delivery.status || video.delivery_status || 'draft');
+
+  if ((!video.hook.trim() || !video.closing.trim() || blockers.some((issue) => /hook|opening|closing/i.test(issue.code))) && project.status !== 'approved') {
+    return {
+      taskKey: 'regenerate_project',
+      taskLabel: 'أعد توليد حزمة الفيديو وفق ملفه التحريري',
+      templateTitle: 'Video Script Studio — إعادة بناء VO والمشاهد',
+      playbookHref: '/prompt-playbook',
+      reason: 'لأن المشروع ما زال يحتاج افتتاحية أو خاتمة أو توازنًا أوضح بين بداية الفيديو ونهايته قبل اعتماد المراجعة.',
+      rationale: [
+        `العوائق الحالية: ${blockers.length}`,
+        `قوة البداية الحالية: ${Math.round((video.hook_strength || 0) * 100)}%`,
+        `نوع الفيديو: ${labelForProfile(video.video_profile)}`,
+      ],
+      autoFilledFields: [
+        { label: 'ملف الفيديو', value: labelForProfile(video.video_profile) },
+        { label: 'المنصة', value: labelForPlatform(video.target_platform) },
+        { label: 'الهدف التحريري', value: labelForObjective(video.editorial_objective) },
+      ],
+      promptPreview: [
+        'المهمة: أعد توليد مشروع الفيديو مع تحسين hook والخاتمة والإيقاع.',
+        `ملف الفيديو: ${labelForProfile(video.video_profile)}`,
+        `المنصة: ${labelForPlatform(video.target_platform)}`,
+        `الهدف: ${labelForObjective(video.editorial_objective)}`,
+        `ملاحظات الإيقاع الحالية: ${video.pace_notes || 'لا توجد ملاحظات محفوظة'}`,
+        `العوائق: ${(blockers.map((item) => item.message).join(' | ') || 'لا توجد عوائق مسجلة').slice(0, 240)}`,
+      ].join('\n'),
+      actionLabel: 'أعد توليد المشروع',
+    };
+  }
+
+  if (firstIncompleteScene) {
+    return {
+      taskKey: 'regenerate_scene',
+      taskLabel: `أصلح المشهد ${firstIncompleteScene.idx} وأعد توليده`,
+      templateTitle: 'Video Script Studio — Scene repair',
+      playbookHref: '/prompt-playbook',
+      reason: 'لأن أحد المشاهد ما زال ناقص المدة أو النص الصوتي أو النص الظاهر على الشاشة، وهذا يمنع الانتقال السلس إلى المراجعة.',
+      rationale: [
+        `المشهد المقترح: #${firstIncompleteScene.idx}`,
+        `النص الصوتي الحالي: ${String(firstIncompleteScene.vo_line || '').trim() ? 'موجود' : 'ناقص'}`,
+        `النص الظاهر: ${String(firstIncompleteScene.on_screen_text || '').trim() ? 'موجود' : 'ناقص'}`,
+      ],
+      autoFilledFields: [
+        { label: 'رقم المشهد', value: `#${firstIncompleteScene.idx}` },
+        { label: 'نوع المشهد', value: String(firstIncompleteScene.scene_type || 'body') },
+        { label: 'المدة الحالية', value: `${Number(firstIncompleteScene.duration_s || 0)} ثوان` },
+      ],
+      promptPreview: [
+        `المهمة: أعد توليد المشهد ${firstIncompleteScene.idx} فقط دون المساس ببقية المشاهد.`,
+        `نوع المشهد: ${String(firstIncompleteScene.scene_type || 'body')}`,
+        `النص الصوتي الحالي: ${String(firstIncompleteScene.vo_line || 'غير متوفر')}`,
+        `النص الظاهر: ${String(firstIncompleteScene.on_screen_text || 'غير متوفر')}`,
+        `المرئي المطلوب: ${String(firstIncompleteScene.visual || 'غير متوفر')}`,
+      ].join('\n'),
+      actionLabel: 'أعد توليد المشهد',
+      sceneIdx: firstIncompleteScene.idx,
+    };
+  }
+
+  if (firstMissingAsset) {
+    return {
+      taskKey: 'open_assets',
+      taskLabel: 'راجع الأصول البصرية قبل الاعتماد',
+      templateTitle: 'Video Script Studio — Asset completion',
+      playbookHref: '/prompt-playbook',
+      reason: 'لأن هناك مشاهد ما زالت تعتمد على أصول بصرية مفقودة، ومن الأفضل حسمها قبل الانتقال إلى التسليم النهائي.',
+      rationale: [
+        `الأصول المفقودة: ${video.scenes.filter((scene) => String(scene.asset_status || 'missing') === 'missing').length}`,
+        `أول مشهد متأثر: #${firstMissingAsset.idx}`,
+        `التنبيهات الحالية: ${warnings.length}`,
+      ],
+      autoFilledFields: [
+        { label: 'المشهد المتأثر', value: `#${firstMissingAsset.idx}` },
+        { label: 'الوصف البصري', value: String(firstMissingAsset.visual || 'غير متوفر') },
+        { label: 'حالة الأصل', value: String(firstMissingAsset.asset_status || 'missing') },
+      ],
+      promptPreview: [
+        'المهمة: افتح تبويب الأصول البصرية وحدد ما هو مفقود قبل التسليم.',
+        `المشهد: #${firstMissingAsset.idx}`,
+        `الوصف البصري: ${String(firstMissingAsset.visual || 'غير متوفر')}`,
+        `التنبيهات: ${(warnings.map((item) => item.message).join(' | ') || 'لا توجد تنبيهات إضافية').slice(0, 220)}`,
+      ].join('\n'),
+      actionLabel: 'افتح الأصول البصرية',
+      sceneIdx: firstMissingAsset.idx,
+    };
+  }
+
+  if (deliveryStatus !== 'exported' && deliveryStatus !== 'sent') {
+    return {
+      taskKey: 'export_delivery',
+      taskLabel: canReview ? 'جهّز حزمة التسليم النهائية' : 'ولّد حزمة التسليم للمراجعة',
+      templateTitle: 'Video Script Studio — Delivery package',
+      playbookHref: '/prompt-playbook',
+      reason: 'لأن المشروع أصبح متماسكًا بما يكفي للانتقال إلى حزمة التسليم بدل الاكتفاء بالمراجعة داخل الاستوديو.',
+      rationale: [
+        `إجمالي المشاهد: ${video.scenes.length}`,
+        `المدة الكلية: ${video.total_duration_s} ثانية`,
+        `حالة التسليم الحالية: ${labelForDeliveryStatus(deliveryStatus)}`,
+      ],
+      autoFilledFields: [
+        { label: 'العنوان', value: project.title },
+        { label: 'المنصة', value: labelForPlatform(video.target_platform) },
+        { label: 'المدة الإجمالية', value: `${video.total_duration_s} ثانية` },
+      ],
+      promptPreview: [
+        'المهمة: أنشئ حزمة تسليم كاملة لهذا الفيديو.',
+        `العنوان: ${project.title}`,
+        `المنصة: ${labelForPlatform(video.target_platform)}`,
+        `الملف: ${labelForProfile(video.video_profile)}`,
+        `عدد أفكار الـ thumbnail: ${video.thumbnail_ideas.length}`,
+      ].join('\n'),
+      actionLabel: 'صدّر الحزمة',
+    };
+  }
+
+  if (canReview && project.status === 'ready_for_review' && blockers.length === 0) {
+    return {
+      taskKey: 'export_delivery',
+      taskLabel: 'راجع الحزمة ثم اعتمد المشروع',
+      templateTitle: 'Video Script Studio — Final delivery check',
+      playbookHref: '/prompt-playbook',
+      reason: 'لأن المشروع جاهز للمراجعة النهائية، وما ينقصه الآن هو التأكد من حزمة التسليم قبل قرار الاعتماد.',
+      rationale: [
+        'لا توجد عوائق مسجلة.',
+        `التنبيهات الحالية: ${warnings.length}`,
+        `حالة المشروع: ${labelForStatus(project.status)}`,
+      ],
+      autoFilledFields: [
+        { label: 'حالة المشروع', value: labelForStatus(project.status) },
+        { label: 'التسليم', value: labelForDeliveryStatus(deliveryStatus) },
+        { label: 'أفضل إجراء تالٍ', value: project.video_workspace?.next_action || 'اعتمد المشروع' },
+      ],
+      promptPreview: [
+        'المهمة: راجع حزمة التسليم ثم انتقل إلى قرار الاعتماد البشري.',
+        `أفضل إجراء الآن: ${project.video_workspace?.next_action || 'اعتمد المشروع إذا لم تظهر ملاحظات جديدة.'}`,
+      ].join('\n'),
+      actionLabel: 'صدّر الحزمة',
+    };
+  }
+
+  return firstUnlockedScene
+    ? {
+        taskKey: 'regenerate_scene',
+        taskLabel: `حسّن المشهد ${firstUnlockedScene.idx} كخطوة تالية`,
+        templateTitle: 'Video Script Studio — Scene polish',
+        playbookHref: '/prompt-playbook',
+        reason: 'لأن المشروع لا يملك عائقًا واضحًا واحدًا، وأفضل طريقة لدفعه للأمام هي تحسين أول مشهد مفتوح للمراجعة.',
+        rationale: [
+          `أول مشهد مفتوح: #${firstUnlockedScene.idx}`,
+          `التنبيهات الحالية: ${warnings.length}`,
+          `المدة الإجمالية: ${video.total_duration_s} ثانية`,
+        ],
+        autoFilledFields: [
+          { label: 'المشهد', value: `#${firstUnlockedScene.idx}` },
+          { label: 'النص الصوتي', value: String(firstUnlockedScene.vo_line || 'غير متوفر').slice(0, 80) },
+          { label: 'الوصف البصري', value: String(firstUnlockedScene.visual || 'غير متوفر').slice(0, 80) },
+        ],
+        promptPreview: [
+          `المهمة: حسّن المشهد ${firstUnlockedScene.idx} مع الحفاظ على بنية المشروع الحالية.`,
+          `النص الصوتي الحالي: ${String(firstUnlockedScene.vo_line || 'غير متوفر')}`,
+          `الوصف البصري الحالي: ${String(firstUnlockedScene.visual || 'غير متوفر')}`,
+        ].join('\n'),
+        actionLabel: 'أعد توليد المشهد',
+        sceneIdx: firstUnlockedScene.idx,
+      }
+    : null;
+}
+
 export default function ScriptWorkspacePage() {
   const params = useParams<{ scriptId: string }>();
   const scriptId = Number(params?.scriptId);
@@ -66,6 +263,7 @@ export default function ScriptWorkspacePage() {
   const latestOutput = outputs[0];
   const video = useMemo(() => toVideoWorkspace(project, latestOutput), [project, latestOutput]);
   const canReview = user?.role === 'director' || user?.role === 'editor_chief';
+  const videoSuggestion = useMemo(() => buildVideoPromptSuggestion(project, video, canReview), [project, video, canReview]);
 
   const effectiveToVersion = toVersion ?? outputs[0]?.version ?? null;
   const effectiveFromVersion = fromVersion ?? outputs[1]?.version ?? outputs[0]?.version ?? null;
@@ -102,6 +300,32 @@ export default function ScriptWorkspacePage() {
   const runAction = async (runner: () => Promise<unknown>, successMessage: string) => {
     await runner();
     await invalidate(successMessage);
+  };
+
+  const runSuggestedVideoAction = async () => {
+    if (!videoSuggestion) return;
+    if (videoSuggestion.taskKey === 'regenerate_scene' && videoSuggestion.sceneIdx) {
+      await runAction(() => scriptsApi.regenerateScene(scriptId, videoSuggestion.sceneIdx as number), 'تم تنفيذ التوليد الذكي للمشهد المقترح.');
+      return;
+    }
+    if (videoSuggestion.taskKey === 'regenerate_project') {
+      await runAction(
+        () =>
+          scriptsApi.regenerate(scriptId, {
+            video_profile: video.video_profile,
+            target_platform: video.target_platform,
+            editorial_objective: video.editorial_objective,
+          }),
+        'تم طلب إعادة توليد المشروع وفق القالب المقترح.',
+      );
+      return;
+    }
+    if (videoSuggestion.taskKey === 'open_assets') {
+      setTab('assets');
+      setMessage('فتحنا تبويب الأصول البصرية لأن هذا هو الإجراء المقترح الآن.');
+      return;
+    }
+    await runAction(() => scriptsApi.exportDelivery(scriptId), 'تم توليد حزمة التسليم من الإجراء الذكي المقترح.');
   };
 
   if (projectQuery.isLoading) {
@@ -369,6 +593,37 @@ export default function ScriptWorkspacePage() {
               <p className="font-semibold text-white">أفضل إجراء الآن</p>
               <p className="mt-1">{project.video_workspace?.next_action || 'راجع المشاهد وحدد أول عنصر يحتاج تعديلًا.'}</p>
             </div>
+            {videoSuggestion ? (
+              <div className="rounded-xl border border-violet-500/20 bg-violet-500/10 p-3 text-sm text-violet-100">
+                <p className="text-xs text-violet-300">القالب الذكي المقترح الآن</p>
+                <p className="mt-1 font-semibold text-white">{videoSuggestion.taskLabel}</p>
+                <p className="mt-2 leading-6 text-slate-200">{videoSuggestion.reason}</p>
+                <div className="mt-3 grid gap-2">
+                  {videoSuggestion.autoFilledFields.map((field) => (
+                    <div key={field.label} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs">
+                      <div className="text-slate-400">{field.label}</div>
+                      <div className="mt-1 text-sm text-white">{field.value}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void runSuggestedVideoAction()}
+                    className="inline-flex h-10 items-center justify-center rounded-xl border border-violet-500/30 bg-violet-500/15 px-4 text-sm text-violet-50"
+                  >
+                    {videoSuggestion.actionLabel}
+                  </button>
+                  <Link href={videoSuggestion.playbookHref} className="inline-flex h-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 px-4 text-sm text-slate-200">
+                    افتح دليل البرومبت
+                  </Link>
+                </div>
+                <details className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3">
+                  <summary className="cursor-pointer text-xs text-violet-200">كيف يملأ النظام هذا القالب تلقائيًا؟</summary>
+                  <pre className="mt-3 whitespace-pre-wrap text-xs leading-6 text-slate-300">{videoSuggestion.promptPreview}</pre>
+                </details>
+              </div>
+            ) : null}
             <Row label="قوة البداية" value={`${Math.round((video.hook_strength || 0) * 100)}%`} />
             <Row label="ملاحظات الإيقاع" value={video.pace_notes || 'لا توجد ملاحظات بعد'} />
             <Row label="عوائق" value={String(project.video_workspace?.blockers?.length || 0)} />
