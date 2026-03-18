@@ -435,6 +435,7 @@
 - `/constitution`
 - `/how-editorial-os-works`
 - `/newsroom-flow`
+- `/prompt-playbook`
 - `/ux-insights`
 
 وصفحات مساندة أو متقدمة:

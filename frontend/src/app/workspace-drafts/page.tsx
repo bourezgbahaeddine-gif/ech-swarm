@@ -1825,8 +1825,23 @@ function WorkspaceDraftsPageContent() {
                 title: 'ماذا بعد هذه الخطوة؟',
                 description: nextActionHelp.after,
             },
+            {
+                title: 'أي برومبت أستخدم هنا؟',
+                description:
+                    isWriteMode
+                        ? 'في مرحلة الكتابة نستخدم برومبتات Scribe لبدء المسودة الأولى فقط، ثم نترك التحسين والمراجعة للمرحلة التالية.'
+                        : isImproveMode
+                          ? 'في هذا الوضع نستخدم برومبتات Smart Editor للعناوين والتحسين اللغوي والأسلوبي دون تغيير الحقائق.'
+                          : 'في المراجعة نستخدم برومبتات فحص الجاهزية والادعاءات، لا برومبتات كتابة المسودة من جديد.',
+                actionLabel: 'افتح دليل البرومبتات',
+                href: isWriteMode
+                    ? '/prompt-playbook#scribe'
+                    : isImproveMode
+                      ? '/prompt-playbook#smart-editor-headlines'
+                      : '/prompt-playbook#quality-gates',
+            },
         ],
-        [nextAction.description, nextActionHelp.after, nextActionHelp.when],
+        [isImproveMode, isWriteMode, nextAction.description, nextActionHelp.after, nextActionHelp.when],
     );
 
     const storyTimelineFromContext = useMemo(

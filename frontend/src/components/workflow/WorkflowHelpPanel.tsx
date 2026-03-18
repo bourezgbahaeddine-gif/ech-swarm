@@ -1,6 +1,7 @@
 'use client';
 
 import { Info } from 'lucide-react';
+import Link from 'next/link';
 
 import { workflowText } from '@/lib/workflow-language';
 
@@ -9,7 +10,7 @@ export function WorkflowHelpPanel({
     items,
 }: {
     title?: string;
-    items: Array<{ title: string; description: string }>;
+    items: Array<{ title: string; description: string; actionLabel?: string; href?: string }>;
 }) {
     return (
         <section className="rounded-3xl border border-white/10 bg-white/5 p-4">
@@ -22,6 +23,14 @@ export function WorkflowHelpPanel({
                     <div key={item.title} className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
                         <div className="font-semibold text-white mb-1">{item.title}</div>
                         <div>{item.description}</div>
+                        {item.actionLabel && item.href ? (
+                            <Link
+                                href={item.href}
+                                className="mt-3 inline-flex items-center rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-[11px] font-medium text-cyan-100 hover:bg-cyan-500/20"
+                            >
+                                {item.actionLabel}
+                            </Link>
+                        ) : null}
                     </div>
                 ))}
             </div>
