@@ -39,6 +39,7 @@ from app.services.ai_service import ai_service
 from app.services.notification_service import notification_service
 from app.services.link_intelligence_service import link_intelligence_service
 from app.services.job_queue_service import job_queue_service
+from app.services.editorial_prompt_orchestrator_service import suggest_workspace_task
 from app.services.quality_gate_service import quality_gate_service
 from app.services.smart_editor_service import smart_editor_service
 from app.services.audit_service import audit_service
@@ -146,6 +147,11 @@ class ManualWorkspaceDraftCreateRequest(BaseModel):
     category: Optional[str] = Field(default="local_algeria", max_length=50)
     urgency: Optional[str] = Field(default="medium", max_length=20)
     source_action: Optional[str] = Field(default="manual_topic", max_length=100)
+
+
+class WorkspacePromptOrchestratorRunRequest(BaseModel):
+    task_key: Optional[Literal["first_draft", "verify_claims", "proofread", "quality_review", "headline_pack", "social_pack", "publish_gate"]] = None
+    auto_apply: Optional[bool] = None
 
 
 def _require_roles(user: User, allowed: set[UserRole]) -> None:
@@ -651,6 +657,52 @@ async def _latest_stage_report(
         .limit(1)
     )
     return row.scalar_one_or_none()
+
+
+async def _build_workspace_publish_readiness(
+    db: AsyncSession,
+    *,
+    latest: EditorialDraft,
+) -> dict[str, Any]:
+    article_id = latest.article_id
+
+    stages = ["FACT_CHECK", "SEO_TECH", "READABILITY", "QUALITY_SCORE"]
+    stage_reports: dict[str, Any] = {}
+    blockers: list[str] = []
+    for stage in stages:
+        report = await _latest_stage_report(db, article_id=article_id, stage=stage)
+        if not report:
+            blockers.append(f"تقرير مفقود: {stage}")
+            continue
+        stage_reports[stage] = {
+            "passed": bool(report.passed),
+            "score": report.score,
+            "created_at": report.created_at,
+            "blocking_reasons": report.blocking_reasons or [],
+        }
+        if not report.passed:
+            blockers.extend(report.blocking_reasons or [f"فشل تقرير المرحلة: {stage}"])
+
+    policy_report_row = await _latest_stage_report(db, article_id=article_id, stage="EDITORIAL_POLICY")
+    policy_payload = (policy_report_row.report_json or {}) if policy_report_row else None
+    gate_result = await quality_gate_service.run_submission_quality_gates(
+        db,
+        article_id=article_id,
+        policy_report=policy_payload,
+    )
+    gate_summary = quality_gate_service.summarize_gate_result(gate_result)
+    gate_blockers = [item["message"] for item in gate_summary["items"] if item["severity"] == "blocker"]
+    blockers = list(dict.fromkeys(blockers + gate_blockers))
+
+    ready = len(blockers) == 0 and bool(gate_summary.get("passed", False))
+    return {
+        "work_id": latest.work_id,
+        "article_id": article_id,
+        "ready_for_publish": ready,
+        "blocking_reasons": blockers,
+        "reports": stage_reports,
+        "gates": gate_summary,
+    }
 
 
 async def _get_latest_draft_or_404(db: AsyncSession, work_id: str) -> EditorialDraft:
@@ -2307,45 +2359,130 @@ async def workspace_publish_readiness(
 ):
     _require_roles(current_user, NEWSROOM_ROLES)
     latest = await _get_latest_draft_or_404(db, work_id)
-    article_id = latest.article_id
+    return await _build_workspace_publish_readiness(db, latest=latest)
 
-    stages = ["FACT_CHECK", "SEO_TECH", "READABILITY", "QUALITY_SCORE"]
-    stage_reports: dict[str, Any] = {}
-    blockers: list[str] = []
-    for stage in stages:
-        report = await _latest_stage_report(db, article_id=article_id, stage=stage)
-        if not report:
-            blockers.append(f"تقرير مفقود: {stage}")
-            continue
-        stage_reports[stage] = {
-            "passed": bool(report.passed),
-            "score": report.score,
-            "created_at": report.created_at,
-            "blocking_reasons": report.blocking_reasons or [],
+
+@router.get("/workspace/drafts/{work_id}/ai/orchestrator")
+async def workspace_ai_orchestrator(
+    work_id: str,
+    task_key: Optional[Literal["first_draft", "verify_claims", "proofread", "quality_review", "headline_pack", "social_pack", "publish_gate"]] = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(current_user, NEWSROOM_ROLES)
+    latest = await _get_latest_draft_or_404(db, work_id)
+    article_row = await db.execute(select(Article).where(Article.id == latest.article_id))
+    article = article_row.scalar_one_or_none()
+    if not article:
+        raise HTTPException(404, "Article not found")
+    try:
+        return await suggest_workspace_task(db, latest=latest, article=article, forced_task_key=task_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/workspace/drafts/{work_id}/ai/orchestrator/run")
+async def workspace_ai_orchestrator_run(
+    work_id: str,
+    payload: WorkspacePromptOrchestratorRunRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(current_user, NEWSROOM_ROLES)
+    latest = await _get_latest_draft_or_404(db, work_id)
+    article_row = await db.execute(select(Article).where(Article.id == latest.article_id))
+    article = article_row.scalar_one_or_none()
+    if not article:
+        raise HTTPException(404, "Article not found")
+
+    try:
+        suggestion = await suggest_workspace_task(
+            db,
+            latest=latest,
+            article=article,
+            forced_task_key=payload.task_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    task_key = suggestion["task_key"]
+    auto_apply = payload.auto_apply if payload.auto_apply is not None else bool(suggestion.get("auto_apply_default"))
+
+    if task_key == "publish_gate":
+        readiness = await _build_workspace_publish_readiness(db, latest=latest)
+        return {
+            "work_id": work_id,
+            "task": suggestion,
+            "status": "completed",
+            "result_type": "readiness",
+            "readiness": readiness,
+            "applied": False,
         }
-        if not report.passed:
-            blockers.extend(report.blocking_reasons or [f"فشل تقرير المرحلة: {stage}"])
 
-    policy_report_row = await _latest_stage_report(db, article_id=article_id, stage="EDITORIAL_POLICY")
-    policy_payload = (policy_report_row.report_json or {}) if policy_report_row else None
-    gate_result = await quality_gate_service.run_submission_quality_gates(
-        db,
-        article_id=article_id,
-        policy_report=policy_payload,
-    )
-    gate_summary = quality_gate_service.summarize_gate_result(gate_result)
-    gate_blockers = [item["message"] for item in gate_summary["items"] if item["severity"] == "blocker"]
-    blockers = list(dict.fromkeys(blockers + gate_blockers))
-
-    ready = len(blockers) == 0 and bool(gate_summary.get("passed", False))
-    return {
-        "work_id": work_id,
-        "article_id": article_id,
-        "ready_for_publish": ready,
-        "blocking_reasons": blockers,
-        "reports": stage_reports,
-        "gates": gate_summary,
+    operation = suggestion["operation"]
+    operation_payload = suggestion.get("operation_payload") or {}
+    job_type_map = {
+        "rewrite": "editorial_rewrite",
+        "claims": "editorial_claims",
+        "proofread": "editorial_proofread",
+        "quality": "editorial_quality",
+        "headlines": "editorial_headlines",
+        "social": "editorial_social",
     }
+    result = await _enqueue_editorial_ai_job(
+        db=db,
+        request=request,
+        current_user=current_user,
+        work_id=work_id,
+        job_type=job_type_map[operation],
+        operation=operation,
+        queue_name="ai_quality",
+        payload=operation_payload,
+        wait_for_result_override=True,
+        wait_timeout_seconds_override=90,
+    )
+
+    response: dict[str, Any] = {
+        "work_id": work_id,
+        "task": suggestion,
+        "status": result.get("status", "completed"),
+        "applied": False,
+    }
+
+    if operation in {"rewrite", "proofread"}:
+        response["result_type"] = "suggestion"
+        response["suggestion"] = result.get("suggestion")
+        if auto_apply and result.get("suggestion") and result.get("status") == "completed":
+            suggestion_payload = result["suggestion"]
+            applied_draft = await _create_draft_version(
+                db,
+                latest=latest,
+                title=suggestion_payload.get("title"),
+                body=str(suggestion_payload.get("body_html") or latest.body or ""),
+                note=f"orchestrator:{task_key}",
+                updated_by=current_user.full_name_ar,
+                change_origin="ai_suggestion",
+            )
+            await db.commit()
+            response["applied"] = True
+            response["draft"] = _draft_to_dict(applied_draft)
+    elif operation == "claims":
+        response["result_type"] = "claims"
+        response["report"] = result
+    elif operation == "quality":
+        response["result_type"] = "quality"
+        response["report"] = result
+    elif operation == "headlines":
+        response["result_type"] = "headlines"
+        response["headlines"] = result.get("headlines", [])
+    elif operation == "social":
+        response["result_type"] = "social"
+        response["variants"] = result.get("variants", {})
+
+    if result.get("error"):
+        response["error"] = result["error"]
+    return response
 
 
 @router.post("/workspace/drafts/{work_id}/apply")

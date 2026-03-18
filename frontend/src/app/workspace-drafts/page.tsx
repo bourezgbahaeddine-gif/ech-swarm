@@ -43,6 +43,8 @@ import {
     type Source,
     type StoryControlCenterResponse,
     type StorySuggestion,
+    type WorkspaceOrchestratorTaskKey,
+    type WorkspacePromptSuggestion,
     type WorkspacePublishReadiness,
 } from '@/lib/api';
 import { constitutionApi } from '@/lib/constitution-api';
@@ -952,11 +954,21 @@ function WorkspaceDraftsPageContent() {
         queryFn: () => editorialApi.linkSuggestionsHistory(workId!, 8),
         enabled: !!workId,
     });
+    const { data: orchestratorData } = useQuery({
+        queryKey: ['workspace-prompt-orchestrator', workId],
+        queryFn: () => editorialApi.workspacePromptSuggestion(workId!),
+        enabled: !!workId,
+        staleTime: 1000 * 20,
+    });
 
     const context = contextData?.data;
     const versions = versionsData?.data || [];
     const constitutionTips = constitutionTipsData?.data?.tips || [];
     const articleContextId = context?.article?.id || null;
+    const promptSuggestion = (orchestratorData?.data || null) as WorkspacePromptSuggestion | null;
+    const invalidatePromptSuggestion = () => {
+        queryClient.invalidateQueries({ queryKey: ['workspace-prompt-orchestrator', workId] });
+    };
     const memoryQueryText = useMemo(() => {
         const parts = [
             context?.article?.title_ar,
@@ -1137,6 +1149,7 @@ function WorkspaceDraftsPageContent() {
             setBaseVersion(res.data?.draft?.version || baseVersion);
             lastSavedRef.current = { title: cleanText(title || ''), body: bodyHtml || '' };
             queryClient.invalidateQueries({ queryKey: ['smart-editor-versions', workId] });
+            invalidatePromptSuggestion();
         },
         onError: (e: any) => { setSaveState('error'); setErr(e?.response?.data?.detail || 'تعذر الحفظ التلقائي'); },
     });
@@ -1187,6 +1200,7 @@ function WorkspaceDraftsPageContent() {
         onSuccess: (data) => {
             setSuggestion(data?.suggestion || null);
             setActiveTab('quality');
+            invalidatePromptSuggestion();
         },
         onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر تشغيل تحسين النص'),
     });
@@ -1195,6 +1209,7 @@ function WorkspaceDraftsPageContent() {
         onSuccess: (data) => {
             setProofread(data?.suggestion || null);
             setActiveTab('proofread');
+            invalidatePromptSuggestion();
         },
         onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر تشغيل التدقيق اللغوي'),
     });
@@ -1217,6 +1232,7 @@ function WorkspaceDraftsPageContent() {
             setShowTechnicalDiff(false);
             queryClient.invalidateQueries({ queryKey: ['smart-editor-context', workId] });
             queryClient.invalidateQueries({ queryKey: ['smart-editor-versions', workId] });
+            invalidatePromptSuggestion();
         },
         onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر تطبيق الاقتراح'),
     });
@@ -1238,6 +1254,7 @@ function WorkspaceDraftsPageContent() {
             setProofread(null);
             queryClient.invalidateQueries({ queryKey: ['smart-editor-context', workId] });
             queryClient.invalidateQueries({ queryKey: ['smart-editor-versions', workId] });
+            invalidatePromptSuggestion();
         },
         onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر تطبيق نتيجة التدقيق اللغوي'),
     });
@@ -1253,12 +1270,13 @@ function WorkspaceDraftsPageContent() {
             setClaims(nextClaims);
             setClaimOverrideDrafts((prev) => mergeClaimOverrideDrafts(nextClaims, prev));
             setActiveTab('evidence');
+            invalidatePromptSuggestion();
         },
         onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر تنفيذ التحقق'),
     });
     const runQuality = useMutation({
         mutationFn: () => runEditorialActionWithPolling(() => editorialApi.qualityScore(workId!), 'تقييم الجودة'),
-        onSuccess: (data) => { setQuality(data); setActiveTab('quality'); },
+        onSuccess: (data) => { setQuality(data); setActiveTab('quality'); invalidatePromptSuggestion(); },
         onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر تنفيذ تقييم الجودة'),
     });
     const runSeo = useMutation({
@@ -1315,7 +1333,7 @@ function WorkspaceDraftsPageContent() {
     });
     const runSocial = useMutation({
         mutationFn: () => runEditorialActionWithPolling(() => editorialApi.aiSocialVariants(workId!), 'نسخ السوشيال'),
-        onSuccess: (data) => { setSocial(data?.variants || null); setActiveTab('social'); },
+        onSuccess: (data) => { setSocial(data?.variants || null); setActiveTab('social'); invalidatePromptSuggestion(); },
         onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر توليد نسخ السوشيال'),
     });
     const runHeadlines = useMutation({
@@ -1337,7 +1355,7 @@ function WorkspaceDraftsPageContent() {
         },
         onError: () => setArchiveError('تعذر البحث في الأرشيف الآن.'),
     });
-    const runReadiness = useMutation({ mutationFn: () => editorialApi.publishReadiness(workId!), onSuccess: (r) => { setReadiness(r.data); setActiveTab('quality'); } });
+    const runReadiness = useMutation({ mutationFn: () => editorialApi.publishReadiness(workId!), onSuccess: (r) => { setReadiness(r.data); setActiveTab('quality'); invalidatePromptSuggestion(); } });
     const runQuickCheck = useMutation({
         mutationFn: async () => {
             const [verifyData, qualityData, readinessRes] = await Promise.all([
@@ -1359,8 +1377,72 @@ function WorkspaceDraftsPageContent() {
             setActiveTab('quality');
             setErr(null);
             setOk('اكتمل الفحص السريع: تم تحديث التحقق والجودة وحالة الجاهزية.');
+            invalidatePromptSuggestion();
         },
         onError: (e: any) => setErr(e?.response?.data?.detail || 'تعذر تنفيذ الفحص السريع'),
+    });
+    const runPromptOrchestrator = useMutation({
+        mutationFn: (payload?: { task_key?: WorkspaceOrchestratorTaskKey; auto_apply?: boolean }) =>
+            editorialApi.runWorkspacePromptTask(workId!, payload || {
+                task_key: promptSuggestion?.task_key,
+                auto_apply: promptSuggestion?.auto_apply_default,
+            }),
+        onSuccess: (response) => {
+            const data = response?.data;
+            if (!data) return;
+            const taskKey = data.task?.task_key;
+            if (data.error) {
+                setErr(data.error);
+                return;
+            }
+
+            if (data.result_type === 'suggestion' && data.suggestion) {
+                if (taskKey === 'proofread') {
+                    setProofread(data.suggestion);
+                    setActiveTab('proofread');
+                } else {
+                    setSuggestion(data.suggestion);
+                    setActiveTab('quality');
+                }
+            }
+            if (data.result_type === 'claims' && data.report) {
+                const nextClaims = ((data.report as any)?.claims || []) as FactCheckClaim[];
+                setClaims(nextClaims);
+                setClaimOverrideDrafts((prev) => mergeClaimOverrideDrafts(nextClaims, prev));
+                setActiveTab('evidence');
+            }
+            if (data.result_type === 'quality' && data.report) {
+                setQuality(data.report);
+                setActiveTab('quality');
+            }
+            if (data.result_type === 'headlines') {
+                setHeadlines(data.headlines || []);
+                setActiveTab('seo');
+            }
+            if (data.result_type === 'social') {
+                setSocial(data.variants || null);
+                setActiveTab('social');
+            }
+            if (data.result_type === 'readiness' && data.readiness) {
+                setReadiness(data.readiness);
+                setActiveTab('quality');
+            }
+            if (data.applied && data.draft && editor) {
+                setTitle(cleanText(data.draft.title || ''));
+                setBodyHtml(data.draft.body || '');
+                editor.commands.setContent(data.draft.body || '<p></p>', { emitUpdate: false });
+                setBaseVersion(data.draft.version);
+                setSaveState('saved');
+                queryClient.invalidateQueries({ queryKey: ['smart-editor-context', workId] });
+                queryClient.invalidateQueries({ queryKey: ['smart-editor-versions', workId] });
+            }
+            invalidatePromptSuggestion();
+            setErr(null);
+            setOk(data.applied
+                ? `اكتمل ${data.task?.task_label || 'التوليد الذكي'} وتم تحديث المسودة تلقائيًا.`
+                : `اكتمل ${data.task?.task_label || 'التوليد الذكي'} وجاهز الآن للمراجعة.`);
+        },
+        onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر تشغيل التوليد الذكي'),
     });
 
     const runInlineAi = useMutation({
@@ -3147,6 +3229,69 @@ function WorkspaceDraftsPageContent() {
                                 {nextAction.description || 'لا توجد خطوة عاجلة حالياً.'}
                             </p>
                         )}
+                        {promptSuggestion && (
+                            <div className="mt-3 rounded-2xl border border-fuchsia-500/20 bg-fuchsia-500/10 p-3 text-right">
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div className="space-y-1">
+                                        <div className="inline-flex items-center gap-2 rounded-full border border-fuchsia-500/25 bg-fuchsia-500/10 px-2.5 py-1 text-[10px] text-fuchsia-100">
+                                            <Sparkles className="h-3.5 w-3.5" />
+                                            القالب الذكي المقترح الآن
+                                        </div>
+                                        <div className="text-sm font-semibold text-white">{promptSuggestion.task_label}</div>
+                                        <p className="max-w-3xl text-[11px] leading-6 text-fuchsia-50/90">
+                                            {promptSuggestion.reason}
+                                        </p>
+                                        <div className="flex flex-wrap gap-2 text-[10px] text-slate-300">
+                                            <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
+                                                {promptSuggestion.template_title}
+                                            </span>
+                                            <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
+                                                {promptSuggestion.word_count} كلمة تقريبًا
+                                            </span>
+                                            {promptSuggestion.auto_apply_default && (
+                                                <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-emerald-200">
+                                                    سيُطبَّق تلقائيًا عند نجاح التوليد
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            disabled={runPromptOrchestrator.isPending}
+                                            onClick={() => {
+                                                trackUiAction('workspace_drafts', 'تشغيل التوليد الذكي', {
+                                                    ...surfaceDetails,
+                                                    task_key: promptSuggestion.task_key,
+                                                    template_key: promptSuggestion.template_key,
+                                                });
+                                                runPromptOrchestrator.mutate({
+                                                    task_key: promptSuggestion.task_key,
+                                                    auto_apply: promptSuggestion.auto_apply_default,
+                                                });
+                                            }}
+                                            className="min-h-10 rounded-xl border border-fuchsia-400/30 bg-fuchsia-500/15 px-4 py-2 text-xs font-medium text-fuchsia-50 disabled:opacity-60"
+                                        >
+                                            {runPromptOrchestrator.isPending ? 'جاري التوليد...' : 'شغّل التوليد الذكي'}
+                                        </button>
+                                        <NextLink
+                                            href={promptSuggestion.playbook_href}
+                                            className="min-h-10 rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-xs text-slate-200"
+                                        >
+                                            راجع القالب
+                                        </NextLink>
+                                    </div>
+                                </div>
+                                <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+                                    {promptSuggestion.auto_filled_fields.slice(0, 4).map((field) => (
+                                        <div key={`${field.label}-${field.value}`} className="rounded-xl border border-white/10 bg-black/20 px-3 py-2">
+                                            <div className="text-[10px] text-slate-400">{field.label}</div>
+                                            <div className="mt-1 line-clamp-2 text-[11px] text-white">{field.value}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
                     {!showWriterMinimal && (
                     <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-[11px] text-gray-300" dir="rtl">
@@ -3191,6 +3336,28 @@ function WorkspaceDraftsPageContent() {
                         />
 
                         <WorkflowHelpPanel title="كيف نستخدم هذا المحرر الآن؟" items={contextualGuideItems} />
+
+                        {promptSuggestion && (
+                            <div className="rounded-xl border border-fuchsia-500/15 bg-black/20 p-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div>
+                                        <div className="text-xs font-medium text-fuchsia-100">كيف يملأ النظام القالب تلقائيًا؟</div>
+                                        <p className="mt-1 text-[11px] leading-6 text-slate-300">
+                                            هذا هو البرومبت العملي الذي سيُبنى تلقائيًا لهذه الحالة دون أن يكتبه الصحفي يدويًا.
+                                        </p>
+                                    </div>
+                                    <NextLink
+                                        href={promptSuggestion.playbook_href}
+                                        className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-[11px] text-slate-200"
+                                    >
+                                        افتح الدليل الكامل
+                                    </NextLink>
+                                </div>
+                                <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-xl border border-white/10 bg-slate-950/70 p-3 text-[11px] leading-7 text-slate-200">
+                                    {promptSuggestion.prompt_preview}
+                                </pre>
+                            </div>
+                        )}
 
                         <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1.1fr_0.9fr]">
                             <div className="rounded-xl border border-white/10 bg-black/20 p-3">

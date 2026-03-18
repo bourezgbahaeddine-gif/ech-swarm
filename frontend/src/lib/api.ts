@@ -708,6 +708,64 @@ export interface WorkspacePublishReadiness {
     gates: GateSummary;
 }
 
+export type WorkspaceOrchestratorTaskKey =
+    | 'first_draft'
+    | 'verify_claims'
+    | 'proofread'
+    | 'quality_review'
+    | 'headline_pack'
+    | 'social_pack'
+    | 'publish_gate';
+
+export interface WorkspacePromptAutofillField {
+    label: string;
+    value: string;
+}
+
+export interface WorkspacePromptSuggestion {
+    work_id: string;
+    article_id: number;
+    task_key: WorkspaceOrchestratorTaskKey;
+    task_label: string;
+    template_key: string;
+    template_title: string;
+    playbook_href: string;
+    reason: string;
+    rationale: string[];
+    auto_filled_fields: WorkspacePromptAutofillField[];
+    prompt_preview: string;
+    operation: string;
+    operation_payload: Record<string, unknown>;
+    auto_apply_default: boolean;
+    run_mode: 'background_task' | 'direct_check' | string;
+    word_count: number;
+}
+
+export interface WorkspaceOrchestratorRunResponse {
+    work_id: string;
+    task: WorkspacePromptSuggestion;
+    status: string;
+    result_type: 'suggestion' | 'claims' | 'quality' | 'headlines' | 'social' | 'readiness' | string;
+    applied: boolean;
+    draft?: WorkspaceDraft;
+    suggestion?: {
+        title?: string | null;
+        body_html?: string;
+        body_text?: string;
+        note?: string;
+        issues?: Array<Record<string, unknown>>;
+        diff?: string;
+        diff_html?: string;
+        diff_stats?: { added: number; removed: number };
+        preview?: { before_text?: string; after_text?: string };
+    } | null;
+    report?: FactCheckReport | Record<string, unknown>;
+    headlines?: Array<Record<string, unknown>>;
+    variants?: Record<string, string>;
+    readiness?: WorkspacePublishReadiness;
+    error?: string;
+}
+
 export interface StoryItemLink {
     id: number;
     link_type: 'article' | 'draft' | string;
@@ -1170,6 +1228,12 @@ export const editorialApi = {
         ),
     aiSocialVariants: (workId: string) =>
         api.post(`/editorial/workspace/drafts/${workId}/ai/social`),
+    workspacePromptSuggestion: (workId: string, taskKey?: WorkspaceOrchestratorTaskKey) =>
+        api.get<WorkspacePromptSuggestion>(`/editorial/workspace/drafts/${workId}/ai/orchestrator`, {
+            params: taskKey ? { task_key: taskKey } : undefined,
+        }),
+    runWorkspacePromptTask: (workId: string, data?: { task_key?: WorkspaceOrchestratorTaskKey; auto_apply?: boolean }) =>
+        api.post<WorkspaceOrchestratorRunResponse>(`/editorial/workspace/drafts/${workId}/ai/orchestrator/run`, data || {}),
     applyAiSuggestion: (workId: string, data: {
         title?: string | null;
         body: string;
