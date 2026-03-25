@@ -830,7 +830,7 @@ function WorkspaceDraftsPageContent() {
     const [explainExpanded, setExplainExpanded] = useState(false);
     const [reviewOpen, setReviewOpen] = useState(false);
     const [explainOpen, setExplainOpen] = useState(false);
-    const [toolsExpanded, setToolsExpanded] = useState(false);
+    const [toolsExpanded, setToolsExpanded] = useState(isWriterRole);
     const [showUrgentAll, setShowUrgentAll] = useState(false);
     const [showImproveAll, setShowImproveAll] = useState(false);
     const [showExtraAll, setShowExtraAll] = useState(false);
@@ -2325,16 +2325,17 @@ function WorkspaceDraftsPageContent() {
         setEditorStage('writing');
         setViewMode('write');
         setDetailsOpen(false);
-        setToolsExpanded(false);
+        setToolsExpanded(true);
         setHeaderToolsOpen(false);
         setCopilotOpen(false);
         setFocusMode(true);
     }, [articleId, isWriterRole, workId]);
 
-    const showSidePanels = detailsOpen && !focusMode;
+    const showSidePanels = detailsOpen && !focusMode && !isWriterRole;
     const mainSpanClass = showSidePanels ? 'xl:col-span-8' : 'xl:col-span-12';
     const isWritingStage = isWriterRole && editorStage === 'writing';
     const showWriterMinimal = isWritingStage && focusMode && !detailsOpen;
+    const showTechnicalDiagnostics = !isWriterRole || decisionDetailOpen;
 
     useEffect(() => {
         if (leftTab !== 'archive') return;
@@ -2744,7 +2745,7 @@ function WorkspaceDraftsPageContent() {
 
         if (mode === 'write') {
             setDetailsOpen(false);
-            setToolsExpanded(false);
+            setToolsExpanded(isWriterRole);
             setFocusMode(true);
             return;
         }
@@ -2756,7 +2757,7 @@ function WorkspaceDraftsPageContent() {
     function enterReviewStage() {
         setEditorStage('review');
         setDetailsOpen(true);
-        setToolsExpanded(false);
+        setToolsExpanded(isWriterRole ? true : false);
         setHeaderToolsOpen(false);
         setCopilotOpen(false);
         setFocusMode(false);
@@ -2766,7 +2767,7 @@ function WorkspaceDraftsPageContent() {
         setEditorStage('writing');
         setViewMode('write');
         setDetailsOpen(false);
-        setToolsExpanded(false);
+        setToolsExpanded(isWriterRole);
         setHeaderToolsOpen(false);
         setCopilotOpen(false);
         setFocusMode(true);
@@ -3415,10 +3416,10 @@ function WorkspaceDraftsPageContent() {
                             </div>
                         </div>
                     )}
-                    {detailsOpen && (
+                    {(isWriterRole || detailsOpen) && (
                         <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-3">
                             <div className="flex flex-wrap items-center justify-between gap-2">
-                                <div className="text-xs text-slate-300">أدوات إضافية عند الحاجة فقط</div>
+                                <div className="text-xs text-slate-300">أدوات التحرير السريعة داخل الصفحة</div>
                                 <div className="flex flex-wrap items-center gap-2">
                                     <button
                                         onClick={() => {
@@ -3431,18 +3432,14 @@ function WorkspaceDraftsPageContent() {
                                         <ShieldCheck className="w-4 h-4" />
                                         {runQuickCheck.isPending ? 'جاري الفحص...' : 'فحص سريع'}
                                     </button>
-                                    <button
-                                        onClick={() => setToolsExpanded((prev) => !prev)}
-                                        className="min-h-8 px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-slate-200 text-[11px]"
-                                    >
-                                        {toolsExpanded ? 'إخفاء أدوات التحسين' : 'إظهار أدوات التحسين'}
-                                    </button>
-                                    <button
-                                        onClick={() => setFocusMode((prev) => !prev)}
-                                        className="min-h-8 px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-slate-200 text-[11px]"
-                                    >
-                                        {focusMode ? 'إظهار الألواح الجانبية' : 'وضع التركيز'}
-                                    </button>
+                                    {!isWriterRole && (
+                                        <button
+                                            onClick={() => setToolsExpanded((prev) => !prev)}
+                                            className="min-h-8 px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-slate-200 text-[11px]"
+                                        >
+                                            {toolsExpanded ? 'إخفاء أدوات التحسين' : 'إظهار أدوات التحسين'}
+                                        </button>
+                                    )}
                                     <button
                                         onClick={() => setSmartHighlightEnabled((prev) => !prev)}
                                         className="min-h-8 px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-slate-200 text-[11px]"
@@ -3453,21 +3450,17 @@ function WorkspaceDraftsPageContent() {
                             </div>
                         </div>
                     )}
-                    {detailsOpen && toolsExpanded && (
+                    {(isWriterRole || detailsOpen) && toolsExpanded && (
                         <div className="flex flex-wrap gap-2">
                             <button disabled={runVerifier.isPending} onClick={() => runWithGuide('verify', () => runVerifier.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-cyan-500/20 border border-cyan-500/30 text-cyan-200 text-xs flex items-center gap-2 disabled:opacity-60"><SearchCheck className="w-4 h-4" />{runVerifier.isPending ? 'جاري التحقق...' : 'تحقق'}</button>
                             <button disabled={runProofread.isPending} onClick={() => runWithGuide('proofread', () => runProofread.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-lime-500/20 border border-lime-500/30 text-lime-200 text-xs disabled:opacity-60">{runProofread.isPending ? 'جاري التدقيق...' : 'تدقيق لغوي'}</button>
                             <button disabled={runQuality.isPending} onClick={() => runWithGuide('quality', () => runQuality.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs disabled:opacity-60">{runQuality.isPending ? 'جاري التقييم...' : 'جودة'}</button>
                             <button disabled={runReadiness.isPending} onClick={() => runWithGuide('publish_gate', () => runReadiness.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-200 text-xs disabled:opacity-60">{runReadiness.isPending ? 'جاري الفحص...' : 'بوابة النشر'}</button>
-                            {!isWriteMode && (
-                                <>
-                                    <button disabled={rewrite.isPending} onClick={() => runWithGuide('improve', () => rewrite.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-2 disabled:opacity-60"><Sparkles className="w-4 h-4" />{rewrite.isPending ? 'جاري التحسين...' : 'تحسين'}</button>
-                                    <button disabled={runHeadlines.isPending} onClick={() => runWithGuide('headlines', () => runHeadlines.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-200 text-xs disabled:opacity-60">{runHeadlines.isPending ? 'جاري التوليد...' : 'عناوين'}</button>
-                                    <button disabled={runSeo.isPending} onClick={() => runWithGuide('seo', () => runSeo.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-200 text-xs disabled:opacity-60">{runSeo.isPending ? 'جاري التحليل...' : 'SEO'}</button>
-                                    <button disabled={runLinks.isPending} onClick={() => runWithGuide('links', () => runLinks.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-teal-500/20 border border-teal-500/30 text-teal-200 text-xs disabled:opacity-60">{runLinks.isPending ? 'جاري جلب الروابط...' : 'روابط'}</button>
-                                    <button disabled={runSocial.isPending} onClick={() => runWithGuide('social', () => runSocial.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-sky-500/20 border border-sky-500/30 text-sky-200 text-xs disabled:opacity-60">{runSocial.isPending ? 'جاري التوليد...' : 'سوشيال'}</button>
-                                </>
-                            )}
+                            <button disabled={rewrite.isPending} onClick={() => runWithGuide('improve', () => rewrite.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-2 disabled:opacity-60"><Sparkles className="w-4 h-4" />{rewrite.isPending ? 'جاري التحسين...' : 'تحسين'}</button>
+                            <button disabled={runHeadlines.isPending} onClick={() => runWithGuide('headlines', () => runHeadlines.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-200 text-xs disabled:opacity-60">{runHeadlines.isPending ? 'جاري التوليد...' : 'عناوين'}</button>
+                            <button disabled={runSeo.isPending} onClick={() => runWithGuide('seo', () => runSeo.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-200 text-xs disabled:opacity-60">{runSeo.isPending ? 'جاري التحليل...' : 'SEO'}</button>
+                            <button disabled={runLinks.isPending} onClick={() => runWithGuide('links', () => runLinks.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-teal-500/20 border border-teal-500/30 text-teal-200 text-xs disabled:opacity-60">{runLinks.isPending ? 'جاري جلب الروابط...' : 'روابط'}</button>
+                            <button disabled={runSocial.isPending} onClick={() => runWithGuide('social', () => runSocial.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-sky-500/20 border border-sky-500/30 text-sky-200 text-xs disabled:opacity-60">{runSocial.isPending ? 'جاري التوليد...' : 'سوشيال'}</button>
                             {isAdvancedMode && (
                                 <button disabled={runAudienceSimulation.isPending} onClick={() => runWithGuide('audience_test', () => runAudienceSimulation.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-100 text-xs disabled:opacity-60">محاكي الجمهور</button>
                             )}
@@ -4253,50 +4246,58 @@ function WorkspaceDraftsPageContent() {
                                                 ))}
                                         </div>
                                     )}
-                                    <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-gray-300 space-y-1">
-                                        {Object.entries(readiness.reports || {}).map(([stage, report]) => (
-                                            <div key={stage} className="flex items-center justify-between gap-2">
-                                                <span>{STAGE_LABELS[stage] || stage}</span>
-                                                <div className="flex items-center gap-2">
-                                                    <span className={report?.passed ? 'text-emerald-300' : 'text-red-300'}>{report?.passed ? 'ناجح' : 'فشل'}</span>
-                                                    {!report?.passed && STAGE_ACTIONS[stage] && (
-                                                        <button
-                                                            onClick={() => decisionActionHandlers[STAGE_ACTIONS[stage] as DecisionActionId]()}
-                                                            className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-gray-200"
-                                                        >
-                                                            فتح
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                    {!!readiness.gates && (
-                                        <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-gray-200 space-y-2">
-                                            <p className="text-[11px] text-gray-400">
-                                                Gate Severities: blocker={readiness.gates.counts?.blocker || 0} · warn={readiness.gates.counts?.warn || 0} · info={readiness.gates.counts?.info || 0}
-                                            </p>
-                                            {([
-                                                { key: 'blocker', label: 'Blockers', style: 'border-red-500/30 bg-red-500/10 text-red-100' },
-                                                { key: 'warn', label: 'Warnings', style: 'border-amber-500/30 bg-amber-500/10 text-amber-100' },
-                                                { key: 'info', label: 'Info', style: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-100' },
-                                            ] as const).map((group) => {
-                                                const groupItems = (readiness.gates.items || []).filter((item) => item.severity === group.key);
-                                                if (groupItems.length === 0) return null;
-                                                return (
-                                                    <div key={group.key} className="space-y-1">
-                                                        <p className="text-[11px] uppercase tracking-wide text-gray-400">{group.label}</p>
-                                                        {groupItems.map((item, idx) => (
-                                                            <div
-                                                                key={`${group.key}-${item.code}-${idx}`}
-                                                                className={cn('rounded-lg border px-2 py-1', group.style)}
-                                                            >
-                                                                <p>{cleanText(item.message || '')}</p>
-                                                            </div>
-                                                        ))}
+                                    {showTechnicalDiagnostics ? (
+                                        <>
+                                            <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-gray-300 space-y-1">
+                                                {Object.entries(readiness.reports || {}).map(([stage, report]) => (
+                                                    <div key={stage} className="flex items-center justify-between gap-2">
+                                                        <span>{STAGE_LABELS[stage] || stage}</span>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className={report?.passed ? 'text-emerald-300' : 'text-red-300'}>{report?.passed ? 'ناجح' : 'فشل'}</span>
+                                                            {!report?.passed && STAGE_ACTIONS[stage] && (
+                                                                <button
+                                                                    onClick={() => decisionActionHandlers[STAGE_ACTIONS[stage] as DecisionActionId]()}
+                                                                    className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-gray-200"
+                                                                >
+                                                                    فتح
+                                                                </button>
+                                                            )}
+                                                        </div>
                                                     </div>
-                                                );
-                                            })}
+                                                ))}
+                                            </div>
+                                            {!!readiness.gates && (
+                                                <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-gray-200 space-y-2">
+                                                    <p className="text-[11px] text-gray-400">
+                                                        Gate Severities: blocker={readiness.gates.counts?.blocker || 0} · warn={readiness.gates.counts?.warn || 0} · info={readiness.gates.counts?.info || 0}
+                                                    </p>
+                                                    {([
+                                                        { key: 'blocker', label: 'Blockers', style: 'border-red-500/30 bg-red-500/10 text-red-100' },
+                                                        { key: 'warn', label: 'Warnings', style: 'border-amber-500/30 bg-amber-500/10 text-amber-100' },
+                                                        { key: 'info', label: 'Info', style: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-100' },
+                                                    ] as const).map((group) => {
+                                                        const groupItems = (readiness.gates.items || []).filter((item) => item.severity === group.key);
+                                                        if (groupItems.length === 0) return null;
+                                                        return (
+                                                            <div key={group.key} className="space-y-1">
+                                                                <p className="text-[11px] uppercase tracking-wide text-gray-400">{group.label}</p>
+                                                                {groupItems.map((item, idx) => (
+                                                                    <div
+                                                                        key={`${group.key}-${item.code}-${idx}`}
+                                                                        className={cn('rounded-lg border px-2 py-1', group.style)}
+                                                                    >
+                                                                        <p>{cleanText(item.message || '')}</p>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </>
+                                    ) : (
+                                        <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-[11px] text-slate-300">
+                                            تفاصيل التقرير التقني مخفية لتقليل التشويش. يمكنك إظهارها من زر «عرض التفاصيل».
                                         </div>
                                     )}
                                 </div>
