@@ -830,7 +830,7 @@ function WorkspaceDraftsPageContent() {
     const [explainExpanded, setExplainExpanded] = useState(false);
     const [reviewOpen, setReviewOpen] = useState(false);
     const [explainOpen, setExplainOpen] = useState(false);
-    const [toolsExpanded, setToolsExpanded] = useState(isWriterRole);
+    const [toolsExpanded, setToolsExpanded] = useState(true);
     const [showUrgentAll, setShowUrgentAll] = useState(false);
     const [showImproveAll, setShowImproveAll] = useState(false);
     const [showExtraAll, setShowExtraAll] = useState(false);
@@ -2745,7 +2745,7 @@ function WorkspaceDraftsPageContent() {
 
         if (mode === 'write') {
             setDetailsOpen(false);
-            setToolsExpanded(isWriterRole);
+            setToolsExpanded(true);
             setFocusMode(true);
             return;
         }
@@ -2757,7 +2757,7 @@ function WorkspaceDraftsPageContent() {
     function enterReviewStage() {
         setEditorStage('review');
         setDetailsOpen(true);
-        setToolsExpanded(isWriterRole ? true : false);
+        setToolsExpanded(true);
         setHeaderToolsOpen(false);
         setCopilotOpen(false);
         setFocusMode(false);
@@ -2767,7 +2767,7 @@ function WorkspaceDraftsPageContent() {
         setEditorStage('writing');
         setViewMode('write');
         setDetailsOpen(false);
-        setToolsExpanded(isWriterRole);
+        setToolsExpanded(true);
         setHeaderToolsOpen(false);
         setCopilotOpen(false);
         setFocusMode(true);
@@ -3416,41 +3416,37 @@ function WorkspaceDraftsPageContent() {
                             </div>
                         </div>
                     )}
-                    {(isWriterRole || detailsOpen) && (
-                        <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-3">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                                <div className="text-xs text-slate-300">أدوات التحرير السريعة داخل الصفحة</div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <button
-                                        onClick={() => {
-                                            trackUiAction('workspace_drafts', 'فحص سريع', surfaceDetails);
-                                            runWithGuide('quick_check', () => runQuickCheck.mutate());
-                                        }}
-                                        disabled={runQuickCheck.isPending}
-                                        className="min-h-8 px-3 py-2 rounded-lg bg-indigo-500/20 border border-indigo-500/30 text-indigo-100 text-[11px] flex items-center gap-2 disabled:opacity-60"
-                                    >
-                                        <ShieldCheck className="w-4 h-4" />
-                                        {runQuickCheck.isPending ? 'جاري الفحص...' : 'فحص سريع'}
-                                    </button>
-                                    {!isWriterRole && (
-                                        <button
-                                            onClick={() => setToolsExpanded((prev) => !prev)}
-                                            className="min-h-8 px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-slate-200 text-[11px]"
-                                        >
-                                            {toolsExpanded ? 'إخفاء أدوات التحسين' : 'إظهار أدوات التحسين'}
-                                        </button>
-                                    )}
-                                    <button
-                                        onClick={() => setSmartHighlightEnabled((prev) => !prev)}
-                                        className="min-h-8 px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-slate-200 text-[11px]"
-                                    >
-                                        {smartHighlightEnabled ? 'إيقاف التظليل' : 'تفعيل التظليل'}
-                                    </button>
-                                </div>
+                    <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-xs text-slate-300">أدوات التحرير السريعة داخل الصفحة</div>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                    onClick={() => {
+                                        trackUiAction('workspace_drafts', 'فحص سريع', surfaceDetails);
+                                        runWithGuide('quick_check', () => runQuickCheck.mutate());
+                                    }}
+                                    disabled={runQuickCheck.isPending}
+                                    className="min-h-8 px-3 py-2 rounded-lg bg-indigo-500/20 border border-indigo-500/30 text-indigo-100 text-[11px] flex items-center gap-2 disabled:opacity-60"
+                                >
+                                    <ShieldCheck className="w-4 h-4" />
+                                    {runQuickCheck.isPending ? 'جاري الفحص...' : 'فحص سريع'}
+                                </button>
+                                <button
+                                    onClick={() => setToolsExpanded((prev) => !prev)}
+                                    className="min-h-8 px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-slate-200 text-[11px]"
+                                >
+                                    {toolsExpanded ? 'إخفاء أدوات التحسين' : 'إظهار أدوات التحسين'}
+                                </button>
+                                <button
+                                    onClick={() => setSmartHighlightEnabled((prev) => !prev)}
+                                    className="min-h-8 px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-slate-200 text-[11px]"
+                                >
+                                    {smartHighlightEnabled ? 'إيقاف التظليل' : 'تفعيل التظليل'}
+                                </button>
                             </div>
                         </div>
-                    )}
-                    {(isWriterRole || detailsOpen) && toolsExpanded && (
+                    </div>
+                    {toolsExpanded && (
                         <div className="flex flex-wrap gap-2">
                             <button disabled={runVerifier.isPending} onClick={() => runWithGuide('verify', () => runVerifier.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-cyan-500/20 border border-cyan-500/30 text-cyan-200 text-xs flex items-center gap-2 disabled:opacity-60"><SearchCheck className="w-4 h-4" />{runVerifier.isPending ? 'جاري التحقق...' : 'تحقق'}</button>
                             <button disabled={runProofread.isPending} onClick={() => runWithGuide('proofread', () => runProofread.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-lime-500/20 border border-lime-500/30 text-lime-200 text-xs disabled:opacity-60">{runProofread.isPending ? 'جاري التدقيق...' : 'تدقيق لغوي'}</button>
