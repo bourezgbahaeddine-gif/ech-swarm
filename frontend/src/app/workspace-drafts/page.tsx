@@ -4012,19 +4012,19 @@ function WorkspaceDraftsPageContent() {
                                 dir="rtl"
                             />
                             {isWritingStage ? (
-                                <p className="mt-2 text-[11px] text-gray-500">???? ???????? ?? ???? ????? ??????. ????? ????? ???????? ??? ???????? ??? ??????? ???????.</p>
+                                <p className="mt-2 text-[11px] text-gray-500">ابدأ بالعنوان ثم اكتب المتن مباشرة. ستظهر أدوات المراجعة بعد الانتقال إلى المرحلة التالية.</p>
                             ) : (
-                                <p className="text-xs text-gray-500 mt-2">???? ?????: {workId} ? ??????? v{baseVersion}</p>
+                                <p className="text-xs text-gray-500 mt-2">معرف العمل: {workId} • الإصدار v{baseVersion}</p>
                             )}
                         </div>
                         {editor && (
                             <BubbleMenu editor={editor}>
                                 <div className="relative rounded-xl bg-gray-950/95 border border-white/20 p-1 flex gap-1 text-xs">
-                                    <button onClick={() => editor.chain().focus().toggleBold().run()} className="px-2 py-1 rounded bg-white/10">????</button>
+                                    <button onClick={() => editor.chain().focus().toggleBold().run()} className="px-2 py-1 rounded bg-white/10">عريض</button>
                                     {!isWritingStage && (
                                         <>
-                                            <button onClick={() => editor.chain().focus().toggleItalic().run()} className="px-2 py-1 rounded bg-white/10">????</button>
-                                            <button onClick={() => editor.chain().focus().toggleHighlight().run()} className="px-2 py-1 rounded bg-white/10">?????</button>
+                                            <button onClick={() => editor.chain().focus().toggleItalic().run()} className="px-2 py-1 rounded bg-white/10">مائل</button>
+                                            <button onClick={() => editor.chain().focus().toggleHighlight().run()} className="px-2 py-1 rounded bg-white/10">تمييز</button>
                                             <span className="w-px bg-white/10 mx-1" />
                                         </>
                                     )}
@@ -4032,13 +4032,13 @@ function WorkspaceDraftsPageContent() {
 
                                     {inlineAiOpen && (
                                         <div className="absolute right-0 top-full mt-2 w-44 rounded-xl border border-white/20 bg-gray-950/95 p-2 space-y-1 text-[11px] text-gray-200 z-20">
-                                            <button onClick={() => handleInlineAiAction('rewrite')} className="w-full text-right px-2 py-1 rounded bg-white/10">????? ?????</button>
-                                            <button onClick={() => handleInlineAiAction('shorten')} className="w-full text-right px-2 py-1 rounded bg-white/10">??????</button>
-                                            <button onClick={() => handleInlineAiAction('expand')} className="w-full text-right px-2 py-1 rounded bg-white/10">?????</button>
-                                            <button onClick={() => handleInlineAiAction('clarify')} className="w-full text-right px-2 py-1 rounded bg-white/10">?????</button>
+                                            <button onClick={() => handleInlineAiAction('rewrite')} className="w-full text-right px-2 py-1 rounded bg-white/10">إعادة صياغة</button>
+                                            <button onClick={() => handleInlineAiAction('shorten')} className="w-full text-right px-2 py-1 rounded bg-white/10">اختصار</button>
+                                            <button onClick={() => handleInlineAiAction('expand')} className="w-full text-right px-2 py-1 rounded bg-white/10">توسيع</button>
+                                            <button onClick={() => handleInlineAiAction('clarify')} className="w-full text-right px-2 py-1 rounded bg-white/10">توضيح</button>
                                             {!isWritingStage && (
                                                 <>
-                                                    <button onClick={() => setInlineSourceOpen((v) => !v)} className="w-full text-right px-2 py-1 rounded bg-white/10">????? ????</button>
+                                                    <button onClick={() => setInlineSourceOpen((v) => !v)} className="w-full text-right px-2 py-1 rounded bg-white/10">إضافة مصدر</button>
                                                     {inlineSourceOpen && (
                                                         <div className="mt-1 max-h-40 overflow-auto rounded-lg border border-white/10 bg-black/30 p-1 space-y-1">
                                                             {(sources || []).slice(0, 10).map((source) => (
@@ -4065,20 +4065,20 @@ function WorkspaceDraftsPageContent() {
 
                     {suggestion && (
                         <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 p-4 space-y-2">
-                            <h3 className="text-sm text-amber-200">?????? ??????? ????? ?????</h3>
+                            <h3 className="text-sm text-amber-200">اقتراح التحسين بصيغة واضحة</h3>
                             <div className="rounded-xl border border-amber-300/30 bg-black/25 p-3 text-xs text-amber-100 space-y-1" dir="rtl">
-                                <p>??????? ???????: {cleanText(suggestion.title || title || '???? ?????')}</p>
-                                <p>???????: +{suggestion?.diff_stats?.added || 0} / -{suggestion?.diff_stats?.removed || 0}</p>
+                                <p>العنوان المقترح: {cleanText(suggestion.title || title || 'بدون عنوان')}</p>
+                                <p>التعديل: +{suggestion?.diff_stats?.added || 0} / -{suggestion?.diff_stats?.removed || 0}</p>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                 <div className="rounded-xl border border-white/10 bg-black/20 p-2">
-                                    <p className="text-[11px] text-gray-400 mb-1">??? ???????</p>
+                                    <p className="text-[11px] text-gray-400 mb-1">قبل التحسين</p>
                                     <p className="text-sm leading-8 text-gray-100 whitespace-pre-wrap max-h-96 overflow-auto">
                                         {cleanText(suggestion?.preview?.before_text || htmlToReadableText(bodyHtml))}
                                     </p>
                                 </div>
                                 <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-2">
-                                    <p className="text-[11px] text-emerald-200 mb-1">??? ???????</p>
+                                    <p className="text-[11px] text-emerald-200 mb-1">بعد التحسين</p>
                                     <p className="text-sm leading-8 text-emerald-50 whitespace-pre-wrap max-h-96 overflow-auto">
                                         {cleanText(suggestion?.preview?.after_text || suggestion?.body_text || htmlToReadableText(suggestion?.body_html || ''))}
                                     </p>
@@ -4088,16 +4088,16 @@ function WorkspaceDraftsPageContent() {
                                 onClick={() => setShowTechnicalDiff((v) => !v)}
                                 className="px-2 py-1 rounded-lg bg-white/10 text-gray-200 text-[11px]"
                             >
-                                {showTechnicalDiff ? '????? ????? ??????' : '??? ????? ??????'}
+                                {showTechnicalDiff ? 'إخفاء الفرق التقني' : 'عرض الفرق التقني'}
                             </button>
                             {showTechnicalDiff && (
                                 <pre className="max-h-56 overflow-auto text-xs text-amber-50 bg-black/25 rounded-xl p-2" dir="ltr">
-                                    {normalizeDiffOutput(suggestion.diff || suggestion.diff_html || '') || '?? ???? ??? ????'}
+                                    {normalizeDiffOutput(suggestion.diff || suggestion.diff_html || '') || 'لا يوجد فرق تقني'}
                                 </pre>
                             )}
                             <div className="flex gap-2">
-                                <button onClick={() => applySuggestion.mutate()} className="px-3 py-2 rounded-xl bg-emerald-500/30 text-emerald-100 text-xs">???? ????? ?????</button>
-                                <button onClick={() => { setSuggestion(null); setShowTechnicalDiff(false); }} className="px-3 py-2 rounded-xl bg-white/10 text-gray-300 text-xs">???</button>
+                                <button onClick={() => applySuggestion.mutate()} className="px-3 py-2 rounded-xl bg-emerald-500/30 text-emerald-100 text-xs">قبول كنسخة جديدة</button>
+                                <button onClick={() => { setSuggestion(null); setShowTechnicalDiff(false); }} className="px-3 py-2 rounded-xl bg-white/10 text-gray-300 text-xs">رفض</button>
                             </div>
                         </div>
                     )}
@@ -4115,29 +4115,29 @@ function WorkspaceDraftsPageContent() {
                                 onClick={() => setLeftTab('drafts')}
                                 className={cn('px-3 py-1 rounded-lg text-[11px] border', leftTab === 'drafts' ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-100' : 'bg-white/5 border-white/10 text-gray-300')}
                             >
-                                ????????
+                                المسودات
                             </button>
                             <button
                                 onClick={() => setLeftTab('source')}
                                 className={cn('px-3 py-1 rounded-lg text-[11px] border', leftTab === 'source' ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-100' : 'bg-white/5 border-white/10 text-gray-300')}
                             >
-                                ??????
+                                المصدر
                             </button>
                             <button
                                 onClick={() => setLeftTab('archive')}
                                 className={cn('px-3 py-1 rounded-lg text-[11px] border', leftTab === 'archive' ? 'bg-amber-500/20 border-amber-500/40 text-amber-100' : 'bg-white/5 border-white/10 text-gray-300')}
                             >
-                                ???????
+                                الأرشيف
                             </button>
                         </div>
 
                         {leftTab === 'drafts' && (
                             <div>
-                                <h2 className="text-sm text-white mb-2">????????</h2>
+                                <h2 className="text-sm text-white mb-2">المسودات</h2>
                                 <div className="space-y-2 max-h-[260px] overflow-auto">
                                     {drafts.map((d) => (
                                         <button key={`${d.work_id}-${d.id}`} onClick={() => setWorkId(d.work_id)} className={cn('w-full text-right rounded-lg border p-2', workId === d.work_id ? 'border-emerald-400/40 bg-emerald-500/10' : 'border-white/10 bg-white/5')}>
-                                            <div className="text-xs text-gray-200">{truncate(cleanText(d.title || '???? ?????'), 58)}</div>
+                                            <div className="text-xs text-gray-200">{truncate(cleanText(d.title || 'بدون عنوان'), 58)}</div>
                                             <div className="text-[10px] text-gray-500 mt-1">{formatRelativeTime(d.updated_at)}</div>
                                         </button>
                                     ))}
@@ -4147,7 +4147,7 @@ function WorkspaceDraftsPageContent() {
                                         onClick={() => setDiffOpen(true)}
                                         className="px-2 py-1 rounded-lg bg-white/10 text-[10px] text-gray-200 border border-white/10"
                                     >
-                                        ?????? ?????
+                                        مقارنة النسخ
                                     </button>
                                     <button
                                         onClick={() => setStoryOpen(true)}
@@ -4161,12 +4161,12 @@ function WorkspaceDraftsPageContent() {
 
                         {leftTab === 'source' && (
                             <div>
-                                <h2 className="text-sm text-white mb-2">?????? ?????????</h2>
-                                {contextLoading ? <p className="text-xs text-gray-500">???? ???????...</p> : (
+                                <h2 className="text-sm text-white mb-2">المصدر والبيانات</h2>
+                                {contextLoading ? <p className="text-xs text-gray-500">جاري التحميل...</p> : (
                                     <div className="text-xs space-y-2" dir="rtl">
-                                        <p className="text-gray-200">{cleanText(context?.article?.original_title || '?? ???? ????? ????')}</p>
-                                        <p className="text-gray-400">{cleanText(context?.article?.router_rationale || '?? ???? ????? ?????')}</p>
-                                        <div className="rounded-xl border border-white/10 bg-black/25 p-2 text-gray-300 max-h-56 overflow-auto">{cleanText(context?.article?.summary || context?.article?.original_content || '?? ???? ?? ???? ????')}</div>
+                                        <p className="text-gray-200">{cleanText(context?.article?.original_title || 'لا يوجد عنوان مصدر')}</p>
+                                        <p className="text-gray-400">{cleanText(context?.article?.router_rationale || 'لا يوجد تفسير توجيه')}</p>
+                                        <div className="rounded-xl border border-white/10 bg-black/25 p-2 text-gray-300 max-h-56 overflow-auto">{cleanText(context?.article?.summary || context?.article?.original_content || 'لا يوجد نص مصدر متاح')}</div>
                                     </div>
                                 )}
                             </div>
@@ -4174,12 +4174,12 @@ function WorkspaceDraftsPageContent() {
 
                         {leftTab === 'archive' && (
                             <div className="space-y-2" dir="rtl">
-                                <h2 className="text-sm text-white">???????</h2>
+                                <h2 className="text-sm text-white">الأرشيف</h2>
                                 <div className="flex items-center gap-2">
                                     <input
                                         value={archiveQuery}
                                         onChange={(e) => setArchiveQuery(e.target.value)}
-                                        placeholder="???? ?? ????? ??????..."
+                                        placeholder="ابحث في أرشيف الشروق..."
                                         className="w-full rounded-xl bg-white/5 border border-white/15 px-3 py-2 text-xs text-white"
                                     />
                                     <button
@@ -4190,19 +4190,19 @@ function WorkspaceDraftsPageContent() {
                                         }}
                                         className="px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-100 text-xs disabled:opacity-60"
                                     >
-                                        {runArchiveSearch.isPending ? '???...' : '???'}
+                                        {runArchiveSearch.isPending ? 'بحث...' : 'بحث'}
                                     </button>
                                 </div>
                                 {archiveError && <p className="text-[11px] text-red-300">{archiveError}</p>}
                                 {archiveItems.length === 0 && !runArchiveSearch.isPending && (
-                                    <p className="text-[11px] text-gray-500">???? ????? ??????? ?? ???? ???.</p>
+                                    <p className="text-[11px] text-gray-500">اكتب كلمات مفتاحية ثم اضغط بحث.</p>
                                 )}
                                 <div className="space-y-2 max-h-[320px] overflow-auto">
                                     {archiveItems.map((item) => (
                                         <div key={`archive-${item.id}`} className="rounded-lg border border-white/10 bg-black/20 p-2">
-                                            <p className="text-xs text-gray-200 line-clamp-2">{cleanText(item.title || '???? ?????')}</p>
+                                            <p className="text-xs text-gray-200 line-clamp-2">{cleanText(item.title || 'بدون عنوان')}</p>
                                             <p className="text-[10px] text-gray-500 mt-1">
-                                                {item.published_at ? new Date(item.published_at).toLocaleDateString('ar-DZ') : '???? ?????'}
+                                                {item.published_at ? new Date(item.published_at).toLocaleDateString('ar-DZ') : 'بدون تاريخ'}
                                             </p>
                                             {item.summary && <p className="text-[11px] text-gray-400 mt-1 line-clamp-2">{cleanText(item.summary)}</p>}
                                             <div className="mt-2 flex items-center gap-2">
@@ -4210,7 +4210,7 @@ function WorkspaceDraftsPageContent() {
                                                     onClick={() => insertArchiveItem(item)}
                                                     className="px-2 py-1 rounded-lg bg-white/10 text-[10px] text-gray-200"
                                                 >
-                                                    ?????
+                                                    إدراج
                                                 </button>
                                                 {item.url && (
                                                     <a
@@ -4219,7 +4219,7 @@ function WorkspaceDraftsPageContent() {
                                                         rel="noreferrer"
                                                         className="text-[10px] text-cyan-300 underline decoration-dotted"
                                                     >
-                                                        ??? ??????
+                                                        فتح المصدر
                                                     </a>
                                                 )}
                                             </div>
@@ -4243,30 +4243,30 @@ function WorkspaceDraftsPageContent() {
                 <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-4" dir="rtl">
                     <div className="flex items-center justify-between">
                         <div>
-                            <h2 className="text-sm text-white font-semibold">????? ??????</h2>
-                            <p className="text-[11px] text-gray-400">?????? ????? ???? ?????.</p>
+                            <h2 className="text-sm text-white font-semibold">ملخص القرار</h2>
+                            <p className="text-[11px] text-gray-400">نظرة سريعة تساعدك على اتخاذ القرار.</p>
                         </div>
                         <div className="flex items-center gap-2">
                             <button
                                 onClick={() => setDecisionDetailOpen((prev) => !prev)}
                                 className="rounded-lg border border-white/15 bg-white/10 px-2 py-1 text-[10px] text-gray-200"
                             >
-                                {decisionDetailOpen ? '????? ????????' : '??? ????????'}
+                                {decisionDetailOpen ? 'إخفاء التفاصيل' : 'عرض التفاصيل'}
                             </button>
                             <button
                                 onClick={() => decisionActionHandlers.quick_check()}
                                 className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[10px] text-emerald-200"
                             >
-                                ??? ????
+                                فحص سريع
                             </button>
                         </div>
                     </div>
 
                     {blockerSummary.count > 0 ? (
                         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-amber-100">
-                            <p className="font-semibold">??????? ???? ?????: {blockerSummary.count}</p>
+                            <p className="font-semibold">ملاحظات جودة عاجلة: {blockerSummary.count}</p>
                             <p className="text-[10px] text-amber-200 mt-1">
-                                {blockerSummary.top?.title || '???? ????????? ??? ???????.'}
+                                {blockerSummary.top?.title || 'لا توجد ملاحظات حرجة الآن.'}
                             </p>
                             <div className="mt-2 flex flex-wrap gap-2">
                                 {isJournalist && (
@@ -4275,7 +4275,7 @@ function WorkspaceDraftsPageContent() {
                                         disabled={selfApproveDraft.isPending || !hasSubmissionBody}
                                         className="px-2 py-1 rounded bg-cyan-500/20 border border-cyan-500/30 text-[10px] text-cyan-100 disabled:opacity-60"
                                     >
-                                        {selfApproveDraft.isPending ? '???? ????????...' : '?????? ?????'}
+                                        {selfApproveDraft.isPending ? 'جاري الاعتماد...' : 'اعتماد مباشر'}
                                     </button>
                                 )}
                                 <button
@@ -4283,13 +4283,13 @@ function WorkspaceDraftsPageContent() {
                                     disabled={!workId}
                                     className="px-2 py-1 rounded bg-amber-500/20 border border-amber-500/30 text-[10px] text-amber-100 disabled:opacity-60"
                                 >
-                                    ????? ??????
+                                    إرسال بتحفّظ
                                 </button>
                             </div>
                         </div>
                     ) : (
                         <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-2 text-[11px] text-emerald-100">
-                            ?? ???? ??????? ???? ????? ??????.
+                            لا توجد عوائق تمنع الاعتماد الآن.
                         </div>
                     )}
 
@@ -4305,19 +4305,19 @@ function WorkspaceDraftsPageContent() {
                         }}
                     />
 
-                    <WorkflowHelpPanel title="??? ?????? ??? ?????? ?????" items={contextualGuideItems} />
+                    <WorkflowHelpPanel title="كيف نستخدم هذا المحرر الآن؟" items={contextualGuideItems} />
 
                     <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
-                        <p className="text-xs text-gray-300">???? ???????? ?????????</p>
+                        <p className="text-xs text-gray-300">ملخص الملاحظات التشغيلية</p>
                         <div className="space-y-2">
                             {decisionSectionsForView.map((section) => (
                                 <div key={section.title} className="rounded-lg border border-white/10 bg-white/5 p-2 space-y-2">
                                     <div className="flex items-center justify-between gap-2">
                                         <p className="text-xs text-gray-200">{section.title}</p>
-                                        <span className="text-[10px] text-gray-400">{section.items.length} ??????</span>
+                                        <span className="text-[10px] text-gray-400">{section.items.length} عنصر</span>
                                     </div>
                                     {section.items.length === 0 && (
-                                        <p className="text-[11px] text-gray-500">?? ???? ??????? ??????.</p>
+                                        <p className="text-[11px] text-gray-500">لا توجد ملاحظات إضافية.</p>
                                     )}
                                     {section.items.map((item) => {
                                         const styles = severityStyles(item.severity);
@@ -4335,7 +4335,7 @@ function WorkspaceDraftsPageContent() {
                                                         onClick={() => decisionActionHandlers[item.action as DecisionActionId]()}
                                                         className="px-2 py-1 rounded bg-white/10 text-[10px] text-gray-200"
                                                     >
-                                                        ??? ??????
+                                                        فتح
                                                     </button>
                                                 )}
                                             </div>
