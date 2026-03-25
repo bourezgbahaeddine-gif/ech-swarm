@@ -2336,6 +2336,7 @@ function WorkspaceDraftsPageContent() {
     const isWritingStage = isWriterRole && editorStage === 'writing';
     const showWriterMinimal = isWritingStage && focusMode && !detailsOpen;
     const showTechnicalDiagnostics = !isWriterRole || decisionDetailOpen;
+    const showInlineResults = toolsExpanded && (detailsOpen || isWriterRole);
 
     useEffect(() => {
         if (leftTab !== 'archive') return;
@@ -4055,7 +4056,7 @@ function WorkspaceDraftsPageContent() {
                         </div>
                     </Panel>
 
-                    {detailsOpen && toolsExpanded && (
+                    {showInlineResults && (
                     <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4">
                         <div className="flex gap-2 overflow-x-auto pb-1 xl:flex-wrap xl:overflow-visible">
                             {visibleTabs.map((t) => (
@@ -4065,7 +4066,7 @@ function WorkspaceDraftsPageContent() {
                     </div>
                     )}
 
-                    {detailsOpen && toolsExpanded && activeTab === 'evidence' && (
+                    {showInlineResults && activeTab === 'evidence' && (
                         <Panel title="نتائج التحقق">
                             {claims.length ? (
                                 <div className="space-y-2">
@@ -4162,7 +4163,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {detailsOpen && toolsExpanded && activeTab === 'proofread' && (
+                    {showInlineResults && activeTab === 'proofread' && (
                         <Panel title="نتائج التدقيق اللغوي">
                             {proofread ? (
                                 <div className="space-y-2 text-xs text-gray-200">
@@ -4214,7 +4215,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {detailsOpen && toolsExpanded && activeTab === 'quality' && (
+                    {showInlineResults && activeTab === 'quality' && (
                         <Panel title="تقييم الجودة">
                             {quality ? (
                                 <div className="space-y-2 text-xs text-gray-200">
@@ -4301,7 +4302,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {detailsOpen && toolsExpanded && activeTab === 'seo' && (
+                    {showInlineResults && activeTab === 'seo' && (
                         <Panel title="نتائج SEO">
                             {seoPack ? (
                                 <div className="space-y-2 text-xs text-gray-200">
@@ -4427,7 +4428,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {detailsOpen && toolsExpanded && activeTab === 'social' && (
+                    {showInlineResults && activeTab === 'social' && (
                         <Panel title="نسخ السوشيال">
                             {social ? (
                                 <div className="space-y-2 text-xs text-gray-200">
@@ -4441,7 +4442,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {detailsOpen && toolsExpanded && activeTab === 'msi' && (
+                    {showInlineResults && activeTab === 'msi' && (
                         <Panel title="MSI السياقي">
                             {msiContextHit ? (
                                 <div className={cn('rounded-xl border p-2 text-xs', Number(msiContextHit.msi || 100) < 60 ? 'border-red-500/30 bg-red-500/10 text-red-100' : 'border-amber-500/30 bg-amber-500/10 text-amber-100')}>
@@ -4474,7 +4475,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {detailsOpen && toolsExpanded && activeTab === 'simulator' && (
+                    {showInlineResults && activeTab === 'simulator' && (
                         <Panel title="محاكي الجمهور">
                             {simResult ? (
                                 <div className="space-y-2 text-xs text-gray-200">
@@ -4506,7 +4507,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {detailsOpen && toolsExpanded && activeTab === 'xray' && (
+                    {showInlineResults && activeTab === 'xray' && (
                         <Panel title="زوايا المنافسين">
                             {xrayItems.length ? (
                                 <div className="space-y-2 text-xs text-gray-200">
@@ -4554,7 +4555,7 @@ function WorkspaceDraftsPageContent() {
                         </Panel>
                     )}
 
-                    {detailsOpen && toolsExpanded && activeTab === 'context' && (
+                    {showInlineResults && activeTab === 'context' && (
                         <Panel title="السياق والنسخ">
                             <div className="space-y-1 max-h-32 overflow-auto">
                                 {versions.map((v) => <button key={v.id} onClick={() => restoreVersion.mutate(v.version)} className="w-full text-right rounded bg-white/5 px-2 py-1 text-xs text-gray-200">الإصدار v{v.version} • {v.change_origin || 'يدوي'}</button>)}
