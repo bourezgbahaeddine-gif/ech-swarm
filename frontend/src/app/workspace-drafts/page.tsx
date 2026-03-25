@@ -2325,19 +2325,548 @@ function WorkspaceDraftsPageContent() {
         lastSimplifiedWorkRef.current = marker;
         setEditorStage('writing');
         setViewMode('write');
-        setDetailsOpen(false);
+        setDetailsOpen(true);
         setToolsExpanded(true);
         setHeaderToolsOpen(false);
         setCopilotOpen(false);
-        setFocusMode(true);
+        setFocusMode(false);
     }, [articleId, isWriterRole, workId]);
 
-    const showSidePanels = detailsOpen && !focusMode && !isWriterRole;
-    const mainSpanClass = showSidePanels ? 'xl:col-span-8' : 'xl:col-span-12';
+    const showSidePanels = !focusMode;
+    const mainSpanClass = showSidePanels ? 'xl:col-span-7' : 'xl:col-span-12';
     const isWritingStage = isWriterRole && editorStage === 'writing';
     const showWriterMinimal = isWritingStage && focusMode && !detailsOpen;
     const showTechnicalDiagnostics = !isWriterRole || decisionDetailOpen;
     const showInlineResults = toolsExpanded && (detailsOpen || isWriterRole);
+
+    const reportPanels = (
+        <>
+        {showInlineResults && (
+        <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4">
+            <div className="flex gap-2 overflow-x-auto pb-1 xl:flex-wrap xl:overflow-visible">
+                {visibleTabs.map((t) => (
+                    <button key={t.id} onClick={() => setActiveTab(t.id)} className={cn('shrink-0 min-h-9 px-2 py-1 rounded-lg text-[11px]', activeTab === t.id ? 'bg-emerald-500/20 text-emerald-200' : 'bg-white/10 text-gray-300')}>{t.label}</button>
+                ))}
+            </div>
+        </div>
+        )}
+
+        {showInlineResults && activeTab === 'evidence' && (
+            <Panel title="نتائج التحقق">
+                {claims.length ? (
+                    <div className="space-y-2">
+                        {claims.map((claim) => {
+                            const claimId = String(claim?.id || '');
+                            const draft = claimOverrideDrafts[claimId] || claimDraftFromClaim(claim);
+                            const sourceInfo = classifyClaimSource(claim?.text || '');
+                            const sourceStyles = severityStyles(sourceInfo.severity);
+                            return (
+                                <div
+                                    key={claimId}
+                                    className={cn(
+                                        'rounded-xl border p-2 text-xs space-y-2',
+                                        claim?.blocking ? 'border-red-500/30 bg-red-500/10' : 'border-emerald-500/30 bg-emerald-500/10',
+                                    )}
+                                >
+                                    <div className="flex items-start justify-between gap-2">
+                                        <p className="text-gray-100 flex-1">{cleanText(claim?.text || '')}</p>
+                                        <div className="shrink-0 flex flex-col items-end gap-1">
+                                            <span className={cn('rounded px-2 py-0.5 text-[10px]', claim?.blocking ? 'bg-red-500/20 text-red-100' : 'bg-emerald-500/20 text-emerald-100')}>
+                                                {Math.round(Number(claim?.confidence || 0) * 100)}% ثقة
+                                            </span>
+                                            <span className={cn(
+                                                'rounded px-2 py-0.5 text-[10px] uppercase',
+                                                claim?.risk_level === 'high'
+                                                    ? 'bg-red-500/20 text-red-100'
+                                                    : claim?.risk_level === 'medium'
+                                                        ? 'bg-amber-500/20 text-amber-100'
+                                                        : 'bg-cyan-500/20 text-cyan-100',
+                                            )}>
+                                                {String(claim?.risk_level || 'low')}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div className={cn('rounded-lg border px-2 py-1 text-[10px]', sourceStyles.border)}>
+                                        <div className="flex items-center justify-between gap-2">
+                                            <span className={cn('px-2 py-0.5 rounded text-[10px]', sourceStyles.badge)}>
+                                                {sourceInfo.label}
+                                            </span>
+                                            <span className="text-gray-400">تصنيف المصدر</span>
+                                        </div>
+                                        <p className="text-gray-200 mt-1">{sourceInfo.reason}</p>
+                                    </div>
+                                    <textarea
+                                        value={draft.evidenceLinksRaw}
+                                        onChange={(e) => setClaimOverrideDraftField(claimId, { evidenceLinksRaw: e.target.value })}
+                                        placeholder="روابط الأدلة أو مراجع DocIntel (سطر لكل مرجع أو مفصولة بفاصلة)"
+                                        className="w-full min-h-14 rounded-lg bg-black/20 border border-white/15 px-2 py-1 text-[11px] text-gray-100 placeholder:text-gray-500"
+                                    />
+                                    {sources.length > 0 && (
+                                        <div className="flex flex-wrap gap-1">
+                                            {sources.slice(0, 6).map((source) => (
+                                                <button
+                                                    key={`claim-source-${claimId}-${source.id}`}
+                                                    onClick={() =>
+                                                        setClaimOverrideDraftField(claimId, {
+                                                            evidenceLinksRaw: appendEvidenceLink(
+                                                                draft.evidenceLinksRaw,
+                                                                source.url || source.name,
+                                                            ),
+                                                        })
+                                                    }
+                                                    className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-gray-200"
+                                                >
+                                                    {cleanText(source.name || source.url)}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                    <label className="flex items-center gap-2 text-[11px] text-gray-200">
+                                        <input
+                                            type="checkbox"
+                                            checked={Boolean(draft.unverifiable)}
+                                            onChange={(e) => setClaimOverrideDraftField(claimId, { unverifiable: e.target.checked })}
+                                        />
+                                        تعليم الادعاء كغير قابل للتحقق مع سبب
+                                    </label>
+                                    {draft.unverifiable && (
+                                        <input
+                                            value={draft.unverifiableReason}
+                                            onChange={(e) => setClaimOverrideDraftField(claimId, { unverifiableReason: e.target.value })}
+                                            placeholder="سبب عدم إمكانية التحقق"
+                                            className="w-full rounded-lg bg-black/20 border border-white/15 px-2 py-1 text-[11px] text-gray-100 placeholder:text-gray-500"
+                                        />
+                                    )}
+                                </div>
+                            );
+                        })}
+                        <p className="text-[11px] text-gray-400">
+                            عند الضغط على «تحقق»، يتم إرسال روابط الأدلة/حالات عدم التحقق الحالية لبوابة الجودة.
+                        </p>
+                    </div>
+                ) : <Empty text="اضغط زر «تحقق» لعرض الادعاءات." />}
+            </Panel>
+        )}
+
+        {showInlineResults && activeTab === 'proofread' && (
+            <Panel title="نتائج التدقيق اللغوي">
+                {proofread ? (
+                    <div className="space-y-2 text-xs text-gray-200">
+                        <div className="rounded-xl border border-lime-500/30 bg-lime-500/10 p-2 text-lime-100">
+                            <p>العنوان المقترح: {cleanText(proofread?.title || title || 'بدون عنوان')}</p>
+                            <p>التعديل: +{proofread?.diff_stats?.added || 0} / -{proofread?.diff_stats?.removed || 0}</p>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-black/20 p-2">
+                            <p className="text-gray-400 mb-1">قبل التدقيق</p>
+                            <p className="text-gray-200 whitespace-pre-wrap max-h-40 overflow-auto">
+                                {cleanText(proofread?.preview?.before_text || htmlToReadableText(bodyHtml))}
+                            </p>
+                        </div>
+                        <div className="rounded-xl border border-lime-500/30 bg-lime-500/10 p-2">
+                            <p className="text-lime-100 mb-1">بعد التدقيق</p>
+                            <p className="text-lime-50 whitespace-pre-wrap max-h-40 overflow-auto">
+                                {cleanText(proofread?.preview?.after_text || proofread?.body_text || htmlToReadableText(proofread?.body_html || ''))}
+                            </p>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-gray-300">
+                            <p className="text-gray-400 mb-1">ملاحظات التدقيق</p>
+                            {(proofread?.issues || []).length ? (
+                                (proofread.issues || []).slice(0, 12).map((issue: any, idx: number) => (
+                                    <p key={`${issue?.kind || 'issue'}-${idx}`}>
+                                        - [{cleanText(issue?.kind || 'language')}] {cleanText(issue?.message || '')}
+                                    </p>
+                                ))
+                            ) : (
+                                <p>لا توجد ملاحظات إضافية.</p>
+                            )}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            <button
+                                onClick={() => applyProofread.mutate()}
+                                disabled={applyProofread.isPending}
+                                className="px-3 py-2 rounded-xl bg-emerald-500/30 text-emerald-100 text-xs disabled:opacity-60"
+                            >
+                                {applyProofread.isPending ? 'جاري التطبيق...' : 'تطبيق كنسخة جديدة'}
+                            </button>
+                            <button
+                                onClick={() => setProofread(null)}
+                                className="px-3 py-2 rounded-xl bg-white/10 text-gray-300 text-xs"
+                            >
+                                تجاهل
+                            </button>
+                        </div>
+                    </div>
+                ) : <Empty text="اضغط زر «تدقيق لغوي» لعرض التصحيحات." />}
+            </Panel>
+        )}
+
+        {showInlineResults && activeTab === 'quality' && (
+            <Panel title="تقييم الجودة">
+                {quality ? (
+                    <div className="space-y-2 text-xs text-gray-200">
+                        <div className="rounded-xl border border-white/10 bg-white/5 p-2">الدرجة الكلية: <span className="font-semibold">{quality.score ?? '-'}/100</span></div>
+                        {Object.entries(quality.metrics || {}).map(([k, v]) => (
+                            <div key={k} className="flex items-center justify-between rounded-lg bg-black/20 px-2 py-1 text-gray-300"><span>{METRIC_LABELS[k] || k}</span><span>{String(v)}</span></div>
+                        ))}
+                        {!!quality.actionable_fixes?.length && <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-2 text-amber-100">{quality.actionable_fixes.map((f: string, i: number) => <p key={`${f}-${i}`}>- {cleanText(f)}</p>)}</div>}
+                    </div>
+                ) : <Empty text="اضغط زر «جودة» للحصول على التقرير." />}
+                {readiness && (
+                    <div className="mt-2 space-y-2 text-xs">
+                        <div className={cn('rounded-xl border p-2', readiness.ready_for_publish ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100' : 'border-amber-500/30 bg-amber-500/10 text-amber-100')}>
+                            {readiness.ready_for_publish ? 'جاهزية ممتازة للنشر بعد المراجعة البشرية.' : 'التقييمات تحتاج تحسين، لكنها لا توقف كتابة الصحفي.'}
+                        </div>
+                        {!readiness.ready_for_publish && (
+                            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-2 text-amber-100 space-y-1">
+                                {explainedBlockers.length === 0
+                                    ? <p className="text-[11px]">لا توجد تفاصيل إضافية بعد.</p>
+                                    : explainedBlockers.map((item, i) => (
+                                        <div key={`ready-${i}`} className="text-[11px]">
+                                            <span className="font-semibold">{item.title}</span>
+                                            <span className="text-amber-100/80"> — {item.detail}</span>
+                                        </div>
+                                    ))}
+                            </div>
+                        )}
+                        {showTechnicalDiagnostics ? (
+                            <>
+                                <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-gray-300 space-y-1">
+                                    {Object.entries(readiness.reports || {}).map(([stage, report]) => (
+                                        <div key={stage} className="flex items-center justify-between gap-2">
+                                            <span>{STAGE_LABELS[stage] || stage}</span>
+                                            <div className="flex items-center gap-2">
+                                                <span className={report?.passed ? 'text-emerald-300' : 'text-red-300'}>{report?.passed ? 'ناجح' : 'فشل'}</span>
+                                                {!report?.passed && STAGE_ACTIONS[stage] && (
+                                                    <button
+                                                        onClick={() => decisionActionHandlers[STAGE_ACTIONS[stage] as DecisionActionId]()}
+                                                        className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-gray-200"
+                                                    >
+                                                        فتح
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                {!!readiness.gates && (
+                                    <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-gray-200 space-y-2">
+                                        <p className="text-[11px] text-gray-400">
+                                            Gate Severities: blocker={readiness.gates.counts?.blocker || 0} · warn={readiness.gates.counts?.warn || 0} · info={readiness.gates.counts?.info || 0}
+                                        </p>
+                                        {([
+                                            { key: 'blocker', label: 'Blockers', style: 'border-red-500/30 bg-red-500/10 text-red-100' },
+                                            { key: 'warn', label: 'Warnings', style: 'border-amber-500/30 bg-amber-500/10 text-amber-100' },
+                                            { key: 'info', label: 'Info', style: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-100' },
+                                        ] as const).map((group) => {
+                                            const groupItems = (readiness.gates.items || []).filter((item) => item.severity === group.key);
+                                            if (groupItems.length === 0) return null;
+                                            return (
+                                                <div key={group.key} className="space-y-1">
+                                                    <p className="text-[11px] uppercase tracking-wide text-gray-400">{group.label}</p>
+                                                    {groupItems.map((item, idx) => (
+                                                        <div
+                                                            key={`${group.key}-${item.code}-${idx}`}
+                                                            className={cn('rounded-lg border px-2 py-1', group.style)}
+                                                        >
+                                                            <p>{cleanText(item.message || '')}</p>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </>
+                        ) : (
+                            <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-[11px] text-slate-300">
+                                تفاصيل التقرير التقني مخفية لتقليل التشويش. يمكنك إظهارها من زر «عرض التفاصيل».
+                            </div>
+                        )}
+                    </div>
+                )}
+            </Panel>
+        )}
+
+        {showInlineResults && activeTab === 'seo' && (
+            <Panel title="نتائج SEO">
+                {seoPack ? (
+                    <div className="space-y-2 text-xs text-gray-200">
+                        <InfoBlock label="عنوان SEO" value={seoPack.seo_title} />
+                        <InfoBlock label="الوصف التعريفي" value={seoPack.meta_description} />
+                        <InfoBlock label="العبارة المفتاحية الرئيسية" value={seoPack.focus_keyphrase} />
+                        <InfoBlock label="عبارات مفتاحية ثانوية" value={(seoPack.secondary_keyphrases || []).join('، ')} />
+                        <InfoBlock label="الكلمات المفتاحية" value={(seoPack.keywords || []).join('، ')} />
+                        <InfoBlock label="الوسوم" value={(seoPack.tags || []).join('، ')} />
+                        <InfoBlock label="Slug" value={seoPack.slug} />
+                        <InfoBlock label="OG Title" value={seoPack.og_title} />
+                        <InfoBlock label="OG Description" value={seoPack.og_description} />
+                        <InfoBlock label="Twitter Title" value={seoPack.twitter_title} />
+                        <InfoBlock label="Twitter Description" value={seoPack.twitter_description} />
+                        <div className={cn(
+                            'rounded-lg border p-2 text-[11px]',
+                            seoPack?.yoast?.meta_ok && seoPack?.yoast?.title_ok
+                                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100'
+                                : 'border-amber-500/30 bg-amber-500/10 text-amber-100'
+                        )}>
+                            <p>جاهزية Yoast:</p>
+                            <p>- طول Meta: {seoPack?.yoast?.meta_length ?? 0} (المطلوب 140-155)</p>
+                            <p>- طول SEO Title: {seoPack?.yoast?.title_length ?? 0} (الموصى به 40-60)</p>
+                        </div>
+                    </div>
+                ) : <Empty text="اضغط زر «SEO» لاستخراج المقترحات." />}
+                <div className="mt-3 rounded-xl border border-teal-500/30 bg-teal-500/10 p-2 space-y-2 text-xs text-teal-100">
+                    <p className="font-semibold">Link Intelligence (داخلي + خارجي)</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <select
+                            value={linkMode}
+                            onChange={(e) => setLinkMode(e.target.value as 'internal' | 'external' | 'mixed')}
+                            className="rounded-lg bg-black/30 border border-white/20 px-2 py-1 text-xs text-white"
+                        >
+                            <option value="mixed">مختلط</option>
+                            <option value="internal">داخلي فقط</option>
+                            <option value="external">خارجي فقط</option>
+                        </select>
+                        <button
+                            onClick={() => runLinks.mutate()}
+                            disabled={runLinks.isPending}
+                            className="px-2 py-1 rounded-lg bg-teal-500/30 border border-teal-400/40 text-teal-50 disabled:opacity-50"
+                        >
+                            {runLinks.isPending ? 'جاري التوليد...' : 'توليد روابط'}
+                        </button>
+                        <button
+                            onClick={() => validateLinks.mutate()}
+                            disabled={!linkRunId || validateLinks.isPending}
+                            className="px-2 py-1 rounded-lg bg-white/10 border border-white/20 text-gray-200 disabled:opacity-50"
+                        >
+                            فحص الروابط
+                        </button>
+                        <button
+                            onClick={() => applyLinks.mutate()}
+                            disabled={!linkRunId || applyLinks.isPending || !linkSuggestions.length}
+                            className="px-2 py-1 rounded-lg bg-emerald-500/30 border border-emerald-400/40 text-emerald-50 disabled:opacity-50"
+                        >
+                            تطبيق المحدد
+                        </button>
+                    </div>
+                    {linkRunId ? <p className="text-[11px] text-teal-50/80">Run ID: {linkRunId}</p> : null}
+
+                    {!!linkSuggestions.length && (
+                        <div className="space-y-1 max-h-64 overflow-auto">
+                            {linkSuggestions.map((item: any) => (
+                                <label key={`lnk-${item.id}`} className="block rounded-lg border border-white/15 bg-black/20 p-2 cursor-pointer">
+                                    <div className="flex items-start gap-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={item.selected !== false}
+                                            onChange={(e) =>
+                                                setLinkSuggestions((prev) =>
+                                                    prev.map((x: any) =>
+                                                        x.id === item.id ? { ...x, selected: e.target.checked } : x
+                                                    )
+                                                )
+                                            }
+                                        />
+                                        <div className="min-w-0 flex-1">
+                                            <p className="text-teal-100 line-clamp-1">{cleanText(item.title || '')}</p>
+                                            <p className="text-gray-300 line-clamp-1">{cleanText(item.anchor_text || '')}</p>
+                                            <p className="text-[11px] text-gray-400 line-clamp-1">{item.url}</p>
+                                            <p className="text-[11px] text-gray-400">
+                                                {item.link_type === 'external' ? 'خارجي' : 'داخلي'} •
+                                                Score {Number(item.score || 0).toFixed(2)} •
+                                                ثقة {Math.round(Number(item.confidence || 0) * 100)}%
+                                            </p>
+                                        </div>
+                                    </div>
+                                </label>
+                            ))}
+                        </div>
+                    )}
+
+                    {!!linkHistory.length && (
+                        <div className="rounded-lg border border-white/10 bg-black/20 p-2">
+                            <p className="text-gray-300 mb-1">آخر تشغيلات الروابط</p>
+                            {(linkHistory || []).slice(0, 3).map((run: any) => (
+                                <p key={`hist-${run.run_id}`} className="text-[11px] text-gray-400">
+                                    {run.mode} • {run.status} • {run.run_id}
+                                </p>
+                            ))}
+                        </div>
+                    )}
+                </div>
+                {!!headlineInsights.length && (
+                    <div className="mt-2 rounded-xl border border-white/10 bg-black/20 p-2 text-xs text-gray-200 space-y-2">
+                        <p className="text-gray-400 mb-1">تحليل العناوين (وضوح + SEO)</p>
+                        {headlineInsights.map((item, idx) => (
+                            <div key={`headline-${idx}-${item.headline}`} className="rounded-lg border border-white/10 bg-black/20 p-2 space-y-1">
+                                <div className="flex items-center justify-between gap-2">
+                                    <p className="text-gray-200 line-clamp-2">{cleanText(item.headline || '')}</p>
+                                    <span className={cn('px-2 py-0.5 rounded text-[10px]', item.score >= 80 ? 'bg-emerald-500/20 text-emerald-100' : item.score >= 65 ? 'bg-amber-500/20 text-amber-100' : 'bg-rose-500/20 text-rose-100')}>
+                                        {item.score}/100
+                                    </span>
+                                </div>
+                                {!!item.reasons?.length && <p className="text-[10px] text-emerald-200">أسباب القوة: {item.reasons.slice(0, 2).join(' • ')}</p>}
+                                {!!item.risks?.length && <p className="text-[10px] text-amber-200">مخاطر: {item.risks.slice(0, 2).join(' • ')}</p>}
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </Panel>
+        )}
+
+        {showInlineResults && activeTab === 'social' && (
+            <Panel title="نسخ السوشيال">
+                {social ? (
+                    <div className="space-y-2 text-xs text-gray-200">
+                        <InfoBlock label="فيسبوك" value={social.facebook} />
+                        <InfoBlock label="X" value={social.x} />
+                        <InfoBlock label="Push" value={social.push} />
+                        <InfoBlock label="ملخص 120 كلمة" value={social.summary_120} />
+                        <InfoBlock label="تنبيه عاجل" value={social.breaking_alert} />
+                    </div>
+                ) : <Empty text="اضغط زر «سوشيال» لإنشاء النسخ." />}
+            </Panel>
+        )}
+
+        {showInlineResults && activeTab === 'msi' && (
+            <Panel title="MSI السياقي">
+                {msiContextHit ? (
+                    <div className={cn('rounded-xl border p-2 text-xs', Number(msiContextHit.msi || 100) < 60 ? 'border-red-500/30 bg-red-500/10 text-red-100' : 'border-amber-500/30 bg-amber-500/10 text-amber-100')}>
+                        <p className="font-semibold mb-1">تنبيه سياقي مرتبط بالكيان: {cleanText(msiContextHit.entity || '')}</p>
+                        <p>المؤشر الحالي: {Number(msiContextHit.msi || 0).toFixed(1)} / 100</p>
+                        <p>التصنيف: {cleanText(msiContextHit.level || '-')}</p>
+                        <p className="mt-1 text-[11px] opacity-90">عند انخفاض المؤشر، شدّد على التحقق من الادعاءات والمصادر قبل الإرسال النهائي.</p>
+                    </div>
+                ) : (
+                    <Empty text="لا يوجد تطابق MSI مباشر مع موضوع المسودة الحالية." />
+                )}
+                <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-xs text-gray-300 mt-2 space-y-1">
+                    <p className="text-gray-400 mb-1">الأكثر اضطراباً اليوم</p>
+                    {(msiTopDaily || []).slice(0, 5).map((item: any) => (
+                        <div key={`msi-d-${item.profile_id}-${item.entity}-${item.period_end}`} className="flex items-center justify-between">
+                            <span className="line-clamp-1">{cleanText(item.entity || '-')}</span>
+                            <span className="text-red-300">{Number(item.msi || 0).toFixed(1)}</span>
+                        </div>
+                    ))}
+                </div>
+                <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-xs text-gray-300 space-y-1">
+                    <p className="text-gray-400 mb-1">الأكثر اضطراباً أسبوعياً</p>
+                    {(msiTopWeekly || []).slice(0, 5).map((item: any) => (
+                        <div key={`msi-w-${item.profile_id}-${item.entity}-${item.period_end}`} className="flex items-center justify-between">
+                            <span className="line-clamp-1">{cleanText(item.entity || '-')}</span>
+                            <span className="text-orange-300">{Number(item.msi || 0).toFixed(1)}</span>
+                        </div>
+                    ))}
+                </div>
+            </Panel>
+        )}
+
+        {showInlineResults && activeTab === 'simulator' && (
+            <Panel title="محاكي الجمهور">
+                {simResult ? (
+                    <div className="space-y-2 text-xs text-gray-200">
+                        <div className="rounded-xl border border-white/10 bg-black/20 p-2">
+                            <p>مخاطر المحتوى: <span className="font-semibold text-red-200">{Number(simResult.risk_score || 0).toFixed(1)}/10</span></p>
+                            <p>قابلية الانتشار: <span className="font-semibold text-cyan-200">{Number(simResult.virality_score || 0).toFixed(1)}/10</span></p>
+                            <p>تصنيف الحوكمة: <span className="font-semibold text-amber-200">{cleanText(simResult.policy_level || '-')}</span></p>
+                            <p>موثوقية القياس: <span className="font-semibold text-gray-100">{Number(simResult.confidence_score || 0).toFixed(1)}%</span></p>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-black/20 p-2">
+                            <p className="text-gray-400 mb-1">ردود الشخصيات</p>
+                            {(simResult.reactions || []).map((rx: any, idx: number) => (
+                                <p key={`${rx.persona_id || 'persona'}-${idx}`}>
+                                    - {cleanText(rx.persona_label || rx.persona_id || 'شخصية')}: {cleanText(rx.comment || '')}
+                                </p>
+                            ))}
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-black/20 p-2">
+                            <p className="text-gray-400 mb-1">نصائح التحرير</p>
+                            <p>{cleanText(simResult?.advice?.summary || '') || '—'}</p>
+                            {(simResult?.advice?.improvements || []).map((fix: string, idx: number) => (
+                                <p key={`${fix}-${idx}`}>- {cleanText(fix)}</p>
+                            ))}
+                        </div>
+                    </div>
+                ) : (
+                    <Empty text="اضغط زر «محاكي الجمهور» لتقييم العنوان قبل الاعتماد." />
+                )}
+            </Panel>
+        )}
+
+        {showInlineResults && activeTab === 'xray' && (
+            <Panel title="زوايا المنافسين">
+                {xrayItems.length ? (
+                    <div className="space-y-2 text-xs text-gray-200">
+                        {xrayItems.slice(0, 6).map((item: any) => (
+                            <div key={`xray-${item.id}`} className="rounded-xl border border-white/10 bg-black/20 p-2">
+                                <a href={item.competitor_url} target="_blank" rel="noreferrer" className="text-cyan-300 hover:underline line-clamp-1">
+                                    {cleanText(item.competitor_title || '')}
+                                </a>
+                                <p className="text-[11px] text-amber-200 mt-1">أولوية {Number(item.priority_score || 0).toFixed(1)}</p>
+                                {item.angle_title ? <p className="text-emerald-200 mt-1">{cleanText(item.angle_title)}</p> : null}
+                                {item.angle_rationale ? <p className="text-gray-300 mt-1 line-clamp-3">{cleanText(item.angle_rationale)}</p> : null}
+                                {(item.angle_questions_json || []).slice(0, 3).map((qText: string, idx: number) => (
+                                    <p key={`${item.id}-q-${idx}`} className="text-gray-200">- {cleanText(qText)}</p>
+                                ))}
+                                <div className="flex flex-wrap gap-2 mt-2">
+                                    <button
+                                        onClick={() => xrayBriefMutation.mutate(item.id)}
+                                        className="px-2 py-1 rounded bg-cyan-500/20 border border-cyan-500/30 text-cyan-200"
+                                    >
+                                        توليد Brief
+                                    </button>
+                                    <button
+                                        onClick={() => xrayMarkUsed.mutate(item.id)}
+                                        className="px-2 py-1 rounded bg-emerald-500/20 border border-emerald-500/30 text-emerald-200"
+                                    >
+                                        تم الاستخدام
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                        {xrayBrief ? (
+                            <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-2 text-cyan-100 space-y-1">
+                                <p className="font-semibold">{cleanText(xrayBrief.title || 'Brief')}</p>
+                                <p>{cleanText(xrayBrief.counter_angle || '')}</p>
+                                <p className="text-cyan-200">{cleanText(xrayBrief.why_it_wins || '')}</p>
+                                {(xrayBrief.newsroom_plan || []).slice(0, 4).map((step: string, idx: number) => (
+                                    <p key={`${step}-${idx}`}>- {cleanText(step)}</p>
+                                ))}
+                            </div>
+                        ) : null}
+                    </div>
+                ) : (
+                    <Empty text="لا توجد فجوات منافسين مرتبطة مباشرة بموضوع المسودة الحالية." />
+                )}
+            </Panel>
+        )}
+
+        {showInlineResults && activeTab === 'context' && (
+            <Panel title="السياق والنسخ">
+                <div className="space-y-1 max-h-32 overflow-auto">
+                    {versions.map((v) => <button key={v.id} onClick={() => restoreVersion.mutate(v.version)} className="w-full text-right rounded bg-white/5 px-2 py-1 text-xs text-gray-200">الإصدار v{v.version} • {v.change_origin || 'يدوي'}</button>)}
+                </div>
+                <div className="flex gap-2 mt-2">
+                    <select value={cmpFrom || ''} onChange={(e) => setCmpFrom(Number(e.target.value))} className="flex-1 bg-white/10 rounded px-2 py-1 text-xs">{versions.map((v) => <option key={`f-${v.id}`} value={v.version}>من v{v.version}</option>)}</select>
+                    <select value={cmpTo || ''} onChange={(e) => setCmpTo(Number(e.target.value))} className="flex-1 bg-white/10 rounded px-2 py-1 text-xs">{versions.map((v) => <option key={`t-${v.id}`} value={v.version}>إلى v{v.version}</option>)}</select>
+                    <button onClick={() => runDiff.mutate()} className="px-2 py-1 rounded bg-white/10 text-xs">فرق</button>
+                </div>
+                <pre className="max-h-36 overflow-auto text-[11px] text-gray-200 whitespace-pre-wrap mt-2" dir="ltr">{diffView || 'لا يوجد فرق معروض بعد.'}</pre>
+                <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-xs text-gray-300">
+                    <p className="text-gray-400 mb-1">الخط الزمني المرتبط</p>
+                    {storyTimelineSorted.slice(0, 5).map((item: any) => (
+                        <p key={item.id}>- {cleanText(item.title || 'بدون عنوان')}</p>
+                    ))}
+                </div>
+                <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-2 text-xs text-cyan-100 space-y-1">
+                    <p className="text-cyan-200">تلميحات الدستور أثناء التحرير</p>
+                    {(constitutionTips || []).slice(0, 4).map((tip: string, idx: number) => (
+                        <p key={`${tip}-${idx}`}>- {cleanText(tip)}</p>
+                    ))}
+                </div>
+            </Panel>
+        )}
+        </>
+    );
 
     useEffect(() => {
         if (leftTab !== 'archive') return;
@@ -2748,7 +3277,7 @@ function WorkspaceDraftsPageContent() {
         if (mode === 'write') {
             setDetailsOpen(false);
             setToolsExpanded(true);
-            setFocusMode(true);
+            setFocusMode(false);
             return;
         }
 
@@ -2772,7 +3301,7 @@ function WorkspaceDraftsPageContent() {
         setToolsExpanded(true);
         setHeaderToolsOpen(false);
         setCopilotOpen(false);
-        setFocusMode(true);
+        setFocusMode(false);
     }
 
     function closeGuide() {
@@ -3472,294 +4001,30 @@ function WorkspaceDraftsPageContent() {
             </div>
             )}
 
-            {detailsOpen && (
-            <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-4">
-                <div className="flex items-center justify-between">
-                    <div>
-                        <h2 className="text-sm text-white font-semibold">مساعد المحرر</h2>
-                        <p className="text-[11px] text-gray-400">مساعدة مركزة بدون تشتيت.</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <button
-                            onClick={() => setDecisionDetailOpen((prev) => !prev)}
-                            className="rounded-lg border border-white/15 bg-white/10 px-2 py-1 text-[10px] text-gray-200"
-                        >
-                            {decisionDetailOpen ? 'إخفاء التفاصيل' : 'عرض التفاصيل'}
-                        </button>
-                        <button
-                            onClick={() => decisionActionHandlers.quick_check()}
-                            className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[10px] text-emerald-200"
-                        >
-                            فحص سريع
-                        </button>
-                    </div>
-                </div>
-
-                {blockerSummary.count > 0 && (
-                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-[10px] text-amber-100 space-y-2">
-                        <div className="flex items-center justify-between gap-2">
-                            <p className="font-semibold">ملاحظات جودة عاجلة ({blockerSummary.count})</p>
-                            <div className="flex items-center gap-2">
-                                {blockerActionHandler && (
-                                    <button
-                                        onClick={() => blockerActionHandler()}
-                                        className="px-2 py-1 rounded bg-white/10 border border-white/15 text-[10px]"
-                                    >
-                                        معالجة الآن
-                                    </button>
-                                )}
-                                {isJournalist && (
-                                    <button
-                                        onClick={() => selfApproveDraft.mutate()}
-                                        disabled={selfApproveDraft.isPending || !hasSubmissionBody}
-                                        className="px-2 py-1 rounded bg-cyan-500/20 border border-cyan-500/30 text-[10px] text-cyan-100 disabled:opacity-60"
-                                    >
-                                        {selfApproveDraft.isPending ? 'جاري الاعتماد...' : 'اعتماد مباشر'}
-                                    </button>
-                                )}
-                                <button
-                                    onClick={() => setOverrideOpen(true)}
-                                    disabled={!workId}
-                                    className="px-2 py-1 rounded bg-amber-500/20 border border-amber-500/30 text-[10px] text-amber-100 disabled:opacity-60"
-                                >
-                                    إرسال بتحفّظ
-                                </button>
-                                <button
-                                    onClick={() => setBlockersOpen((prev) => !prev)}
-                                    className="px-2 py-1 rounded bg-black/20 border border-white/15 text-[10px]"
-                                >
-                                    {blockersOpen ? 'عرض أقل' : 'عرض التفاصيل'}
-                                </button>
-                            </div>
-                        </div>
-                        <div className="space-y-1">
-                            {blockerSummary.items.slice(0, blockersOpen ? blockerSummary.items.length : 1).map((item) => {
-                                const styles = severityStyles(item.severity);
-                                const actionHandler = item.action ? decisionActionHandlers[item.action] : undefined;
-                                return (
-                                    <div key={`blocker-${item.id}`} className={cn('rounded-md border p-1', styles.border)}>
-                                        <div className="flex items-center justify-between gap-2">
-                                            <p className="text-[10px] text-white line-clamp-1">{item.title}</p>
-                                            {actionHandler && (
-                                                <button onClick={() => actionHandler()} className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-gray-100">
-                                                    معالجة
-                                                </button>
-                                            )}
-                                        </div>
-                                        <p className={cn('text-[10px] text-amber-50 mt-1', decisionDetailOpen ? '' : 'line-clamp-1')}>
-                                            {item.reason}
-                                        </p>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                )}
-
-                <div className="space-y-2">
-                    {decisionSectionsForView.map((section) => (
-                        <div key={section.title} className="rounded-lg border border-white/10 bg-black/20 p-2 space-y-2">
-                            <div className="flex items-center justify-between gap-2">
-                                <h3 className="text-[11px] text-gray-200 font-semibold">
-                                    {section.title} ({section.items.length})
-                                </h3>
-                                {section.items.length > 1 && (
-                                    <button
-                                        onClick={section.toggle}
-                                        className="text-[10px] text-gray-300 underline decoration-dotted"
-                                    >
-                                        {section.showAll ? 'عرض أقل' : 'عرض الكل'}
-                                    </button>
-                                )}
-                            </div>
-                            {section.items.length === 0 ? (
-                                <p className="text-[10px] text-gray-500">{section.empty}</p>
-                            ) : (
-                                section.items.slice(0, section.showAll ? section.items.length : 2).map((item) => {
-                                    const styles = severityStyles(item.severity);
-                                    const actionHandler = item.action ? decisionActionHandlers[item.action] : undefined;
-                                    return (
-                                        <div key={item.id} className={cn('rounded-md border p-2 space-y-1', styles.border)}>
-                                            <div className="flex items-center justify-between gap-2">
-                                                <p className="text-[11px] text-white line-clamp-1">{item.title}</p>
-                                                <span className={cn('px-2 py-0.5 rounded text-[10px]', styles.badge)}>
-                                                    {severityLabel(item.severity)}
-                                                </span>
-                                            </div>
-                                            {decisionDetailOpen && (
-                                                <>
-                                                    <p className="text-[10px] text-gray-200 line-clamp-2">{item.reason}</p>
-                                                    <p className="text-[10px] text-gray-500">الأثر: {item.impact}</p>
-                                                    <p className="text-[10px] text-gray-500">القاعدة: {item.rule}</p>
-                                                </>
-                                            )}
-                                            <div className="flex items-center justify-between">
-                                                <span className="text-[10px] text-gray-500">
-                                                    الثقة: {item.confidence ? `${Math.round(item.confidence * 100)}%` : '—'}
-                                                </span>
-                                                {actionHandler && (
-                                                    <button
-                                                        onClick={() => actionHandler()}
-                                                        className="text-[10px] px-2 py-0.5 rounded bg-white/10 text-gray-200"
-                                                    >
-                                                        إصلاح الآن
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
-                                    );
-                                })
-                            )}
-                        </div>
-                    ))}
-                </div>
-
-                {isAdvancedMode && (
-                    <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-[11px] text-emerald-100 space-y-1">
-                        <p className="font-semibold text-emerald-200">أفضل عنوان مقترح</p>
-                        <p>{cleanText(decisionModel.bestHeadline.headline || 'لا يوجد عنوان مقترح حالياً.')}</p>
-                        {!!decisionModel.bestHeadline.reasons?.length && (
-                            <p className="text-[10px] text-emerald-200/90">السبب: {decisionModel.bestHeadline.reasons.slice(0, 2).join(' • ')}</p>
-                        )}
-                        {!!decisionModel.bestHeadline.risks?.length && (
-                            <p className="text-[10px] text-amber-200">مخاطر محتملة: {decisionModel.bestHeadline.risks.slice(0, 2).join(' • ')}</p>
-                        )}
-                    </div>
-                )}
-            </div>
-            )}
-
-            {detailsOpen && isAdvancedMode && (
-                <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3">
-                    <div className="flex items-center justify-between gap-2">
-                        <div>
-                            <h2 className="text-sm text-white font-semibold">مراجعة احترافية</h2>
-                            <p className="text-[11px] text-gray-400">تلخيص سريع لمخرجات الجودة والتحقق والتهيئة قبل الاعتماد.</p>
-                        </div>
-                        <button
-                            onClick={() => setReviewOpen((prev) => !prev)}
-                            className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-gray-200"
-                        >
-                            {reviewOpen ? 'إخفاء' : 'عرض'}
-                        </button>
-                    </div>
-                    {reviewOpen && (
-                        <>
-                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                                {reviewCards.map((card) => {
-                                    const styles = severityStyles(card.severity);
-                                    const actionHandler = card.action ? decisionActionHandlers[card.action] : undefined;
-                                    return (
-                                        <div key={card.id} className={cn('rounded-xl border p-3 space-y-1', styles.border)}>
-                                            <div className="flex items-center justify-between gap-2">
-                                                <p className="text-[11px] text-white font-semibold">{card.title}</p>
-                                                <span className={cn('px-2 py-0.5 rounded text-[10px]', styles.badge)}>
-                                                    {severityLabel(card.severity)}
-                                                </span>
-                                            </div>
-                                            <p className="text-sm text-gray-100">{card.value}</p>
-                                            <p className="text-[10px] text-gray-400 line-clamp-2">{card.hint}</p>
-                                            {actionHandler && (
-                                                <button
-                                                    onClick={() => actionHandler()}
-                                                    className="mt-1 rounded-lg border border-white/15 bg-white/10 px-2 py-1 text-[10px] text-gray-200"
-                                                >
-                                                    فتح الأداة
-                                                </button>
-                                            )}
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                            {professionalReview.length > 4 && (
-                                <div className="flex justify-end">
-                                    <button
-                                        onClick={() => setReviewExpanded((prev) => !prev)}
-                                        className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-gray-200"
-                                    >
-                                        {reviewExpanded ? 'عرض أقل' : 'عرض المزيد'}
-                                    </button>
-                                </div>
-                            )}
-                        </>
-                    )}
-                </div>
-            )}
-
-            {detailsOpen && isAdvancedMode && (
-                <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-3">
-                    <div className="flex items-center justify-between gap-2">
-                        <div>
-                            <h2 className="text-sm text-white font-semibold">ثقة وتفسير</h2>
-                            <p className="text-[11px] text-gray-400">لماذا ظهرت هذه الملاحظات؟ وما أثرها التحريري؟</p>
-                        </div>
-                        <button
-                            onClick={() => setExplainOpen((prev) => !prev)}
-                            className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-gray-200"
-                        >
-                            {explainOpen ? 'إخفاء' : 'عرض'}
-                        </button>
-                    </div>
-                    {explainOpen && (
-                        <>
-                            {explainCards.length ? (
-                                <div className="space-y-2">
-                                    {explainCards.map((item) => {
-                                        const styles = severityStyles(item.severity);
-                                        return (
-                                            <div key={`explain-${item.id}`} className={cn('rounded-xl border p-3 space-y-1', styles.border)}>
-                                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                                    <p className="text-xs text-white font-semibold">{item.title}</p>
-                                                    <div className="flex items-center gap-2">
-                                                        <span className={cn('px-2 py-0.5 rounded text-[10px]', styles.badge)}>{severityLabel(item.severity)}</span>
-                                                        <span className="text-[10px] text-gray-400">{item.source}</span>
-                                                    </div>
-                                                </div>
-                                                <p className="text-[11px] text-gray-200 line-clamp-2">{item.reason}</p>
-                                                <p className="text-[10px] text-gray-400">الأثر: {item.impact}</p>
-                                                <p className="text-[10px] text-gray-500">القاعدة: {item.rule}</p>
-                                                <p className="text-[10px] text-gray-500">الثقة: {item.confidence ? `${Math.round(item.confidence * 100)}%` : '—'}</p>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            ) : (
-                                <Empty text="لا توجد ملاحظات مفسّرة حالياً." />
-                            )}
-                            {explanationItems.length > 5 && (
-                                <div className="flex justify-end">
-                                    <button
-                                        onClick={() => setExplainExpanded((prev) => !prev)}
-                                        className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-gray-200"
-                                    >
-                                        {explainExpanded ? 'عرض أقل' : 'عرض المزيد'}
-                                    </button>
-                                </div>
-                            )}
-                        </>
-                    )}
-                </div>
-            )}
-
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
-                <main className={cn('order-1 xl:order-2 space-y-4', mainSpanClass)}>
+                <div className={cn('order-1 xl:order-2 space-y-4', mainSpanClass)}>
                     <div className="rounded-2xl border border-white/10 bg-gray-900/50 overflow-hidden">
                         <div className="border-b border-white/10 p-4">
-                            <input value={title} onChange={(e) => { setTitle(cleanText(e.target.value)); setSaveState('unsaved'); }} className="w-full rounded-xl bg-white/5 border border-white/15 px-3 py-2 text-white text-lg" dir="rtl" />
+                            <input
+                                value={title}
+                                onChange={(e) => { setTitle(cleanText(e.target.value)); setSaveState('unsaved'); }}
+                                className="w-full rounded-xl bg-white/5 border border-white/15 px-3 py-2 text-white text-lg"
+                                dir="rtl"
+                            />
                             {isWritingStage ? (
-                                <p className="mt-2 text-[11px] text-gray-500">ابدأ بالعنوان ثم اكتب المتن مباشرة. ستظهر أدوات المراجعة بعد الانتقال إلى المرحلة التالية.</p>
+                                <p className="mt-2 text-[11px] text-gray-500">???? ???????? ?? ???? ????? ??????. ????? ????? ???????? ??? ???????? ??? ??????? ???????.</p>
                             ) : (
-                                <p className="text-xs text-gray-500 mt-2">معرف العمل: {workId} • الإصدار v{baseVersion}</p>
+                                <p className="text-xs text-gray-500 mt-2">???? ?????: {workId} ? ??????? v{baseVersion}</p>
                             )}
                         </div>
                         {editor && (
                             <BubbleMenu editor={editor}>
                                 <div className="relative rounded-xl bg-gray-950/95 border border-white/20 p-1 flex gap-1 text-xs">
-                                    <button onClick={() => editor.chain().focus().toggleBold().run()} className="px-2 py-1 rounded bg-white/10">عريض</button>
+                                    <button onClick={() => editor.chain().focus().toggleBold().run()} className="px-2 py-1 rounded bg-white/10">????</button>
                                     {!isWritingStage && (
                                         <>
-                                            <button onClick={() => editor.chain().focus().toggleItalic().run()} className="px-2 py-1 rounded bg-white/10">مائل</button>
-                                            <button onClick={() => editor.chain().focus().toggleHighlight().run()} className="px-2 py-1 rounded bg-white/10">تمييز</button>
+                                            <button onClick={() => editor.chain().focus().toggleItalic().run()} className="px-2 py-1 rounded bg-white/10">????</button>
+                                            <button onClick={() => editor.chain().focus().toggleHighlight().run()} className="px-2 py-1 rounded bg-white/10">?????</button>
                                             <span className="w-px bg-white/10 mx-1" />
                                         </>
                                     )}
@@ -3767,13 +4032,13 @@ function WorkspaceDraftsPageContent() {
 
                                     {inlineAiOpen && (
                                         <div className="absolute right-0 top-full mt-2 w-44 rounded-xl border border-white/20 bg-gray-950/95 p-2 space-y-1 text-[11px] text-gray-200 z-20">
-                                            <button onClick={() => handleInlineAiAction('rewrite')} className="w-full text-right px-2 py-1 rounded bg-white/10">إعادة صياغة</button>
-                                            <button onClick={() => handleInlineAiAction('shorten')} className="w-full text-right px-2 py-1 rounded bg-white/10">اختصار</button>
-                                            <button onClick={() => handleInlineAiAction('expand')} className="w-full text-right px-2 py-1 rounded bg-white/10">توسيع</button>
-                                            <button onClick={() => handleInlineAiAction('clarify')} className="w-full text-right px-2 py-1 rounded bg-white/10">توضيح</button>
+                                            <button onClick={() => handleInlineAiAction('rewrite')} className="w-full text-right px-2 py-1 rounded bg-white/10">????? ?????</button>
+                                            <button onClick={() => handleInlineAiAction('shorten')} className="w-full text-right px-2 py-1 rounded bg-white/10">??????</button>
+                                            <button onClick={() => handleInlineAiAction('expand')} className="w-full text-right px-2 py-1 rounded bg-white/10">?????</button>
+                                            <button onClick={() => handleInlineAiAction('clarify')} className="w-full text-right px-2 py-1 rounded bg-white/10">?????</button>
                                             {!isWritingStage && (
                                                 <>
-                                                    <button onClick={() => setInlineSourceOpen((v) => !v)} className="w-full text-right px-2 py-1 rounded bg-white/10">إضافة مصدر</button>
+                                                    <button onClick={() => setInlineSourceOpen((v) => !v)} className="w-full text-right px-2 py-1 rounded bg-white/10">????? ????</button>
                                                     {inlineSourceOpen && (
                                                         <div className="mt-1 max-h-40 overflow-auto rounded-lg border border-white/10 bg-black/30 p-1 space-y-1">
                                                             {(sources || []).slice(0, 10).map((source) => (
@@ -3800,20 +4065,20 @@ function WorkspaceDraftsPageContent() {
 
                     {suggestion && (
                         <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 p-4 space-y-2">
-                            <h3 className="text-sm text-amber-200">اقتراح التحسين بصيغة واضحة</h3>
+                            <h3 className="text-sm text-amber-200">?????? ??????? ????? ?????</h3>
                             <div className="rounded-xl border border-amber-300/30 bg-black/25 p-3 text-xs text-amber-100 space-y-1" dir="rtl">
-                                <p>العنوان المقترح: {cleanText(suggestion.title || title || 'بدون عنوان')}</p>
-                                <p>التعديل: +{suggestion?.diff_stats?.added || 0} / -{suggestion?.diff_stats?.removed || 0}</p>
+                                <p>??????? ???????: {cleanText(suggestion.title || title || '???? ?????')}</p>
+                                <p>???????: +{suggestion?.diff_stats?.added || 0} / -{suggestion?.diff_stats?.removed || 0}</p>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                 <div className="rounded-xl border border-white/10 bg-black/20 p-2">
-                                    <p className="text-[11px] text-gray-400 mb-1">قبل التحسين</p>
+                                    <p className="text-[11px] text-gray-400 mb-1">??? ???????</p>
                                     <p className="text-sm leading-8 text-gray-100 whitespace-pre-wrap max-h-96 overflow-auto">
                                         {cleanText(suggestion?.preview?.before_text || htmlToReadableText(bodyHtml))}
                                     </p>
                                 </div>
                                 <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-2">
-                                    <p className="text-[11px] text-emerald-200 mb-1">بعد التحسين</p>
+                                    <p className="text-[11px] text-emerald-200 mb-1">??? ???????</p>
                                     <p className="text-sm leading-8 text-emerald-50 whitespace-pre-wrap max-h-96 overflow-auto">
                                         {cleanText(suggestion?.preview?.after_text || suggestion?.body_text || htmlToReadableText(suggestion?.body_html || ''))}
                                     </p>
@@ -3823,20 +4088,24 @@ function WorkspaceDraftsPageContent() {
                                 onClick={() => setShowTechnicalDiff((v) => !v)}
                                 className="px-2 py-1 rounded-lg bg-white/10 text-gray-200 text-[11px]"
                             >
-                                {showTechnicalDiff ? 'إخفاء الفرق التقني' : 'عرض الفرق التقني'}
+                                {showTechnicalDiff ? '????? ????? ??????' : '??? ????? ??????'}
                             </button>
                             {showTechnicalDiff && (
                                 <pre className="max-h-56 overflow-auto text-xs text-amber-50 bg-black/25 rounded-xl p-2" dir="ltr">
-                                    {normalizeDiffOutput(suggestion.diff || suggestion.diff_html || '') || 'لا يوجد فرق تقني'}
+                                    {normalizeDiffOutput(suggestion.diff || suggestion.diff_html || '') || '?? ???? ??? ????'}
                                 </pre>
                             )}
                             <div className="flex gap-2">
-                                <button onClick={() => applySuggestion.mutate()} className="px-3 py-2 rounded-xl bg-emerald-500/30 text-emerald-100 text-xs">قبول كنسخة جديدة</button>
-                                <button onClick={() => { setSuggestion(null); setShowTechnicalDiff(false); }} className="px-3 py-2 rounded-xl bg-white/10 text-gray-300 text-xs">رفض</button>
+                                <button onClick={() => applySuggestion.mutate()} className="px-3 py-2 rounded-xl bg-emerald-500/30 text-emerald-100 text-xs">???? ????? ?????</button>
+                                <button onClick={() => { setSuggestion(null); setShowTechnicalDiff(false); }} className="px-3 py-2 rounded-xl bg-white/10 text-gray-300 text-xs">???</button>
                             </div>
                         </div>
                     )}
-                </main>
+
+                    <div className="xl:hidden">
+                        {reportPanels}
+                    </div>
+                </div>
 
                 {showSidePanels && (
                 <aside className="order-2 xl:order-1 xl:col-span-2 space-y-4 xl:sticky xl:top-24 self-start max-h-[calc(100vh-140px)] overflow-auto pr-1">
@@ -3846,29 +4115,29 @@ function WorkspaceDraftsPageContent() {
                                 onClick={() => setLeftTab('drafts')}
                                 className={cn('px-3 py-1 rounded-lg text-[11px] border', leftTab === 'drafts' ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-100' : 'bg-white/5 border-white/10 text-gray-300')}
                             >
-                                المسودات
+                                ????????
                             </button>
                             <button
                                 onClick={() => setLeftTab('source')}
                                 className={cn('px-3 py-1 rounded-lg text-[11px] border', leftTab === 'source' ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-100' : 'bg-white/5 border-white/10 text-gray-300')}
                             >
-                                المصدر
+                                ??????
                             </button>
                             <button
                                 onClick={() => setLeftTab('archive')}
                                 className={cn('px-3 py-1 rounded-lg text-[11px] border', leftTab === 'archive' ? 'bg-amber-500/20 border-amber-500/40 text-amber-100' : 'bg-white/5 border-white/10 text-gray-300')}
                             >
-                                الأرشيف
+                                ???????
                             </button>
                         </div>
 
                         {leftTab === 'drafts' && (
                             <div>
-                                <h2 className="text-sm text-white mb-2">المسودات</h2>
+                                <h2 className="text-sm text-white mb-2">????????</h2>
                                 <div className="space-y-2 max-h-[260px] overflow-auto">
                                     {drafts.map((d) => (
                                         <button key={`${d.work_id}-${d.id}`} onClick={() => setWorkId(d.work_id)} className={cn('w-full text-right rounded-lg border p-2', workId === d.work_id ? 'border-emerald-400/40 bg-emerald-500/10' : 'border-white/10 bg-white/5')}>
-                                            <div className="text-xs text-gray-200">{truncate(cleanText(d.title || 'بدون عنوان'), 58)}</div>
+                                            <div className="text-xs text-gray-200">{truncate(cleanText(d.title || '???? ?????'), 58)}</div>
                                             <div className="text-[10px] text-gray-500 mt-1">{formatRelativeTime(d.updated_at)}</div>
                                         </button>
                                     ))}
@@ -3878,7 +4147,7 @@ function WorkspaceDraftsPageContent() {
                                         onClick={() => setDiffOpen(true)}
                                         className="px-2 py-1 rounded-lg bg-white/10 text-[10px] text-gray-200 border border-white/10"
                                     >
-                                        مقارنة النسخ
+                                        ?????? ?????
                                     </button>
                                     <button
                                         onClick={() => setStoryOpen(true)}
@@ -3892,12 +4161,12 @@ function WorkspaceDraftsPageContent() {
 
                         {leftTab === 'source' && (
                             <div>
-                                <h2 className="text-sm text-white mb-2">المصدر والبيانات</h2>
-                                {contextLoading ? <p className="text-xs text-gray-500">جاري التحميل...</p> : (
+                                <h2 className="text-sm text-white mb-2">?????? ?????????</h2>
+                                {contextLoading ? <p className="text-xs text-gray-500">???? ???????...</p> : (
                                     <div className="text-xs space-y-2" dir="rtl">
-                                        <p className="text-gray-200">{cleanText(context?.article?.original_title || 'لا يوجد عنوان مصدر')}</p>
-                                        <p className="text-gray-400">{cleanText(context?.article?.router_rationale || 'لا يوجد تفسير توجيه')}</p>
-                                        <div className="rounded-xl border border-white/10 bg-black/25 p-2 text-gray-300 max-h-56 overflow-auto">{cleanText(context?.article?.summary || context?.article?.original_content || 'لا يوجد نص مصدر متاح')}</div>
+                                        <p className="text-gray-200">{cleanText(context?.article?.original_title || '?? ???? ????? ????')}</p>
+                                        <p className="text-gray-400">{cleanText(context?.article?.router_rationale || '?? ???? ????? ?????')}</p>
+                                        <div className="rounded-xl border border-white/10 bg-black/25 p-2 text-gray-300 max-h-56 overflow-auto">{cleanText(context?.article?.summary || context?.article?.original_content || '?? ???? ?? ???? ????')}</div>
                                     </div>
                                 )}
                             </div>
@@ -3905,12 +4174,12 @@ function WorkspaceDraftsPageContent() {
 
                         {leftTab === 'archive' && (
                             <div className="space-y-2" dir="rtl">
-                                <h2 className="text-sm text-white">الأرشيف</h2>
+                                <h2 className="text-sm text-white">???????</h2>
                                 <div className="flex items-center gap-2">
                                     <input
                                         value={archiveQuery}
                                         onChange={(e) => setArchiveQuery(e.target.value)}
-                                        placeholder="ابحث في أرشيف الشروق..."
+                                        placeholder="???? ?? ????? ??????..."
                                         className="w-full rounded-xl bg-white/5 border border-white/15 px-3 py-2 text-xs text-white"
                                     />
                                     <button
@@ -3921,19 +4190,19 @@ function WorkspaceDraftsPageContent() {
                                         }}
                                         className="px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-100 text-xs disabled:opacity-60"
                                     >
-                                        {runArchiveSearch.isPending ? 'بحث...' : 'بحث'}
+                                        {runArchiveSearch.isPending ? '???...' : '???'}
                                     </button>
                                 </div>
                                 {archiveError && <p className="text-[11px] text-red-300">{archiveError}</p>}
                                 {archiveItems.length === 0 && !runArchiveSearch.isPending && (
-                                    <p className="text-[11px] text-gray-500">اكتب كلمات مفتاحية ثم اضغط بحث.</p>
+                                    <p className="text-[11px] text-gray-500">???? ????? ??????? ?? ???? ???.</p>
                                 )}
                                 <div className="space-y-2 max-h-[320px] overflow-auto">
                                     {archiveItems.map((item) => (
                                         <div key={`archive-${item.id}`} className="rounded-lg border border-white/10 bg-black/20 p-2">
-                                            <p className="text-xs text-gray-200 line-clamp-2">{cleanText(item.title || 'بدون عنوان')}</p>
+                                            <p className="text-xs text-gray-200 line-clamp-2">{cleanText(item.title || '???? ?????')}</p>
                                             <p className="text-[10px] text-gray-500 mt-1">
-                                                {item.published_at ? new Date(item.published_at).toLocaleDateString('ar-DZ') : 'بدون تاريخ'}
+                                                {item.published_at ? new Date(item.published_at).toLocaleDateString('ar-DZ') : '???? ?????'}
                                             </p>
                                             {item.summary && <p className="text-[11px] text-gray-400 mt-1 line-clamp-2">{cleanText(item.summary)}</p>}
                                             <div className="mt-2 flex items-center gap-2">
@@ -3941,7 +4210,7 @@ function WorkspaceDraftsPageContent() {
                                                     onClick={() => insertArchiveItem(item)}
                                                     className="px-2 py-1 rounded-lg bg-white/10 text-[10px] text-gray-200"
                                                 >
-                                                    إدراج
+                                                    ?????
                                                 </button>
                                                 {item.url && (
                                                     <a
@@ -3950,7 +4219,7 @@ function WorkspaceDraftsPageContent() {
                                                         rel="noreferrer"
                                                         className="text-[10px] text-cyan-300 underline decoration-dotted"
                                                     >
-                                                        فتح المصدر
+                                                        ??? ??????
                                                     </a>
                                                 )}
                                             </div>
@@ -3963,628 +4232,121 @@ function WorkspaceDraftsPageContent() {
                 </aside>
                 )}
 
-                {detailsOpen && copilotOpen && (
-                <div className="fixed inset-0 z-[88] bg-black/60 backdrop-blur-sm flex justify-end">
-                    <div className="h-full w-full max-w-md overflow-auto border-l border-white/10 bg-gray-950 p-4 space-y-4" dir="rtl">
-                        <div className="flex items-center justify-between gap-3">
-                            <div>
-                                <h2 className="text-sm font-semibold text-white">مساعد التحرير</h2>
-                                <p className="text-[11px] text-gray-400">أدوات المراجعة العميقة في درج مستقل حتى لا تزاحم الكتابة.</p>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => setCopilotOpen(false)}
-                                className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-gray-200"
-                            >
-                                إغلاق
-                            </button>
-                        </div>
-                    <Panel title="مساعد التحرير (Copilot)">
-                        <div className="space-y-3 text-xs text-gray-200">
-                            <div className="rounded-lg border border-white/10 bg-black/20 p-2 space-y-2">
-                                <p className="text-gray-400">إجراءات سريعة</p>
-                                <div className="flex flex-wrap gap-2">
-                                    <button onClick={() => runQuickCheck.mutate()} className="px-2 py-1 rounded bg-indigo-500/20 border border-indigo-500/30 text-indigo-100 text-[10px]">فحص سريع</button>
-                                    <button onClick={() => runQuality.mutate()} className="px-2 py-1 rounded bg-violet-500/20 border border-violet-500/30 text-violet-100 text-[10px]">جودة</button>
-                                    <button onClick={() => runVerifier.mutate()} className="px-2 py-1 rounded bg-cyan-500/20 border border-cyan-500/30 text-cyan-100 text-[10px]">تحقق</button>
-                                    <button onClick={() => runHeadlines.mutate()} className="px-2 py-1 rounded bg-indigo-500/20 border border-indigo-500/30 text-indigo-100 text-[10px]">عناوين</button>
-                                </div>
-                            </div>
-                            <div className="rounded-lg border border-white/10 bg-black/20 p-2 space-y-2">
-                                <p className="text-gray-400">على النص المحدد</p>
-                                <div className="flex flex-wrap gap-2">
-                                    <button onClick={() => handleInlineAiAction('rewrite')} className="px-2 py-1 rounded bg-emerald-500/20 border border-emerald-500/30 text-emerald-100 text-[10px]">إعادة صياغة</button>
-                                    <button onClick={() => handleInlineAiAction('shorten')} className="px-2 py-1 rounded bg-white/10 border border-white/15 text-gray-200 text-[10px]">اختصار</button>
-                                    <button onClick={() => handleInlineAiAction('clarify')} className="px-2 py-1 rounded bg-white/10 border border-white/15 text-gray-200 text-[10px]">توضيح</button>
-                                </div>
-                                <p className="text-[10px] text-gray-500">حدد فقرة داخل النص ثم اختر الإجراء.</p>
-                                {inlineAiError && <p className="text-[10px] text-red-300">{inlineAiError}</p>}
-                            </div>
-                            <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-                                <p className="text-gray-400 mb-1">الحالة الحالية</p>
-                                <p>الجاهزية: {compactStatus.readinessLabel}</p>
-                                <p>الادعاءات الحرجة: {compactStatus.blockingClaims}</p>
-                                <p>الجودة: {compactStatus.qualityScore}</p>
-                            </div>
-                            <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-                                <p className="text-gray-400 mb-1">ما ينقص الخبر</p>
-                                {[...decisionModel.urgent, ...decisionModel.improve].slice(0, 3).map((item) => (
-                                    <p key={`need-${item.id}`} className="text-gray-200">- {item.title}</p>
-                                ))}
-                                {decisionModel.urgent.length === 0 && decisionModel.improve.length === 0 && <p className="text-gray-500">لا توجد ملاحظات حرجة الآن.</p>}
-                            </div>
-                            <button
-                                onClick={() => setCopilotExpanded((prev) => !prev)}
-                                className="w-full rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-[11px] text-gray-200"
-                            >
-                                {copilotExpanded ? 'إخفاء التفاصيل' : 'تفاصيل أكثر'}
-                            </button>
-                            {copilotExpanded && (
-                                <>
-                                    <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-                                        <p className="text-gray-400 mb-1">اقتراح عناوين</p>
-                                        {headlineInsights.slice(0, 3).map((h, idx) => (
-                                            <div key={`headline-cp-${idx}`} className="flex items-center justify-between gap-2">
-                                                <span className="text-gray-200 line-clamp-1">{cleanText(h.headline || '')}</span>
-                                                <button
-                                                    onClick={() => { setTitle(cleanText(h.headline || '')); setSaveState('unsaved'); }}
-                                                    className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-gray-200"
-                                                >
-                                                    استخدم
-                                                </button>
-                                            </div>
-                                        ))}
-                                        {!headlineInsights.length && <p className="text-gray-500">لم يتم توليد عناوين بعد.</p>}
-                                    </div>
-                                    <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-                                        <p className="text-gray-400 mb-1">جودة الخبر</p>
-                                        {quality ? (
-                                            <>
-                                                <p>الدرجة: {quality.score ?? '-'}/100</p>
-                                                {(quality.actionable_fixes || []).slice(0, 2).map((f: string, i: number) => (
-                                                    <p key={`cp-fix-${i}`} className="text-gray-300">- {cleanText(f)}</p>
-                                                ))}
-                                            </>
-                                        ) : <p className="text-gray-500">شغّل تقييم الجودة لرؤية التقرير.</p>}
-                                    </div>
-                                    <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-                                        <p className="text-gray-400 mb-1">التحقق</p>
-                                        <p>الادعاءات: {claims.length}</p>
-                                        <p>الحرجة: {claims.filter((c: any) => c?.blocking).length}</p>
-                                    </div>
-                                </>
-                            )}
-                        </div>
-                    </Panel>
+                {showSidePanels && (
+                <aside className="order-3 hidden xl:block xl:col-span-3 space-y-3 xl:sticky xl:top-24 self-start max-h-[calc(100vh-140px)] overflow-auto pr-1">
+                    {reportPanels}
+                </aside>
+                )}
+            </div>
 
-                    {showInlineResults && (
-                    <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4">
-                        <div className="flex gap-2 overflow-x-auto pb-1 xl:flex-wrap xl:overflow-visible">
-                            {visibleTabs.map((t) => (
-                                <button key={t.id} onClick={() => setActiveTab(t.id)} className={cn('shrink-0 min-h-9 px-2 py-1 rounded-lg text-[11px]', activeTab === t.id ? 'bg-emerald-500/20 text-emerald-200' : 'bg-white/10 text-gray-300')}>{t.label}</button>
-                            ))}
+            {detailsOpen && (
+                <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-4" dir="rtl">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <h2 className="text-sm text-white font-semibold">????? ??????</h2>
+                            <p className="text-[11px] text-gray-400">?????? ????? ???? ?????.</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => setDecisionDetailOpen((prev) => !prev)}
+                                className="rounded-lg border border-white/15 bg-white/10 px-2 py-1 text-[10px] text-gray-200"
+                            >
+                                {decisionDetailOpen ? '????? ????????' : '??? ????????'}
+                            </button>
+                            <button
+                                onClick={() => decisionActionHandlers.quick_check()}
+                                className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[10px] text-emerald-200"
+                            >
+                                ??? ????
+                            </button>
                         </div>
                     </div>
+
+                    {blockerSummary.count > 0 ? (
+                        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-amber-100">
+                            <p className="font-semibold">??????? ???? ?????: {blockerSummary.count}</p>
+                            <p className="text-[10px] text-amber-200 mt-1">
+                                {blockerSummary.top?.title || '???? ????????? ??? ???????.'}
+                            </p>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                                {isJournalist && (
+                                    <button
+                                        onClick={() => selfApproveDraft.mutate()}
+                                        disabled={selfApproveDraft.isPending || !hasSubmissionBody}
+                                        className="px-2 py-1 rounded bg-cyan-500/20 border border-cyan-500/30 text-[10px] text-cyan-100 disabled:opacity-60"
+                                    >
+                                        {selfApproveDraft.isPending ? '???? ????????...' : '?????? ?????'}
+                                    </button>
+                                )}
+                                <button
+                                    onClick={() => setOverrideOpen(true)}
+                                    disabled={!workId}
+                                    className="px-2 py-1 rounded bg-amber-500/20 border border-amber-500/30 text-[10px] text-amber-100 disabled:opacity-60"
+                                >
+                                    ????? ??????
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-2 text-[11px] text-emerald-100">
+                            ?? ???? ??????? ???? ????? ??????.
+                        </div>
                     )}
 
-                    {showInlineResults && activeTab === 'evidence' && (
-                        <Panel title="نتائج التحقق">
-                            {claims.length ? (
-                                <div className="space-y-2">
-                                    {claims.map((claim) => {
-                                        const claimId = String(claim?.id || '');
-                                        const draft = claimOverrideDrafts[claimId] || claimDraftFromClaim(claim);
-                                        const sourceInfo = classifyClaimSource(claim?.text || '');
-                                        const sourceStyles = severityStyles(sourceInfo.severity);
+                    <MemoryRecommendationPanel
+                        items={memoryRecommendations}
+                        isLoading={memoryRecommendationsQuery.isLoading}
+                        onMarkUsed={(itemId) => markMemoryUsedMutation.mutate(itemId)}
+                        onQuickCapture={() => setMemoryCaptureOpen(true)}
+                        onOpenLibrary={() => {
+                            if (typeof window !== 'undefined') {
+                                window.open('/memory', '_blank', 'noopener,noreferrer');
+                            }
+                        }}
+                    />
+
+                    <WorkflowHelpPanel title="??? ?????? ??? ?????? ?????" items={contextualGuideItems} />
+
+                    <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
+                        <p className="text-xs text-gray-300">???? ???????? ?????????</p>
+                        <div className="space-y-2">
+                            {decisionSectionsForView.map((section) => (
+                                <div key={section.title} className="rounded-lg border border-white/10 bg-white/5 p-2 space-y-2">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <p className="text-xs text-gray-200">{section.title}</p>
+                                        <span className="text-[10px] text-gray-400">{section.items.length} ??????</span>
+                                    </div>
+                                    {section.items.length === 0 && (
+                                        <p className="text-[11px] text-gray-500">?? ???? ??????? ??????.</p>
+                                    )}
+                                    {section.items.map((item) => {
+                                        const styles = severityStyles(item.severity);
                                         return (
-                                            <div
-                                                key={claimId}
-                                                className={cn(
-                                                    'rounded-xl border p-2 text-xs space-y-2',
-                                                    claim?.blocking ? 'border-red-500/30 bg-red-500/10' : 'border-emerald-500/30 bg-emerald-500/10',
-                                                )}
-                                            >
-                                                <div className="flex items-start justify-between gap-2">
-                                                    <p className="text-gray-100 flex-1">{cleanText(claim?.text || '')}</p>
-                                                    <div className="shrink-0 flex flex-col items-end gap-1">
-                                                        <span className={cn('rounded px-2 py-0.5 text-[10px]', claim?.blocking ? 'bg-red-500/20 text-red-100' : 'bg-emerald-500/20 text-emerald-100')}>
-                                                            {Math.round(Number(claim?.confidence || 0) * 100)}% ثقة
-                                                        </span>
-                                                        <span className={cn(
-                                                            'rounded px-2 py-0.5 text-[10px] uppercase',
-                                                            claim?.risk_level === 'high'
-                                                                ? 'bg-red-500/20 text-red-100'
-                                                                : claim?.risk_level === 'medium'
-                                                                    ? 'bg-amber-500/20 text-amber-100'
-                                                                    : 'bg-cyan-500/20 text-cyan-100',
-                                                        )}>
-                                                            {String(claim?.risk_level || 'low')}
-                                                        </span>
-                                                    </div>
+                                            <div key={item.id} className={cn('rounded-lg border p-2 text-[11px] space-y-1', styles.border)}>
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <p className="text-gray-200">{item.title}</p>
+                                                    <span className={cn('px-2 py-0.5 rounded text-[10px]', styles.badge)}>
+                                                        {severityLabel(item.severity)}
+                                                    </span>
                                                 </div>
-                                                <div className={cn('rounded-lg border px-2 py-1 text-[10px]', sourceStyles.border)}>
-                                                    <div className="flex items-center justify-between gap-2">
-                                                        <span className={cn('px-2 py-0.5 rounded text-[10px]', sourceStyles.badge)}>
-                                                            {sourceInfo.label}
-                                                        </span>
-                                                        <span className="text-gray-400">تصنيف المصدر</span>
-                                                    </div>
-                                                    <p className="text-gray-200 mt-1">{sourceInfo.reason}</p>
-                                                </div>
-                                                <textarea
-                                                    value={draft.evidenceLinksRaw}
-                                                    onChange={(e) => setClaimOverrideDraftField(claimId, { evidenceLinksRaw: e.target.value })}
-                                                    placeholder="روابط الأدلة أو مراجع DocIntel (سطر لكل مرجع أو مفصولة بفاصلة)"
-                                                    className="w-full min-h-14 rounded-lg bg-black/20 border border-white/15 px-2 py-1 text-[11px] text-gray-100 placeholder:text-gray-500"
-                                                />
-                                                {sources.length > 0 && (
-                                                    <div className="flex flex-wrap gap-1">
-                                                        {sources.slice(0, 6).map((source) => (
-                                                            <button
-                                                                key={`claim-source-${claimId}-${source.id}`}
-                                                                onClick={() =>
-                                                                    setClaimOverrideDraftField(claimId, {
-                                                                        evidenceLinksRaw: appendEvidenceLink(
-                                                                            draft.evidenceLinksRaw,
-                                                                            source.url || source.name,
-                                                                        ),
-                                                                    })
-                                                                }
-                                                                className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-gray-200"
-                                                            >
-                                                                {cleanText(source.name || source.url)}
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                                <label className="flex items-center gap-2 text-[11px] text-gray-200">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={Boolean(draft.unverifiable)}
-                                                        onChange={(e) => setClaimOverrideDraftField(claimId, { unverifiable: e.target.checked })}
-                                                    />
-                                                    تعليم الادعاء كغير قابل للتحقق مع سبب
-                                                </label>
-                                                {draft.unverifiable && (
-                                                    <input
-                                                        value={draft.unverifiableReason}
-                                                        onChange={(e) => setClaimOverrideDraftField(claimId, { unverifiableReason: e.target.value })}
-                                                        placeholder="سبب عدم إمكانية التحقق"
-                                                        className="w-full rounded-lg bg-black/20 border border-white/15 px-2 py-1 text-[11px] text-gray-100 placeholder:text-gray-500"
-                                                    />
+                                                <p className="text-gray-400">{item.reason}</p>
+                                                {item.action && (
+                                                    <button
+                                                        onClick={() => decisionActionHandlers[item.action as DecisionActionId]()}
+                                                        className="px-2 py-1 rounded bg-white/10 text-[10px] text-gray-200"
+                                                    >
+                                                        ??? ??????
+                                                    </button>
                                                 )}
                                             </div>
                                         );
                                     })}
-                                    <p className="text-[11px] text-gray-400">
-                                        عند الضغط على «تحقق»، يتم إرسال روابط الأدلة/حالات عدم التحقق الحالية لبوابة الجودة.
-                                    </p>
                                 </div>
-                            ) : <Empty text="اضغط زر «تحقق» لعرض الادعاءات." />}
-                        </Panel>
-                    )}
-
-                    {showInlineResults && activeTab === 'proofread' && (
-                        <Panel title="نتائج التدقيق اللغوي">
-                            {proofread ? (
-                                <div className="space-y-2 text-xs text-gray-200">
-                                    <div className="rounded-xl border border-lime-500/30 bg-lime-500/10 p-2 text-lime-100">
-                                        <p>العنوان المقترح: {cleanText(proofread?.title || title || 'بدون عنوان')}</p>
-                                        <p>التعديل: +{proofread?.diff_stats?.added || 0} / -{proofread?.diff_stats?.removed || 0}</p>
-                                    </div>
-                                    <div className="rounded-xl border border-white/10 bg-black/20 p-2">
-                                        <p className="text-gray-400 mb-1">قبل التدقيق</p>
-                                        <p className="text-gray-200 whitespace-pre-wrap max-h-40 overflow-auto">
-                                            {cleanText(proofread?.preview?.before_text || htmlToReadableText(bodyHtml))}
-                                        </p>
-                                    </div>
-                                    <div className="rounded-xl border border-lime-500/30 bg-lime-500/10 p-2">
-                                        <p className="text-lime-100 mb-1">بعد التدقيق</p>
-                                        <p className="text-lime-50 whitespace-pre-wrap max-h-40 overflow-auto">
-                                            {cleanText(proofread?.preview?.after_text || proofread?.body_text || htmlToReadableText(proofread?.body_html || ''))}
-                                        </p>
-                                    </div>
-                                    <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-gray-300">
-                                        <p className="text-gray-400 mb-1">ملاحظات التدقيق</p>
-                                        {(proofread?.issues || []).length ? (
-                                            (proofread.issues || []).slice(0, 12).map((issue: any, idx: number) => (
-                                                <p key={`${issue?.kind || 'issue'}-${idx}`}>
-                                                    - [{cleanText(issue?.kind || 'language')}] {cleanText(issue?.message || '')}
-                                                </p>
-                                            ))
-                                        ) : (
-                                            <p>لا توجد ملاحظات إضافية.</p>
-                                        )}
-                                    </div>
-                                    <div className="flex flex-wrap gap-2">
-                                        <button
-                                            onClick={() => applyProofread.mutate()}
-                                            disabled={applyProofread.isPending}
-                                            className="px-3 py-2 rounded-xl bg-emerald-500/30 text-emerald-100 text-xs disabled:opacity-60"
-                                        >
-                                            {applyProofread.isPending ? 'جاري التطبيق...' : 'تطبيق كنسخة جديدة'}
-                                        </button>
-                                        <button
-                                            onClick={() => setProofread(null)}
-                                            className="px-3 py-2 rounded-xl bg-white/10 text-gray-300 text-xs"
-                                        >
-                                            تجاهل
-                                        </button>
-                                    </div>
-                                </div>
-                            ) : <Empty text="اضغط زر «تدقيق لغوي» لعرض التصحيحات." />}
-                        </Panel>
-                    )}
-
-                    {showInlineResults && activeTab === 'quality' && (
-                        <Panel title="تقييم الجودة">
-                            {quality ? (
-                                <div className="space-y-2 text-xs text-gray-200">
-                                    <div className="rounded-xl border border-white/10 bg-white/5 p-2">الدرجة الكلية: <span className="font-semibold">{quality.score ?? '-'}/100</span></div>
-                                    {Object.entries(quality.metrics || {}).map(([k, v]) => (
-                                        <div key={k} className="flex items-center justify-between rounded-lg bg-black/20 px-2 py-1 text-gray-300"><span>{METRIC_LABELS[k] || k}</span><span>{String(v)}</span></div>
-                                    ))}
-                                    {!!quality.actionable_fixes?.length && <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-2 text-amber-100">{quality.actionable_fixes.map((f: string, i: number) => <p key={`${f}-${i}`}>- {cleanText(f)}</p>)}</div>}
-                                </div>
-                            ) : <Empty text="اضغط زر «جودة» للحصول على التقرير." />}
-                            {readiness && (
-                                <div className="mt-2 space-y-2 text-xs">
-                                    <div className={cn('rounded-xl border p-2', readiness.ready_for_publish ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100' : 'border-amber-500/30 bg-amber-500/10 text-amber-100')}>
-                                        {readiness.ready_for_publish ? 'جاهزية ممتازة للنشر بعد المراجعة البشرية.' : 'التقييمات تحتاج تحسين، لكنها لا توقف كتابة الصحفي.'}
-                                    </div>
-                                    {!readiness.ready_for_publish && (
-                                        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-2 text-amber-100 space-y-1">
-                                            {explainedBlockers.length === 0
-                                                ? <p className="text-[11px]">لا توجد تفاصيل إضافية بعد.</p>
-                                                : explainedBlockers.map((item, i) => (
-                                                    <div key={`ready-${i}`} className="text-[11px]">
-                                                        <span className="font-semibold">{item.title}</span>
-                                                        <span className="text-amber-100/80"> — {item.detail}</span>
-                                                    </div>
-                                                ))}
-                                        </div>
-                                    )}
-                                    {showTechnicalDiagnostics ? (
-                                        <>
-                                            <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-gray-300 space-y-1">
-                                                {Object.entries(readiness.reports || {}).map(([stage, report]) => (
-                                                    <div key={stage} className="flex items-center justify-between gap-2">
-                                                        <span>{STAGE_LABELS[stage] || stage}</span>
-                                                        <div className="flex items-center gap-2">
-                                                            <span className={report?.passed ? 'text-emerald-300' : 'text-red-300'}>{report?.passed ? 'ناجح' : 'فشل'}</span>
-                                                            {!report?.passed && STAGE_ACTIONS[stage] && (
-                                                                <button
-                                                                    onClick={() => decisionActionHandlers[STAGE_ACTIONS[stage] as DecisionActionId]()}
-                                                                    className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-gray-200"
-                                                                >
-                                                                    فتح
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                            {!!readiness.gates && (
-                                                <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-gray-200 space-y-2">
-                                                    <p className="text-[11px] text-gray-400">
-                                                        Gate Severities: blocker={readiness.gates.counts?.blocker || 0} · warn={readiness.gates.counts?.warn || 0} · info={readiness.gates.counts?.info || 0}
-                                                    </p>
-                                                    {([
-                                                        { key: 'blocker', label: 'Blockers', style: 'border-red-500/30 bg-red-500/10 text-red-100' },
-                                                        { key: 'warn', label: 'Warnings', style: 'border-amber-500/30 bg-amber-500/10 text-amber-100' },
-                                                        { key: 'info', label: 'Info', style: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-100' },
-                                                    ] as const).map((group) => {
-                                                        const groupItems = (readiness.gates.items || []).filter((item) => item.severity === group.key);
-                                                        if (groupItems.length === 0) return null;
-                                                        return (
-                                                            <div key={group.key} className="space-y-1">
-                                                                <p className="text-[11px] uppercase tracking-wide text-gray-400">{group.label}</p>
-                                                                {groupItems.map((item, idx) => (
-                                                                    <div
-                                                                        key={`${group.key}-${item.code}-${idx}`}
-                                                                        className={cn('rounded-lg border px-2 py-1', group.style)}
-                                                                    >
-                                                                        <p>{cleanText(item.message || '')}</p>
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            )}
-                                        </>
-                                    ) : (
-                                        <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-[11px] text-slate-300">
-                                            تفاصيل التقرير التقني مخفية لتقليل التشويش. يمكنك إظهارها من زر «عرض التفاصيل».
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        </Panel>
-                    )}
-
-                    {showInlineResults && activeTab === 'seo' && (
-                        <Panel title="نتائج SEO">
-                            {seoPack ? (
-                                <div className="space-y-2 text-xs text-gray-200">
-                                    <InfoBlock label="عنوان SEO" value={seoPack.seo_title} />
-                                    <InfoBlock label="الوصف التعريفي" value={seoPack.meta_description} />
-                                    <InfoBlock label="العبارة المفتاحية الرئيسية" value={seoPack.focus_keyphrase} />
-                                    <InfoBlock label="عبارات مفتاحية ثانوية" value={(seoPack.secondary_keyphrases || []).join('، ')} />
-                                    <InfoBlock label="الكلمات المفتاحية" value={(seoPack.keywords || []).join('، ')} />
-                                    <InfoBlock label="الوسوم" value={(seoPack.tags || []).join('، ')} />
-                                    <InfoBlock label="Slug" value={seoPack.slug} />
-                                    <InfoBlock label="OG Title" value={seoPack.og_title} />
-                                    <InfoBlock label="OG Description" value={seoPack.og_description} />
-                                    <InfoBlock label="Twitter Title" value={seoPack.twitter_title} />
-                                    <InfoBlock label="Twitter Description" value={seoPack.twitter_description} />
-                                    <div className={cn(
-                                        'rounded-lg border p-2 text-[11px]',
-                                        seoPack?.yoast?.meta_ok && seoPack?.yoast?.title_ok
-                                            ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100'
-                                            : 'border-amber-500/30 bg-amber-500/10 text-amber-100'
-                                    )}>
-                                        <p>جاهزية Yoast:</p>
-                                        <p>- طول Meta: {seoPack?.yoast?.meta_length ?? 0} (المطلوب 140-155)</p>
-                                        <p>- طول SEO Title: {seoPack?.yoast?.title_length ?? 0} (الموصى به 40-60)</p>
-                                    </div>
-                                </div>
-                            ) : <Empty text="اضغط زر «SEO» لاستخراج المقترحات." />}
-                            <div className="mt-3 rounded-xl border border-teal-500/30 bg-teal-500/10 p-2 space-y-2 text-xs text-teal-100">
-                                <p className="font-semibold">Link Intelligence (داخلي + خارجي)</p>
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <select
-                                        value={linkMode}
-                                        onChange={(e) => setLinkMode(e.target.value as 'internal' | 'external' | 'mixed')}
-                                        className="rounded-lg bg-black/30 border border-white/20 px-2 py-1 text-xs text-white"
-                                    >
-                                        <option value="mixed">مختلط</option>
-                                        <option value="internal">داخلي فقط</option>
-                                        <option value="external">خارجي فقط</option>
-                                    </select>
-                                    <button
-                                        onClick={() => runLinks.mutate()}
-                                        disabled={runLinks.isPending}
-                                        className="px-2 py-1 rounded-lg bg-teal-500/30 border border-teal-400/40 text-teal-50 disabled:opacity-50"
-                                    >
-                                        {runLinks.isPending ? 'جاري التوليد...' : 'توليد روابط'}
-                                    </button>
-                                    <button
-                                        onClick={() => validateLinks.mutate()}
-                                        disabled={!linkRunId || validateLinks.isPending}
-                                        className="px-2 py-1 rounded-lg bg-white/10 border border-white/20 text-gray-200 disabled:opacity-50"
-                                    >
-                                        فحص الروابط
-                                    </button>
-                                    <button
-                                        onClick={() => applyLinks.mutate()}
-                                        disabled={!linkRunId || applyLinks.isPending || !linkSuggestions.length}
-                                        className="px-2 py-1 rounded-lg bg-emerald-500/30 border border-emerald-400/40 text-emerald-50 disabled:opacity-50"
-                                    >
-                                        تطبيق المحدد
-                                    </button>
-                                </div>
-                                {linkRunId ? <p className="text-[11px] text-teal-50/80">Run ID: {linkRunId}</p> : null}
-
-                                {!!linkSuggestions.length && (
-                                    <div className="space-y-1 max-h-64 overflow-auto">
-                                        {linkSuggestions.map((item: any) => (
-                                            <label key={`lnk-${item.id}`} className="block rounded-lg border border-white/15 bg-black/20 p-2 cursor-pointer">
-                                                <div className="flex items-start gap-2">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={item.selected !== false}
-                                                        onChange={(e) =>
-                                                            setLinkSuggestions((prev) =>
-                                                                prev.map((x: any) =>
-                                                                    x.id === item.id ? { ...x, selected: e.target.checked } : x
-                                                                )
-                                                            )
-                                                        }
-                                                    />
-                                                    <div className="min-w-0 flex-1">
-                                                        <p className="text-teal-100 line-clamp-1">{cleanText(item.title || '')}</p>
-                                                        <p className="text-gray-300 line-clamp-1">{cleanText(item.anchor_text || '')}</p>
-                                                        <p className="text-[11px] text-gray-400 line-clamp-1">{item.url}</p>
-                                                        <p className="text-[11px] text-gray-400">
-                                                            {item.link_type === 'external' ? 'خارجي' : 'داخلي'} •
-                                                            Score {Number(item.score || 0).toFixed(2)} •
-                                                            ثقة {Math.round(Number(item.confidence || 0) * 100)}%
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            </label>
-                                        ))}
-                                    </div>
-                                )}
-
-                                {!!linkHistory.length && (
-                                    <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-                                        <p className="text-gray-300 mb-1">آخر تشغيلات الروابط</p>
-                                        {(linkHistory || []).slice(0, 3).map((run: any) => (
-                                            <p key={`hist-${run.run_id}`} className="text-[11px] text-gray-400">
-                                                {run.mode} • {run.status} • {run.run_id}
-                                            </p>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                            {!!headlineInsights.length && (
-                                <div className="mt-2 rounded-xl border border-white/10 bg-black/20 p-2 text-xs text-gray-200 space-y-2">
-                                    <p className="text-gray-400 mb-1">تحليل العناوين (وضوح + SEO)</p>
-                                    {headlineInsights.map((item, idx) => (
-                                        <div key={`headline-${idx}-${item.headline}`} className="rounded-lg border border-white/10 bg-black/20 p-2 space-y-1">
-                                            <div className="flex items-center justify-between gap-2">
-                                                <p className="text-gray-200 line-clamp-2">{cleanText(item.headline || '')}</p>
-                                                <span className={cn('px-2 py-0.5 rounded text-[10px]', item.score >= 80 ? 'bg-emerald-500/20 text-emerald-100' : item.score >= 65 ? 'bg-amber-500/20 text-amber-100' : 'bg-rose-500/20 text-rose-100')}>
-                                                    {item.score}/100
-                                                </span>
-                                            </div>
-                                            {!!item.reasons?.length && <p className="text-[10px] text-emerald-200">أسباب القوة: {item.reasons.slice(0, 2).join(' • ')}</p>}
-                                            {!!item.risks?.length && <p className="text-[10px] text-amber-200">مخاطر: {item.risks.slice(0, 2).join(' • ')}</p>}
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </Panel>
-                    )}
-
-                    {showInlineResults && activeTab === 'social' && (
-                        <Panel title="نسخ السوشيال">
-                            {social ? (
-                                <div className="space-y-2 text-xs text-gray-200">
-                                    <InfoBlock label="فيسبوك" value={social.facebook} />
-                                    <InfoBlock label="X" value={social.x} />
-                                    <InfoBlock label="Push" value={social.push} />
-                                    <InfoBlock label="ملخص 120 كلمة" value={social.summary_120} />
-                                    <InfoBlock label="تنبيه عاجل" value={social.breaking_alert} />
-                                </div>
-                            ) : <Empty text="اضغط زر «سوشيال» لإنشاء النسخ." />}
-                        </Panel>
-                    )}
-
-                    {showInlineResults && activeTab === 'msi' && (
-                        <Panel title="MSI السياقي">
-                            {msiContextHit ? (
-                                <div className={cn('rounded-xl border p-2 text-xs', Number(msiContextHit.msi || 100) < 60 ? 'border-red-500/30 bg-red-500/10 text-red-100' : 'border-amber-500/30 bg-amber-500/10 text-amber-100')}>
-                                    <p className="font-semibold mb-1">تنبيه سياقي مرتبط بالكيان: {cleanText(msiContextHit.entity || '')}</p>
-                                    <p>المؤشر الحالي: {Number(msiContextHit.msi || 0).toFixed(1)} / 100</p>
-                                    <p>التصنيف: {cleanText(msiContextHit.level || '-')}</p>
-                                    <p className="mt-1 text-[11px] opacity-90">عند انخفاض المؤشر، شدّد على التحقق من الادعاءات والمصادر قبل الإرسال النهائي.</p>
-                                </div>
-                            ) : (
-                                <Empty text="لا يوجد تطابق MSI مباشر مع موضوع المسودة الحالية." />
-                            )}
-                            <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-xs text-gray-300 mt-2 space-y-1">
-                                <p className="text-gray-400 mb-1">الأكثر اضطراباً اليوم</p>
-                                {(msiTopDaily || []).slice(0, 5).map((item: any) => (
-                                    <div key={`msi-d-${item.profile_id}-${item.entity}-${item.period_end}`} className="flex items-center justify-between">
-                                        <span className="line-clamp-1">{cleanText(item.entity || '-')}</span>
-                                        <span className="text-red-300">{Number(item.msi || 0).toFixed(1)}</span>
-                                    </div>
-                                ))}
-                            </div>
-                            <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-xs text-gray-300 space-y-1">
-                                <p className="text-gray-400 mb-1">الأكثر اضطراباً أسبوعياً</p>
-                                {(msiTopWeekly || []).slice(0, 5).map((item: any) => (
-                                    <div key={`msi-w-${item.profile_id}-${item.entity}-${item.period_end}`} className="flex items-center justify-between">
-                                        <span className="line-clamp-1">{cleanText(item.entity || '-')}</span>
-                                        <span className="text-orange-300">{Number(item.msi || 0).toFixed(1)}</span>
-                                    </div>
-                                ))}
-                            </div>
-                        </Panel>
-                    )}
-
-                    {showInlineResults && activeTab === 'simulator' && (
-                        <Panel title="محاكي الجمهور">
-                            {simResult ? (
-                                <div className="space-y-2 text-xs text-gray-200">
-                                    <div className="rounded-xl border border-white/10 bg-black/20 p-2">
-                                        <p>مخاطر المحتوى: <span className="font-semibold text-red-200">{Number(simResult.risk_score || 0).toFixed(1)}/10</span></p>
-                                        <p>قابلية الانتشار: <span className="font-semibold text-cyan-200">{Number(simResult.virality_score || 0).toFixed(1)}/10</span></p>
-                                        <p>تصنيف الحوكمة: <span className="font-semibold text-amber-200">{cleanText(simResult.policy_level || '-')}</span></p>
-                                        <p>موثوقية القياس: <span className="font-semibold text-gray-100">{Number(simResult.confidence_score || 0).toFixed(1)}%</span></p>
-                                    </div>
-                                    <div className="rounded-xl border border-white/10 bg-black/20 p-2">
-                                        <p className="text-gray-400 mb-1">ردود الشخصيات</p>
-                                        {(simResult.reactions || []).map((rx: any, idx: number) => (
-                                            <p key={`${rx.persona_id || 'persona'}-${idx}`}>
-                                                - {cleanText(rx.persona_label || rx.persona_id || 'شخصية')}: {cleanText(rx.comment || '')}
-                                            </p>
-                                        ))}
-                                    </div>
-                                    <div className="rounded-xl border border-white/10 bg-black/20 p-2">
-                                        <p className="text-gray-400 mb-1">نصائح التحرير</p>
-                                        <p>{cleanText(simResult?.advice?.summary || '') || '—'}</p>
-                                        {(simResult?.advice?.improvements || []).map((fix: string, idx: number) => (
-                                            <p key={`${fix}-${idx}`}>- {cleanText(fix)}</p>
-                                        ))}
-                                    </div>
-                                </div>
-                            ) : (
-                                <Empty text="اضغط زر «محاكي الجمهور» لتقييم العنوان قبل الاعتماد." />
-                            )}
-                        </Panel>
-                    )}
-
-                    {showInlineResults && activeTab === 'xray' && (
-                        <Panel title="زوايا المنافسين">
-                            {xrayItems.length ? (
-                                <div className="space-y-2 text-xs text-gray-200">
-                                    {xrayItems.slice(0, 6).map((item: any) => (
-                                        <div key={`xray-${item.id}`} className="rounded-xl border border-white/10 bg-black/20 p-2">
-                                            <a href={item.competitor_url} target="_blank" rel="noreferrer" className="text-cyan-300 hover:underline line-clamp-1">
-                                                {cleanText(item.competitor_title || '')}
-                                            </a>
-                                            <p className="text-[11px] text-amber-200 mt-1">أولوية {Number(item.priority_score || 0).toFixed(1)}</p>
-                                            {item.angle_title ? <p className="text-emerald-200 mt-1">{cleanText(item.angle_title)}</p> : null}
-                                            {item.angle_rationale ? <p className="text-gray-300 mt-1 line-clamp-3">{cleanText(item.angle_rationale)}</p> : null}
-                                            {(item.angle_questions_json || []).slice(0, 3).map((qText: string, idx: number) => (
-                                                <p key={`${item.id}-q-${idx}`} className="text-gray-200">- {cleanText(qText)}</p>
-                                            ))}
-                                            <div className="flex flex-wrap gap-2 mt-2">
-                                                <button
-                                                    onClick={() => xrayBriefMutation.mutate(item.id)}
-                                                    className="px-2 py-1 rounded bg-cyan-500/20 border border-cyan-500/30 text-cyan-200"
-                                                >
-                                                    توليد Brief
-                                                </button>
-                                                <button
-                                                    onClick={() => xrayMarkUsed.mutate(item.id)}
-                                                    className="px-2 py-1 rounded bg-emerald-500/20 border border-emerald-500/30 text-emerald-200"
-                                                >
-                                                    تم الاستخدام
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ))}
-                                    {xrayBrief ? (
-                                        <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-2 text-cyan-100 space-y-1">
-                                            <p className="font-semibold">{cleanText(xrayBrief.title || 'Brief')}</p>
-                                            <p>{cleanText(xrayBrief.counter_angle || '')}</p>
-                                            <p className="text-cyan-200">{cleanText(xrayBrief.why_it_wins || '')}</p>
-                                            {(xrayBrief.newsroom_plan || []).slice(0, 4).map((step: string, idx: number) => (
-                                                <p key={`${step}-${idx}`}>- {cleanText(step)}</p>
-                                            ))}
-                                        </div>
-                                    ) : null}
-                                </div>
-                            ) : (
-                                <Empty text="لا توجد فجوات منافسين مرتبطة مباشرة بموضوع المسودة الحالية." />
-                            )}
-                        </Panel>
-                    )}
-
-                    {showInlineResults && activeTab === 'context' && (
-                        <Panel title="السياق والنسخ">
-                            <div className="space-y-1 max-h-32 overflow-auto">
-                                {versions.map((v) => <button key={v.id} onClick={() => restoreVersion.mutate(v.version)} className="w-full text-right rounded bg-white/5 px-2 py-1 text-xs text-gray-200">الإصدار v{v.version} • {v.change_origin || 'يدوي'}</button>)}
-                            </div>
-                            <div className="flex gap-2 mt-2">
-                                <select value={cmpFrom || ''} onChange={(e) => setCmpFrom(Number(e.target.value))} className="flex-1 bg-white/10 rounded px-2 py-1 text-xs">{versions.map((v) => <option key={`f-${v.id}`} value={v.version}>من v{v.version}</option>)}</select>
-                                <select value={cmpTo || ''} onChange={(e) => setCmpTo(Number(e.target.value))} className="flex-1 bg-white/10 rounded px-2 py-1 text-xs">{versions.map((v) => <option key={`t-${v.id}`} value={v.version}>إلى v{v.version}</option>)}</select>
-                                <button onClick={() => runDiff.mutate()} className="px-2 py-1 rounded bg-white/10 text-xs">فرق</button>
-                            </div>
-                            <pre className="max-h-36 overflow-auto text-[11px] text-gray-200 whitespace-pre-wrap mt-2" dir="ltr">{diffView || 'لا يوجد فرق معروض بعد.'}</pre>
-                            <div className="rounded-xl border border-white/10 bg-black/20 p-2 text-xs text-gray-300">
-                                <p className="text-gray-400 mb-1">الخط الزمني المرتبط</p>
-                                {storyTimelineSorted.slice(0, 5).map((item: any) => (
-                                    <p key={item.id}>- {cleanText(item.title || 'بدون عنوان')}</p>
-                                ))}
-                            </div>
-                            <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-2 text-xs text-cyan-100 space-y-1">
-                                <p className="text-cyan-200">تلميحات الدستور أثناء التحرير</p>
-                                {(constitutionTips || []).slice(0, 4).map((tip: string, idx: number) => (
-                                    <p key={`${tip}-${idx}`}>- {cleanText(tip)}</p>
-                                ))}
-                            </div>
-                        </Panel>
-                    )}
+                            ))}
+                        </div>
                     </div>
                 </div>
-                )}
-            </div>
+            )}
 
             {paletteOpen && (
                 <div className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-sm flex items-start justify-center p-4">
