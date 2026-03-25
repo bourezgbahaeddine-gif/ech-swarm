@@ -1,7 +1,7 @@
 ﻿'use client';
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps, react-hooks/refs */
 
-import { Suspense, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import NextLink from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'next/navigation';
@@ -54,6 +54,9 @@ import { WorkflowHelpPanel } from '@/components/workflow/WorkflowHelpPanel';
 import { RoleOnboardingBanner } from '@/components/workflow/RoleOnboardingBanner';
 import { MemoryRecommendationPanel } from '@/components/memory/MemoryRecommendationPanel';
 import { MemoryQuickCaptureModal } from '@/components/memory/MemoryQuickCaptureModal';
+import { WorkspaceGuideModal } from '@/components/workspace-drafts/WorkspaceGuideModal';
+import { WorkspacePromptSuggestionCard } from '@/components/workspace-drafts/WorkspacePromptSuggestionCard';
+import { WorkspaceEmpty as Empty, WorkspaceInfoBlock as InfoBlock, WorkspacePanel as Panel } from '@/components/workspace-drafts/WorkspacePrimitives';
 import { trackNextAction, trackUiAction, useTrackSurfaceView } from '@/lib/ux-telemetry';
 
 type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
@@ -189,10 +192,10 @@ const ACTION_HELP: Record<ActionId, { title: string; description: string; when: 
     },
     publish_gate: {
         title: 'زر بوابة النشر',
-        description: 'يفحص الجاهزية النهائية ويمنع النشر عند وجود موانع.',
-        when: 'استخدمه قبل إرسال النسخة للاعتماد أو عندما تريد التأكد أن لا توجد موانع حرجة.',
-        after: 'إذا أصبح النص جاهزًا فانتقل إلى الإرسال، وإذا ظهرت موانع فابدأ بعلاج أول مانع ظاهر.',
-        caution: 'لا تتجاوز الموانع إلا إذا كانت هناك ضرورة تحريرية واضحة ومعللة.',
+        description: 'يفحص الجاهزية النهائية ويعرض ملاحظات الجودة قبل التسليم.',
+        when: 'استخدمه قبل إرسال النسخة للاعتماد أو عندما تريد تقييمًا سريعًا للنص.',
+        after: 'إذا ظهرت ملاحظات، عالج المهم أولًا أو أكمل ودوّن ما ستراجعه لاحقًا.',
+        caution: 'اعتبر النتيجة مرشدًا تحريريًا يساعدك على اتخاذ القرار.',
     },
     apply: {
         title: 'زر إرسال الاعتماد',
@@ -319,7 +322,7 @@ function explainBlockerReason(reason: string): BlockerExplanation {
     }
 
     return {
-        title: 'مانع نشر',
+        title: 'ملاحظة جودة',
         detail: msg,
         action: 'publish_gate',
         raw: msg,
@@ -759,6 +762,7 @@ function WorkspaceDraftsPageContent() {
     const { user } = useAuth();
     const userRole = (user?.role || '').toLowerCase();
     const isDirector = userRole === 'director';
+    const isJournalist = userRole === 'journalist';
     const isWriterRole = ['journalist', 'social_media', 'print_editor', 'fact_checker'].includes(userRole);
     const search = useSearchParams();
     const articleId = search.get('article_id');
@@ -1642,7 +1646,7 @@ function WorkspaceDraftsPageContent() {
                 id: 'readiness',
                 title: 'بوابة النشر',
                 value: readiness ? (readinessReady ? 'جاهز للنشر' : 'غير جاهز') : 'غير مفعلة',
-                hint: readiness ? (readinessReady ? 'لا توجد موانع حرجة حالياً.' : 'راجع أسباب المنع قبل الإرسال.') : 'شغّل بوابة النشر للتحقق من الجاهزية.',
+                hint: readiness ? (readinessReady ? 'لا توجد ملاحظات حرجة حالياً.' : 'راجع ملاحظات الجودة قبل الإرسال.') : 'شغّل بوابة النشر للتحقق من الجاهزية.',
                 severity: readiness ? (readinessReady ? 'low' : 'high') : 'medium',
                 action: 'publish_gate',
             },
@@ -1801,13 +1805,16 @@ function WorkspaceDraftsPageContent() {
     }, [readiness, claims, quality]);
 
     const bodyText = useMemo(() => htmlToReadableText(bodyHtml || ''), [bodyHtml]);
+    const hasSubmissionBody = bodyText.trim().length >= 120;
 
     const nextActionHelp = useMemo(() => ACTION_HELP[nextAction.actionId], [nextAction.actionId]);
 
     const editorChecklist = useMemo(() => {
         const hasDraftBody = bodyText.trim().length >= 240;
         const hasQuickCheckSignal = Boolean(readiness || quality || proofread || claims.length > 0);
-        const isReadyForApproval = Boolean(readiness?.ready_for_publish) && blockerSummary.count === 0;
+        const isReadyForApproval = isJournalist
+            ? hasDraftBody
+            : Boolean(readiness?.ready_for_publish) && blockerSummary.count === 0;
 
         if (isWriteMode) {
             return [
@@ -1825,8 +1832,10 @@ function WorkspaceDraftsPageContent() {
                 },
                 {
                     id: 'send_to_chief',
-                    title: 'أرسل لاعتماد رئيس التحرير',
-                    hint: isReadyForApproval ? 'النسخة جاهزة للإرسال بعد المراجعة البشرية.' : 'لا تنتقل إلى الإرسال قبل معالجة الموانع الحرجة.',
+                    title: isJournalist ? 'اعتماد مباشر أو إرسال للرئيس' : 'أرسل لاعتماد رئيس التحرير',
+                    hint: isReadyForApproval
+                        ? 'يمكنك إنهاء الموضوع مباشرة، أو إرساله للرئيس إذا أردت مراجعة إضافية.'
+                        : 'أكمل المتن أولاً ثم اختر مسار الاعتماد المناسب.',
                     status: isReadyForApproval ? 'current' : 'upcoming',
                 },
             ];
@@ -1837,7 +1846,7 @@ function WorkspaceDraftsPageContent() {
                 {
                     id: 'resolve_blockers',
                     title: 'عالج أول مانع مهم',
-                    hint: blockerSummary.count > 0 ? `يوجد ${blockerSummary.count} مانع/ملاحظة عالية الأولوية.` : 'لا توجد موانع حرجة ظاهرة الآن.',
+                    hint: blockerSummary.count > 0 ? `يوجد ${blockerSummary.count} ملاحظة عالية الأولوية.` : 'لا توجد ملاحظات حرجة ظاهرة الآن.',
                     status: blockerSummary.count === 0 ? 'done' : 'current',
                 },
                 {
@@ -1880,6 +1889,7 @@ function WorkspaceDraftsPageContent() {
         blockerSummary.count,
         bodyText,
         claims.length,
+        isJournalist,
         isImproveMode,
         isWriteMode,
         msiTopDaily.length,
@@ -2171,26 +2181,32 @@ function WorkspaceDraftsPageContent() {
     });
     const runDiff = useMutation({ mutationFn: () => editorialApi.draftDiff(workId!, cmpFrom!, cmpTo!), onSuccess: (r) => setDiffView(r.data?.diff || '') });
     const restoreVersion = useMutation({ mutationFn: (v: number) => editorialApi.restoreWorkspaceDraftVersion(workId!, v), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['smart-editor-context', workId] }); queryClient.invalidateQueries({ queryKey: ['smart-editor-versions', workId] }); } });
+    const handleSubmissionSuccess = (data: any, fallbackMessage: string) => {
+        setOk(data?.status_message ? `تم الإرسال: ${data.status_message}` : fallbackMessage);
+        setErr(null);
+        queryClient.invalidateQueries({ queryKey: ['smart-editor-context', workId] });
+    };
     const applyToArticle = useMutation({
         mutationFn: () => editorialApi.submitWorkspaceDraftForChief(workId!),
         onSuccess: (res) => {
-            const data = res.data || {};
-            if (data?.status_message) {
-                setOk(`تم الإرسال: ${data.status_message}`);
-            } else {
-                setOk('تم إرسال النسخة إلى رئيس التحرير.');
-            }
-            queryClient.invalidateQueries({ queryKey: ['smart-editor-context', workId] });
+            handleSubmissionSuccess(res.data || {}, 'تم إرسال النسخة إلى رئيس التحرير.');
         },
         onError: (e: any) => {
             const detail = e?.response?.data?.detail;
             if (detail?.blocking_reasons) {
-                setErr('لا يمكن الإرسال بسبب موانع. يمكنك إرسال طلب بتحفّظ.');
+                setErr('ظهرت ملاحظات جودة. يمكنك المتابعة بالاعتماد المباشر أو الإرسال بتحفّظ.');
                 setOverrideOpen(true);
                 return;
             }
             setErr(detail || e?.message || 'تعذر إرسال النسخة.');
         },
+    });
+    const selfApproveDraft = useMutation({
+        mutationFn: () => editorialApi.selfApproveWorkspaceDraft(workId!),
+        onSuccess: (res) => {
+            handleSubmissionSuccess(res.data || {}, 'تم اعتماد الموضوع مباشرة من الصحفي.');
+        },
+        onError: (e: any) => setErr(e?.response?.data?.detail || e?.message || 'تعذر الاعتماد المباشر.'),
     });
     const submitWithReservations = useMutation({
         mutationFn: () => editorialApi.submitWorkspaceDraftWithReservations(workId!, { notes: overrideNote.trim() }),
@@ -2521,17 +2537,17 @@ function WorkspaceDraftsPageContent() {
 
     const decisionSections = isAdvancedMode
         ? [
-            { key: 'urgent', title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد موانع حرجة حالياً.', showAll: showUrgentAll, toggle: () => setShowUrgentAll((v) => !v) },
+            { key: 'urgent', title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد ملاحظات حرجة حالياً.', showAll: showUrgentAll, toggle: () => setShowUrgentAll((v) => !v) },
             { key: 'improve', title: 'يحسّن الجودة', items: decisionModel.improve, empty: 'لا توجد تحسينات عاجلة للجودة.', showAll: showImproveAll, toggle: () => setShowImproveAll((v) => !v) },
             { key: 'extra', title: 'تحسينات إضافية', items: decisionModel.extra, empty: 'لا توجد تحسينات إضافية الآن.', showAll: showExtraAll, toggle: () => setShowExtraAll((v) => !v) },
         ]
         : isImproveMode
             ? [
-                { key: 'urgent', title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد موانع حرجة حالياً.', showAll: showUrgentAll, toggle: () => setShowUrgentAll((v) => !v) },
+                { key: 'urgent', title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد ملاحظات حرجة حالياً.', showAll: showUrgentAll, toggle: () => setShowUrgentAll((v) => !v) },
                 { key: 'improve', title: 'يحسّن الجودة', items: decisionModel.improve, empty: 'لا توجد تحسينات عاجلة للجودة.', showAll: showImproveAll, toggle: () => setShowImproveAll((v) => !v) },
             ]
             : [
-                { key: 'urgent', title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد موانع حرجة حالياً.', showAll: showUrgentAll, toggle: () => setShowUrgentAll((v) => !v) },
+                { key: 'urgent', title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد ملاحظات حرجة حالياً.', showAll: showUrgentAll, toggle: () => setShowUrgentAll((v) => !v) },
             ];
 
     const decisionSectionsForView = useMemo(() => {
@@ -3116,17 +3132,17 @@ function WorkspaceDraftsPageContent() {
                 )}
 
                 {blockerSummary.count > 0 ? (
-                    <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] text-red-100">
+                    <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
                         <div className="space-y-0.5">
-                            <p className="font-semibold">موانع حرجة ({blockerSummary.count})</p>
-                            <p className="text-[10px] text-red-200 line-clamp-1">
-                                {explainedBlockers[0]?.title || blockerSummary.top?.title || 'موانع تحتاج معالجة قبل الإرسال.'}
+                            <p className="font-semibold">ملاحظات جودة عالية ({blockerSummary.count})</p>
+                            <p className="text-[10px] text-amber-200 line-clamp-1">
+                                {explainedBlockers[0]?.title || blockerSummary.top?.title || 'يمكنك معالجتها الآن أو المتابعة ثم الرجوع لها.'}
                             </p>
                         </div>
                     </div>
                 ) : (
                     <div className="mt-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-[10px] text-emerald-200">
-                        لا توجد موانع حرجة حالياً.
+                        لا توجد ملاحظات جودة عالية حالياً.
                     </div>
                 )}
 
@@ -3172,16 +3188,26 @@ function WorkspaceDraftsPageContent() {
                         >
                             <Save className="w-4 h-4" />حفظ
                         </button>
-                        {Boolean(readiness?.ready_for_publish) && blockerSummary.count === 0 && (
+                        <button
+                            disabled={applyToArticle.isPending || !hasSubmissionBody}
+                            onClick={() => {
+                                trackNextAction('workspace_drafts', 'إرسال لاعتماد رئيس التحرير', surfaceDetails);
+                                runWithGuide('apply', () => applyToArticle.mutate());
+                            }}
+                            className="min-h-10 px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-100 text-xs disabled:opacity-60"
+                        >
+                            {applyToArticle.isPending ? 'جاري الإرسال...' : 'إرسال لاعتماد رئيس التحرير'}
+                        </button>
+                        {isJournalist && (
                             <button
-                                disabled={applyToArticle.isPending}
+                                disabled={selfApproveDraft.isPending || !hasSubmissionBody}
                                 onClick={() => {
-                                    trackNextAction('workspace_drafts', 'إرسال لاعتماد رئيس التحرير', surfaceDetails);
-                                    runWithGuide('apply', () => applyToArticle.mutate());
+                                    trackNextAction('workspace_drafts', 'اعتماد مباشر', surfaceDetails);
+                                    runWithGuide('apply', () => selfApproveDraft.mutate());
                                 }}
-                                className="min-h-10 px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-100 text-xs disabled:opacity-60"
+                                className="min-h-10 px-3 py-2 rounded-xl bg-cyan-500/15 border border-cyan-500/30 text-cyan-100 text-xs disabled:opacity-60"
                             >
-                                {applyToArticle.isPending ? 'جاري الإرسال...' : 'إرسال لاعتماد رئيس التحرير'}
+                                {selfApproveDraft.isPending ? 'جاري الاعتماد...' : 'اعتماد مباشر'}
                             </button>
                         )}
                         <div className="mr-auto flex items-center gap-2">
@@ -3221,7 +3247,7 @@ function WorkspaceDraftsPageContent() {
                         </div>
                         {showWriterMinimal && (
                             <p className="mt-2 text-[11px] text-slate-400">
-                                المطلوب الآن ببساطة: اكتب النص، ثم اضغط الزر الرئيسي عندما تنتهي.
+                                المطلوب الآن ببساطة: اكتب النص ثم اختر الإجراء المناسب لك (اعتماد مباشر أو إرسال للرئيس).
                             </p>
                         )}
                         {!showWriterMinimal && (
@@ -3230,73 +3256,27 @@ function WorkspaceDraftsPageContent() {
                             </p>
                         )}
                         {promptSuggestion && (
-                            <div className="mt-3 rounded-2xl border border-fuchsia-500/20 bg-fuchsia-500/10 p-3 text-right">
-                                <div className="flex flex-wrap items-start justify-between gap-3">
-                                    <div className="space-y-1">
-                                        <div className="inline-flex items-center gap-2 rounded-full border border-fuchsia-500/25 bg-fuchsia-500/10 px-2.5 py-1 text-[10px] text-fuchsia-100">
-                                            <Sparkles className="h-3.5 w-3.5" />
-                                            القالب الذكي المقترح الآن
-                                        </div>
-                                        <div className="text-sm font-semibold text-white">{promptSuggestion.task_label}</div>
-                                        <p className="max-w-3xl text-[11px] leading-6 text-fuchsia-50/90">
-                                            {promptSuggestion.reason}
-                                        </p>
-                                        <div className="flex flex-wrap gap-2 text-[10px] text-slate-300">
-                                            <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
-                                                {promptSuggestion.template_title}
-                                            </span>
-                                            <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
-                                                {promptSuggestion.word_count} كلمة تقريبًا
-                                            </span>
-                                            {promptSuggestion.auto_apply_default && (
-                                                <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-emerald-200">
-                                                    سيُطبَّق تلقائيًا عند نجاح التوليد
-                                                </span>
-                                            )}
-                                        </div>
-                                    </div>
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        <button
-                                            type="button"
-                                            disabled={runPromptOrchestrator.isPending}
-                                            onClick={() => {
-                                                trackUiAction('workspace_drafts', 'تشغيل التوليد الذكي', {
-                                                    ...surfaceDetails,
-                                                    task_key: promptSuggestion.task_key,
-                                                    template_key: promptSuggestion.template_key,
-                                                });
-                                                runPromptOrchestrator.mutate({
-                                                    task_key: promptSuggestion.task_key,
-                                                    auto_apply: promptSuggestion.auto_apply_default,
-                                                });
-                                            }}
-                                            className="min-h-10 rounded-xl border border-fuchsia-400/30 bg-fuchsia-500/15 px-4 py-2 text-xs font-medium text-fuchsia-50 disabled:opacity-60"
-                                        >
-                                            {runPromptOrchestrator.isPending ? 'جاري التوليد...' : 'شغّل التوليد الذكي'}
-                                        </button>
-                                        <NextLink
-                                            href={promptSuggestion.playbook_href}
-                                            className="min-h-10 rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-xs text-slate-200"
-                                        >
-                                            راجع القالب
-                                        </NextLink>
-                                    </div>
-                                </div>
-                                <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-                                    {promptSuggestion.auto_filled_fields.slice(0, 4).map((field) => (
-                                        <div key={`${field.label}-${field.value}`} className="rounded-xl border border-white/10 bg-black/20 px-3 py-2">
-                                            <div className="text-[10px] text-slate-400">{field.label}</div>
-                                            <div className="mt-1 line-clamp-2 text-[11px] text-white">{field.value}</div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
+                            <WorkspacePromptSuggestionCard
+                                suggestion={promptSuggestion}
+                                isPending={runPromptOrchestrator.isPending}
+                                onRun={() => {
+                                    trackUiAction('workspace_drafts', 'تشغيل التوليد الذكي', {
+                                        ...surfaceDetails,
+                                        task_key: promptSuggestion.task_key,
+                                        template_key: promptSuggestion.template_key,
+                                    });
+                                    runPromptOrchestrator.mutate({
+                                        task_key: promptSuggestion.task_key,
+                                        auto_apply: promptSuggestion.auto_apply_default,
+                                    });
+                                }}
+                            />
                         )}
                     </div>
                     {!showWriterMinimal && (
                     <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-[11px] text-gray-300" dir="rtl">
                         {isWriteMode
-                            ? 'هذا الوضع مخصص للصحفي: اكتب النص، شغّل الفحص السريع، ثم أرسل لاعتماد رئيس التحرير.'
+                            ? 'هذا الوضع مخصص للصحفي: اكتب النص، شغّل الفحص السريع، ثم اختر اعتماد مباشر أو إرسال للرئيس.'
                             : isImproveMode
                                 ? 'هذا الوضع يفتح أدوات التحسين العملية: التحقق، التدقيق، الجودة، SEO، والسوشيال.'
                                 : 'هذا الوضع مخصص للمراجعة العميقة: التفسير، محاكاة التفاعل، MSI، وزوايا المنافسين.'}
@@ -3525,16 +3505,25 @@ function WorkspaceDraftsPageContent() {
                 </div>
 
                 {blockerSummary.count > 0 && (
-                    <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-[10px] text-red-100 space-y-2">
+                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-[10px] text-amber-100 space-y-2">
                         <div className="flex items-center justify-between gap-2">
-                            <p className="font-semibold">موانع حرجة ({blockerSummary.count})</p>
+                            <p className="font-semibold">ملاحظات جودة عاجلة ({blockerSummary.count})</p>
                             <div className="flex items-center gap-2">
                                 {blockerActionHandler && (
                                     <button
                                         onClick={() => blockerActionHandler()}
                                         className="px-2 py-1 rounded bg-white/10 border border-white/15 text-[10px]"
                                     >
-                                        حل الآن
+                                        معالجة الآن
+                                    </button>
+                                )}
+                                {isJournalist && (
+                                    <button
+                                        onClick={() => selfApproveDraft.mutate()}
+                                        disabled={selfApproveDraft.isPending || !hasSubmissionBody}
+                                        className="px-2 py-1 rounded bg-cyan-500/20 border border-cyan-500/30 text-[10px] text-cyan-100 disabled:opacity-60"
+                                    >
+                                        {selfApproveDraft.isPending ? 'جاري الاعتماد...' : 'اعتماد مباشر'}
                                     </button>
                                 )}
                                 <button
@@ -3566,7 +3555,7 @@ function WorkspaceDraftsPageContent() {
                                                 </button>
                                             )}
                                         </div>
-                                        <p className={cn('text-[10px] text-gray-200 mt-1', decisionDetailOpen ? '' : 'line-clamp-1')}>
+                                        <p className={cn('text-[10px] text-amber-50 mt-1', decisionDetailOpen ? '' : 'line-clamp-1')}>
                                             {item.reason}
                                         </p>
                                     </div>
@@ -4249,17 +4238,17 @@ function WorkspaceDraftsPageContent() {
                             ) : <Empty text="اضغط زر «جودة» للحصول على التقرير." />}
                             {readiness && (
                                 <div className="mt-2 space-y-2 text-xs">
-                                    <div className={cn('rounded-xl border p-2', readiness.ready_for_publish ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100' : 'border-red-500/30 bg-red-500/10 text-red-100')}>
-                                        {readiness.ready_for_publish ? 'جاهز للنشر بعد المراجعة البشرية.' : 'غير جاهز للنشر. توجد موانع.'}
+                                    <div className={cn('rounded-xl border p-2', readiness.ready_for_publish ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100' : 'border-amber-500/30 bg-amber-500/10 text-amber-100')}>
+                                        {readiness.ready_for_publish ? 'جاهزية ممتازة للنشر بعد المراجعة البشرية.' : 'التقييمات تحتاج تحسين، لكنها لا توقف كتابة الصحفي.'}
                                     </div>
                                     {!readiness.ready_for_publish && (
-                                        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-2 text-red-100 space-y-1">
+                                        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-2 text-amber-100 space-y-1">
                                             {explainedBlockers.length === 0
-                                                ? <p className="text-[11px]">توجد موانع غير موضحة بعد.</p>
+                                                ? <p className="text-[11px]">لا توجد تفاصيل إضافية بعد.</p>
                                                 : explainedBlockers.map((item, i) => (
                                                     <div key={`ready-${i}`} className="text-[11px]">
                                                         <span className="font-semibold">{item.title}</span>
-                                                        <span className="text-red-200/80"> — {item.detail}</span>
+                                                        <span className="text-amber-100/80"> — {item.detail}</span>
                                                     </div>
                                                 ))}
                                         </div>
@@ -4892,7 +4881,7 @@ function WorkspaceDraftsPageContent() {
                     <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-gray-950 p-5 space-y-4" dir="rtl">
                         <div className="flex items-center justify-between">
                             <div>
-                                <h2 className="text-lg text-white font-semibold">إرسال بتحفّظ (تجاوز الموانع)</h2>
+                                <h2 className="text-lg text-white font-semibold">إرسال بتحفّظ (تجاوز الملاحظات)</h2>
                                 <p className="text-[11px] text-gray-400">سيتم إرسال الخبر لرئيس التحرير مع توثيق سبب التجاوز.</p>
                             </div>
                             <button onClick={() => setOverrideOpen(false)} className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-gray-200">
@@ -4900,9 +4889,9 @@ function WorkspaceDraftsPageContent() {
                             </button>
                         </div>
                         <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-[11px] text-red-100 space-y-2">
-                            <p className="font-semibold">الموانع الحالية (سبب + إجراء)</p>
+                            <p className="font-semibold">الملاحظات الحالية (سبب + إجراء)</p>
                             {explainedBlockers.length === 0 ? (
-                                <p className="text-[10px] text-red-200">لا توجد موانع حرجة حالياً.</p>
+                                <p className="text-[10px] text-red-200">لا توجد ملاحظات حرجة حالياً.</p>
                             ) : (
                                 explainedBlockers.slice(0, 6).map((item, idx) => (
                                     <div key={`override-${idx}`} className="rounded-lg border border-white/10 bg-black/20 p-2">
@@ -5022,78 +5011,36 @@ function WorkspaceDraftsPageContent() {
                 />
             )}
 
-            {guideOpen && <GuideModal type={guideType} action={guideAction} onClose={closeGuide} onConfirm={confirmGuide} />}
-        </div>
-    );
-}
-
-function Panel({ title, children }: { title: string; children: ReactNode }) {
-    return (
-        <div className="rounded-xl border border-white/10 bg-gray-950/50 p-3 space-y-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-            <h3 className="text-sm text-white">{title}</h3>
-            {children}
-        </div>
-    );
-}
-
-function Empty({ text }: { text: string }) {
-    return <p className="text-xs text-gray-500">{text}</p>;
-}
-
-function InfoBlock({ label, value }: { label: string; value?: string }) {
-    return <div className="rounded-xl border border-white/10 bg-black/20 p-2"><p className="text-gray-400 mb-1 text-xs">{label}</p><p className="text-xs text-gray-200">{cleanText(value || '-')}</p></div>;
-}
-
-function GuideModal({ type, action, onClose, onConfirm }: { type: GuideType; action: ActionId | null; onClose: () => void; onConfirm: () => void }) {
-    return (
-        <div className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-gray-950 p-5 space-y-4" dir="rtl">
-                {type === 'welcome' ? (
-                    <>
-                        <h2 className="text-lg font-semibold text-white">مرحباً بك في المحرر الذكي</h2>
-                        <div className="text-sm text-gray-300 space-y-2">
-                            <p>هذا دليل سريع للمحرر المبتدئ.</p>
-                            <p>- النظام لا يكتب مكانك تلقائياً، كل شيء يأتي كمقترح قابل للقبول أو الرفض.</p>
-                            <p>- ابدأ بكتابة النص في الوسط.</p>
-                            <p>- استخدم «فحص سريع» للحصول على التحقق والجودة والجاهزية بضغطة واحدة.</p>
-                            <p>- لا تعتمد النشر قبل زوال الموانع.</p>
-                        </div>
-                    </>
-                ) : (
-                    <>
-                        <h2 className="text-lg font-semibold text-white">{action ? ACTION_HELP[action].title : 'شرح الزر'}</h2>
-                        {action ? (
-                            <div className="space-y-3 text-sm text-gray-300">
-                                <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                                    <p className="text-xs text-gray-400 mb-1">ماذا يفعل؟</p>
-                                    <p>{ACTION_HELP[action].description}</p>
-                                </div>
-                                <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                                    <p className="text-xs text-gray-400 mb-1">متى أستخدمه؟</p>
-                                    <p>{ACTION_HELP[action].when}</p>
-                                </div>
-                                <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                                    <p className="text-xs text-gray-400 mb-1">ماذا سيحدث بعده؟</p>
-                                    <p>{ACTION_HELP[action].after}</p>
-                                </div>
-                                {ACTION_HELP[action].caution && (
-                                    <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-amber-100">
-                                        <p className="text-xs mb-1">تنبيه</p>
-                                        <p>{ACTION_HELP[action].caution}</p>
-                                    </div>
-                                )}
-                            </div>
-                        ) : (
-                            <p className="text-sm text-gray-300">شرح غير متاح.</p>
-                        )}
-                    </>
-                )}
-
-                <div className="flex items-center gap-2 justify-end">
-                    <button onClick={onClose} className="rounded-xl border border-white/20 px-4 py-2 text-sm text-gray-300">إغلاق</button>
-                    <button onClick={onConfirm} className="rounded-xl bg-emerald-500/25 border border-emerald-400/40 px-4 py-2 text-sm text-emerald-100">{type === 'welcome' ? 'فهمت، ابدأ' : 'فهمت، نفّذ'}</button>
-                </div>
-            </div>
+            <WorkspaceGuideModal
+                open={guideOpen}
+                title={guideType === 'welcome' ? 'مرحباً بك في المحرر الذكي' : guideAction ? ACTION_HELP[guideAction].title : 'شرح الزر'}
+                introLines={
+                    guideType === 'welcome'
+                        ? [
+                            'هذا دليل سريع للمحرر المبتدئ.',
+                            '- النظام لا يكتب مكانك تلقائياً، كل شيء يأتي كمقترح قابل للقبول أو الرفض.',
+                            '- ابدأ بكتابة النص في الوسط.',
+                            '- استخدم «فحص سريع» للحصول على التحقق والجودة والجاهزية بضغطة واحدة.',
+                            '- إذا ظهرت ملاحظات جودة، عالج المهم أولاً ثم أكمل عملك.',
+                        ]
+                        : []
+                }
+                items={
+                    guideType === 'action' && guideAction
+                        ? [
+                            { label: 'ماذا يفعل؟', value: ACTION_HELP[guideAction].description },
+                            { label: 'متى أستخدمه؟', value: ACTION_HELP[guideAction].when },
+                            { label: 'ماذا سيحدث بعده؟', value: ACTION_HELP[guideAction].after },
+                            ...(ACTION_HELP[guideAction].caution
+                                ? [{ label: 'تنبيه', value: ACTION_HELP[guideAction].caution, tone: 'warn' as const }]
+                                : []),
+                        ]
+                        : []
+                }
+                confirmLabel={guideType === 'welcome' ? 'فهمت، ابدأ' : 'فهمت، نفّذ'}
+                onClose={closeGuide}
+                onConfirm={confirmGuide}
+            />
         </div>
     );
 }

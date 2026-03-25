@@ -750,13 +750,24 @@ async def _submit_draft_for_chief_approval(
     db: AsyncSession,
     draft: EditorialDraft,
     current_user: User,
+    force_direct_publish: bool = False,
 ) -> dict[str, Any]:
     article_result = await db.execute(select(Article).where(Article.id == draft.article_id))
     article = article_result.scalar_one_or_none()
     if not article:
         raise HTTPException(404, "Article not found")
 
-    await _assert_publish_gate_and_constitution(db, article_id=article.id, user=current_user)
+    preflight_blockers: list[str] = []
+    if force_direct_publish:
+        try:
+            await _assert_publish_gate_and_constitution(db, article_id=article.id, user=current_user)
+        except HTTPException as exc:
+            if exc.status_code == 412 and isinstance(exc.detail, dict):
+                preflight_blockers = list(exc.detail.get("blocking_reasons") or [])
+            else:
+                raise
+    else:
+        await _assert_publish_gate_and_constitution(db, article_id=article.id, user=current_user)
 
     if draft.title:
         article.title_ar = draft.title
@@ -805,10 +816,10 @@ async def _submit_draft_for_chief_approval(
     gate_summary = quality_gate_service.summarize_gate_result(gate_result)
 
     decision = policy_report.get("decision", "reservations")
-    if not gate_result.passed:
+    if not gate_result.passed and not force_direct_publish:
         decision = "reservations"
 
-    blockers = [issue.message for issue in gate_result.blockers]
+    blockers = list(dict.fromkeys(preflight_blockers + [issue.message for issue in gate_result.blockers]))
     is_sensitive, sensitivity_reasons = _is_sensitive_article(
         article=article,
         policy_report=policy_report,
@@ -818,7 +829,13 @@ async def _submit_draft_for_chief_approval(
     submitted_for_chief_approval = False
     transition_action = "submit_for_chief_approval"
 
-    if decision == "approved" and journalist_direct_path and settings.editorial_direct_publish_enabled and not is_sensitive:
+    if force_direct_publish:
+        if not journalist_direct_path:
+            raise HTTPException(status_code=403, detail="المسار المباشر متاح للصحفي فقط.")
+        target_status = NewsStatus.READY_FOR_MANUAL_PUBLISH
+        transition_action = "journalist_self_approval"
+        status_message = "تم الاعتماد الذاتي من الصحفي. ملاحظات الجودة تبقى استرشادية."
+    elif decision == "approved" and journalist_direct_path and settings.editorial_direct_publish_enabled and not is_sensitive:
         target_status = NewsStatus.READY_FOR_MANUAL_PUBLISH
         status_message = "تم اعتماد النسخة من الصحفي وأصبحت جاهزة للنشر اليدوي."
         transition_action = "journalist_direct_approval"
@@ -851,6 +868,7 @@ async def _submit_draft_for_chief_approval(
             "policy_score": policy_report.get("score"),
             "blocking_reasons": blockers,
             "journalist_direct_path": journalist_direct_path,
+            "forced_direct_publish": force_direct_publish,
             "sensitive": is_sensitive,
             "sensitivity_reasons": sensitivity_reasons,
         },
@@ -905,6 +923,7 @@ async def _submit_draft_for_chief_approval(
         "status_message": status_message,
         "submitted_for_chief_approval": submitted_for_chief_approval,
         "journalist_direct_path": journalist_direct_path,
+        "forced_direct_publish": force_direct_publish,
         "sensitive": is_sensitive,
         "sensitivity_reasons": sensitivity_reasons,
         "blocking_reasons": blockers or policy_report.get("blocking_reasons", []),
@@ -2534,6 +2553,29 @@ async def submit_draft_for_chief_approval(
             if submission.get("submitted_for_chief_approval")
             else "تم اعتماد النسخة داخل المسار المباشر بدون تصعيد لرئيس التحرير."
         ),
+    }
+
+
+@router.post("/workspace/drafts/{work_id}/self-approve")
+async def self_approve_workspace_draft(
+    work_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(current_user, {UserRole.journalist})
+    draft = await _get_latest_draft_or_404(db, work_id)
+    if draft.status not in {"draft", "applied"}:
+        raise HTTPException(409, "Draft already archived")
+    submission = await _submit_draft_for_chief_approval(
+        db=db,
+        draft=draft,
+        current_user=current_user,
+        force_direct_publish=True,
+    )
+    return {
+        **submission,
+        "submitted_for_chief_approval": False,
+        "message": "تم الاعتماد المباشر من الصحفي. التقييمات المعروضة هي ملاحظات مساعدة فقط.",
     }
 
 

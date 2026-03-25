@@ -11,6 +11,7 @@ export const api = axios.create({
     baseURL: API_BASE,
     timeout: 30000,
     headers: { 'Content-Type': 'application/json' },
+    withCredentials: true,
 });
 
 export interface ApiEnvelopeError {
@@ -1183,6 +1184,8 @@ export const editorialApi = {
         api.post(`/editorial/workspace/drafts/${workId}/apply`),
     submitWorkspaceDraftForChief: (workId: string) =>
         api.post(`/editorial/workspace/drafts/${workId}/submit-for-chief-approval`),
+    selfApproveWorkspaceDraft: (workId: string) =>
+        api.post(`/editorial/workspace/drafts/${workId}/self-approve`),
     submitWorkspaceDraftWithReservations: (workId: string, data: { notes: string }) =>
         api.post(`/editorial/workspace/drafts/${workId}/submit-with-reservations`, data),
     archiveWorkspaceDraft: (workId: string) =>
@@ -2852,8 +2855,6 @@ api.interceptors.response.use(
         }
 
         if (error.response?.status === 401 && typeof window !== 'undefined') {
-            localStorage.removeItem('echorouk_token');
-            localStorage.removeItem('echorouk_user');
             window.location.href = '/login';
         }
         return Promise.reject(error);
