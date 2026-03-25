@@ -868,8 +868,9 @@ function WorkspaceDraftsPageContent() {
         const improveIds = new Set<RightTab>(['evidence', 'proofread', 'quality', 'seo', 'social', 'context']);
         if (isAdvancedMode) return allowedTabs;
         if (isImproveMode) return allowedTabs.filter((tab) => improveIds.has(tab.id));
+        if (isWriteMode && toolsExpanded) return allowedTabs.filter((tab) => improveIds.has(tab.id));
         return allowedTabs.filter((tab) => writeIds.has(tab.id));
-    }, [allowedTabs, isAdvancedMode, isImproveMode]);
+    }, [allowedTabs, isAdvancedMode, isImproveMode, isWriteMode, toolsExpanded]);
 
     const setClaimOverrideDraftField = (claimId: string, patch: Partial<ClaimOverrideDraft>) => {
         setClaimOverrideDrafts((prev) => {
