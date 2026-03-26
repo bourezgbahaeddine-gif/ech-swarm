@@ -850,7 +850,14 @@ facebook, x, push, summary_120, breaking_alert
         clean_text = self._strip_side_comments(text or "")
         template_noise = self._contains_template_noise(clean_text)
         claims = self.extract_claims(text=clean_text, source_url=source_url)
-        unresolved = [c for c in claims if c["confidence"] < threshold]
+        for claim in claims:
+            has_support = bool(claim.get("evidence_links")) or (
+                bool(claim.get("unverifiable")) and bool(claim.get("unverifiable_reason"))
+            )
+            if has_support:
+                claim["blocking"] = False
+                claim["supported"] = True
+        unresolved = [c for c in claims if c.get("blocking")]
 
         blocking_reasons: list[str] = []
         actionable_fixes: list[str] = []

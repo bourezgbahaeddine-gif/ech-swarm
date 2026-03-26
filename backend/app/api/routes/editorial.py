@@ -669,10 +669,48 @@ async def _build_workspace_publish_readiness(
     stages = ["FACT_CHECK", "SEO_TECH", "READABILITY", "QUALITY_SCORE"]
     stage_reports: dict[str, Any] = {}
     blockers: list[str] = []
+    mutated = False
+    article: Article | None = None
     for stage in stages:
         report = await _latest_stage_report(db, article_id=article_id, stage=stage)
+        if not report and stage in {"READABILITY", "SEO_TECH"}:
+            if article is None:
+                article_row = await db.execute(select(Article).where(Article.id == article_id))
+                article = article_row.scalar_one_or_none()
+            if article:
+                if stage == "READABILITY":
+                    text_value = article.body_html or article.summary or article.original_content or article.original_title
+                    payload = quality_gate_service.readability_report(text_value or "")
+                    report = await quality_gate_service.save_report(
+                        db,
+                        article_id=article_id,
+                        stage="READABILITY",
+                        passed=bool(payload.get("passed")),
+                        score=payload.get("score"),
+                        blocking_reasons=payload.get("blocking_reasons", []),
+                        actionable_fixes=payload.get("actionable_fixes", []),
+                        report_json=payload,
+                        created_by="system",
+                        upsert_by_stage=True,
+                    )
+                    mutated = True
+                elif stage == "SEO_TECH":
+                    payload = await quality_gate_service.technical_audit(db, article)
+                    report = await quality_gate_service.save_report(
+                        db,
+                        article_id=article_id,
+                        stage="SEO_TECH",
+                        passed=bool(payload.get("passed")),
+                        score=payload.get("score"),
+                        blocking_reasons=payload.get("blocking_reasons", []),
+                        actionable_fixes=payload.get("actionable_fixes", []),
+                        report_json=payload,
+                        created_by="system",
+                        upsert_by_stage=True,
+                    )
+                    mutated = True
         if not report:
-            blockers.append(f"تقرير مفقود: {stage}")
+            blockers.append(f"Missing report: {stage}")
             continue
         stage_reports[stage] = {
             "passed": bool(report.passed),
@@ -681,7 +719,10 @@ async def _build_workspace_publish_readiness(
             "blocking_reasons": report.blocking_reasons or [],
         }
         if not report.passed:
-            blockers.extend(report.blocking_reasons or [f"فشل تقرير المرحلة: {stage}"])
+            blockers.extend(report.blocking_reasons or [f"Stage report failed: {stage}"])
+
+    if mutated:
+        await db.commit()
 
     policy_report_row = await _latest_stage_report(db, article_id=article_id, stage="EDITORIAL_POLICY")
     policy_payload = (policy_report_row.report_json or {}) if policy_report_row else None

@@ -227,6 +227,21 @@ async def _execute_editorial_ai_payload(
 
         if op == "seo":
             result = await smart_editor_service.seo_suggestions(source_text=source_text, draft_title=draft_title, draft_html=draft_html)
+            yoast = result.get("yoast") or {}
+            score = 100 if yoast.get("meta_ok") and yoast.get("title_ok") else 70
+            await quality_gate_service.save_report(
+                db,
+                article_id=article.id,
+                stage="SEO_SUGGESTIONS",
+                passed=True,
+                score=score,
+                blocking_reasons=[],
+                actionable_fixes=[],
+                report_json={"seo": result, "work_id": work_id, "version": latest.version},
+                created_by=job.actor_username or "worker",
+                upsert_by_stage=True,
+            )
+            await db.commit()
             return {"work_id": work_id, "base_version": latest.version, **result}
 
         if op == "social":
