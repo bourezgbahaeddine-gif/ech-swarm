@@ -223,6 +223,19 @@ async def _execute_editorial_ai_payload(
         if op == "headlines":
             count = max(1, min(int(payload.get("count", 5)), 10))
             suggestions = await smart_editor_service.headline_suggestions(source_text=source_text, draft_title=draft_title)
+            await quality_gate_service.save_report(
+                db,
+                article_id=article.id,
+                stage="HEADLINE_PACK",
+                passed=True,
+                score=100,
+                blocking_reasons=[],
+                actionable_fixes=[],
+                report_json={"headlines": suggestions[:count], "work_id": work_id, "version": latest.version},
+                created_by=job.actor_username or "worker",
+                upsert_by_stage=True,
+            )
+            await db.commit()
             return {"work_id": work_id, "base_version": latest.version, "headlines": suggestions[:count]}
 
         if op == "seo":

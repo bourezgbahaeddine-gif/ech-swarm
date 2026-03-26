@@ -709,6 +709,62 @@ export interface WorkspacePublishReadiness {
     gates: GateSummary;
 }
 
+export interface ReadyStageReport {
+    stage: string;
+    label?: string;
+    passed: boolean;
+    score?: number | null;
+    created_at?: string | null;
+    blocking_reasons?: string[];
+    actionable_fixes?: string[];
+    report?: Record<string, unknown>;
+    created_by?: string | null;
+}
+
+export interface LinkSuggestionHistoryRun {
+    run_id: string;
+    mode: string;
+    status: string;
+    created_at: string | null;
+    source_counts: Record<string, unknown>;
+    items: LinkSuggestionItem[];
+}
+
+export interface WorkspaceReadyPackage {
+    work_id: string;
+    article: {
+        id: number;
+        title?: string | null;
+        original_title?: string | null;
+        source_name?: string | null;
+        source_url?: string | null;
+        published_at?: string | null;
+        crawled_at?: string | null;
+        created_at?: string | null;
+        updated_at?: string | null;
+    };
+    draft: {
+        id: number;
+        version: number;
+        title?: string | null;
+        body?: string | null;
+        note?: string | null;
+        status?: string | null;
+        created_by?: string | null;
+        updated_by?: string | null;
+        created_at?: string | null;
+        updated_at?: string | null;
+    };
+    journalist: {
+        name?: string | null;
+        created_by?: string | null;
+        updated_by?: string | null;
+    };
+    readiness: WorkspacePublishReadiness;
+    reports: Record<string, ReadyStageReport>;
+    links_history: LinkSuggestionHistoryRun[];
+}
+
 export type WorkspaceOrchestratorTaskKey =
     | 'first_draft'
     | 'verify_claims'
@@ -1250,6 +1306,8 @@ export const editorialApi = {
         api.post(`/editorial/workspace/drafts/${workId}/quality/score`),
     publishReadiness: (workId: string) =>
         api.get<WorkspacePublishReadiness>(`/editorial/workspace/drafts/${workId}/publish-readiness`),
+    workspaceReadyPackage: (workId: string) =>
+        api.get<WorkspaceReadyPackage>(`/editorial/workspace/drafts/${workId}/ready-package`),
     chiefPending: (limit = 100) =>
         api.get<ChiefPendingItem[]>(`/editorial/chief/pending`, { params: { limit } }),
     chiefFinalDecision: (articleId: number, data: { decision: 'approve' | 'approve_with_reservations' | 'send_back' | 'reject' | 'return_for_revision'; notes?: string }) =>

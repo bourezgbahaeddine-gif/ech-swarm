@@ -38,6 +38,7 @@ from app.services.article_index_service import article_index_service
 from app.services.ai_service import ai_service
 from app.services.notification_service import notification_service
 from app.services.link_intelligence_service import link_intelligence_service
+from app.services.claim_support_service import claim_support_service
 from app.services.job_queue_service import job_queue_service
 from app.services.editorial_prompt_orchestrator_service import suggest_workspace_task
 from app.services.quality_gate_service import quality_gate_service
@@ -659,6 +660,18 @@ async def _latest_stage_report(
     return row.scalar_one_or_none()
 
 
+STAGE_LABELS_AR = {
+    "FACT_CHECK": "التحقق من الادعاءات",
+    "QUALITY_SCORE": "تقييم الجودة",
+    "READABILITY": "قابلية القراءة",
+    "SEO_TECH": "الفحص التقني للسيو",
+    "SEO_SUGGESTIONS": "اقتراحات السيو",
+    "SOCIAL_VARIANTS": "نسخ السوشيال",
+    "HEADLINE_PACK": "حزمة العناوين",
+    "EDITORIAL_POLICY": "السياسة التحريرية",
+}
+
+
 async def _build_workspace_publish_readiness(
     db: AsyncSession,
     *,
@@ -666,21 +679,23 @@ async def _build_workspace_publish_readiness(
 ) -> dict[str, Any]:
     article_id = latest.article_id
 
-    stages = ["FACT_CHECK", "SEO_TECH", "READABILITY", "QUALITY_SCORE"]
+    stages = ["FACT_CHECK", "QUALITY_SCORE", "READABILITY", "SEO_TECH"]
+    stage_labels = STAGE_LABELS_AR
     stage_reports: dict[str, Any] = {}
     blockers: list[str] = []
     mutated = False
     article: Article | None = None
     for stage in stages:
         report = await _latest_stage_report(db, article_id=article_id, stage=stage)
-        if not report and stage in {"READABILITY", "SEO_TECH"}:
+        if not report:
             if article is None:
                 article_row = await db.execute(select(Article).where(Article.id == article_id))
                 article = article_row.scalar_one_or_none()
             if article:
                 if stage == "READABILITY":
-                    text_value = article.body_html or article.summary or article.original_content or article.original_title
-                    payload = quality_gate_service.readability_report(text_value or "")
+                    text_value = latest.body or article.body_html or article.summary or article.original_content or article.original_title
+                    clean_text = smart_editor_service.html_to_text(text_value or "")
+                    payload = quality_gate_service.readability_report(clean_text or "")
                     report = await quality_gate_service.save_report(
                         db,
                         article_id=article_id,
@@ -709,8 +724,64 @@ async def _build_workspace_publish_readiness(
                         upsert_by_stage=True,
                     )
                     mutated = True
+                elif stage == "FACT_CHECK":
+                    text_value = latest.body or article.body_html or article.summary or article.original_content or article.original_title
+                    clean_text = smart_editor_service.html_to_text(text_value or "")
+                    payload = smart_editor_service.fact_check_report(
+                        text=clean_text,
+                        source_url=article.original_url,
+                        threshold=0.70,
+                    )
+                    payload = claim_support_service.enrich_fact_check_report(payload)
+                    report = await quality_gate_service.save_report(
+                        db,
+                        article_id=article_id,
+                        stage="FACT_CHECK",
+                        passed=bool(payload.get("passed")),
+                        score=payload.get("score"),
+                        blocking_reasons=payload.get("blocking_reasons", []),
+                        actionable_fixes=payload.get("actionable_fixes", []),
+                        report_json=payload,
+                        created_by="system",
+                        upsert_by_stage=True,
+                    )
+                    await claim_support_service.persist_claim_report(
+                        db,
+                        article_id=article_id,
+                        quality_report_id=report.id if report else None,
+                        work_id=latest.work_id,
+                        report=payload,
+                        actor="system",
+                    )
+                    mutated = True
+                elif stage == "QUALITY_SCORE":
+                    source_text = "\n".join(
+                        [
+                            article.original_title or "",
+                            article.summary or "",
+                            article.original_content or "",
+                        ]
+                    ).strip()
+                    payload = smart_editor_service.quality_score(
+                        title=latest.title or article.title_ar or article.original_title or "",
+                        html=latest.body or article.body_html or "",
+                        source_text=source_text,
+                    )
+                    report = await quality_gate_service.save_report(
+                        db,
+                        article_id=article_id,
+                        stage="QUALITY_SCORE",
+                        passed=bool(payload.get("passed")),
+                        score=payload.get("score"),
+                        blocking_reasons=payload.get("blocking_reasons", []),
+                        actionable_fixes=payload.get("actionable_fixes", []),
+                        report_json=payload,
+                        created_by="system",
+                        upsert_by_stage=True,
+                    )
+                    mutated = True
         if not report:
-            blockers.append(f"Missing report: {stage}")
+            blockers.append(f"تقرير مفقود: {stage_labels.get(stage, stage)}")
             continue
         stage_reports[stage] = {
             "passed": bool(report.passed),
@@ -719,7 +790,7 @@ async def _build_workspace_publish_readiness(
             "blocking_reasons": report.blocking_reasons or [],
         }
         if not report.passed:
-            blockers.extend(report.blocking_reasons or [f"Stage report failed: {stage}"])
+            blockers.extend(report.blocking_reasons or [f"فشل تقرير المرحلة: {stage_labels.get(stage, stage)}"])
 
     if mutated:
         await db.commit()
@@ -743,6 +814,82 @@ async def _build_workspace_publish_readiness(
         "blocking_reasons": blockers,
         "reports": stage_reports,
         "gates": gate_summary,
+    }
+
+
+async def _build_workspace_ready_package(
+    db: AsyncSession,
+    *,
+    latest: EditorialDraft,
+) -> dict[str, Any]:
+    article_row = await db.execute(select(Article).where(Article.id == latest.article_id))
+    article = article_row.scalar_one_or_none()
+    if not article:
+        raise HTTPException(404, "Article not found")
+
+    readiness = await _build_workspace_publish_readiness(db, latest=latest)
+    stage_keys = [
+        "FACT_CHECK",
+        "QUALITY_SCORE",
+        "READABILITY",
+        "SEO_TECH",
+        "SEO_SUGGESTIONS",
+        "SOCIAL_VARIANTS",
+        "HEADLINE_PACK",
+    ]
+    reports: dict[str, Any] = {}
+    for stage in stage_keys:
+        report = await _latest_stage_report(db, article_id=article.id, stage=stage)
+        if not report:
+            continue
+        reports[stage] = {
+            "stage": stage,
+            "label": STAGE_LABELS_AR.get(stage, stage),
+            "passed": bool(report.passed),
+            "score": report.score,
+            "created_at": report.created_at,
+            "blocking_reasons": report.blocking_reasons or [],
+            "actionable_fixes": report.actionable_fixes or [],
+            "report": report.report_json or {},
+            "created_by": report.created_by,
+        }
+
+    links_history = await link_intelligence_service.history(db, latest.work_id, limit=6)
+    journalist = latest.updated_by or latest.created_by
+
+    return {
+        "work_id": latest.work_id,
+        "article": {
+            "id": article.id,
+            "title": latest.title or article.title_ar or article.original_title,
+            "original_title": article.original_title,
+            "source_name": article.source_name,
+            "source_url": article.original_url,
+            "published_at": article.published_at,
+            "crawled_at": article.crawled_at,
+            "created_at": article.created_at,
+            "updated_at": article.updated_at,
+        },
+        "draft": {
+            "id": latest.id,
+            "version": latest.version,
+            "title": latest.title,
+            "body": latest.body,
+            "note": latest.note,
+            "status": latest.status,
+            "created_by": latest.created_by,
+            "updated_by": latest.updated_by,
+            "created_at": latest.created_at,
+            "updated_at": latest.updated_at,
+        },
+        "journalist": {
+            "name": journalist,
+            "created_by": latest.created_by,
+            "updated_by": latest.updated_by,
+        },
+        "readiness": readiness,
+        "reports": reports,
+        "links_history": links_history,
     }
 
 
@@ -2420,6 +2567,17 @@ async def workspace_publish_readiness(
     _require_roles(current_user, NEWSROOM_ROLES)
     latest = await _get_latest_draft_or_404(db, work_id)
     return await _build_workspace_publish_readiness(db, latest=latest)
+
+
+@router.get("/workspace/drafts/{work_id}/ready-package")
+async def workspace_ready_package(
+    work_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_roles(current_user, NEWSROOM_ROLES)
+    latest = await _get_latest_draft_or_404(db, work_id)
+    return await _build_workspace_ready_package(db, latest=latest)
 
 
 @router.get("/workspace/drafts/{work_id}/ai/orchestrator")

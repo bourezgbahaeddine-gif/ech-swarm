@@ -3124,6 +3124,14 @@ function WorkspaceDraftsPageContent() {
                             >
                                 <Save className="w-4 h-4" />حفظ
                             </button>
+                            {readiness?.ready_for_publish && workId && (
+                                <NextLink
+                                    href={`/ready-publish/${workId}`}
+                                    className="min-h-10 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-100 text-xs flex items-center gap-2"
+                                >
+                                    صفحة الجاهز للنشر
+                                </NextLink>
+                            )}
                             <button
                                 disabled={applyToArticle.isPending || !hasSubmissionBody}
                                 onClick={() => {
