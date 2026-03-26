@@ -17,7 +17,6 @@ import { Decoration, DecorationSet } from 'prosemirror-view';
 import {
     AlertTriangle,
     CheckCircle2,
-    CircleHelp,
     Clock3,
     Loader2,
     Save,
@@ -39,7 +38,6 @@ import {
     type ClaimOverrideInput,
     type ArchiveSearchItem,
     type FactCheckClaim,
-    type ProjectMemoryRecommendation,
     type Source,
     type StoryControlCenterResponse,
     type StorySuggestion,
@@ -50,20 +48,14 @@ import {
 import { constitutionApi } from '@/lib/constitution-api';
 import { useAuth } from '@/lib/auth';
 import { cn, formatRelativeTime, truncate } from '@/lib/utils';
-import { WorkflowHelpPanel } from '@/components/workflow/WorkflowHelpPanel';
-import { RoleOnboardingBanner } from '@/components/workflow/RoleOnboardingBanner';
-import { MemoryRecommendationPanel } from '@/components/memory/MemoryRecommendationPanel';
 import { MemoryQuickCaptureModal } from '@/components/memory/MemoryQuickCaptureModal';
-import { WorkspaceGuideModal } from '@/components/workspace-drafts/WorkspaceGuideModal';
-import { WorkspacePromptSuggestionCard } from '@/components/workspace-drafts/WorkspacePromptSuggestionCard';
 import { WorkspaceEmpty as Empty, WorkspaceInfoBlock as InfoBlock, WorkspacePanel as Panel } from '@/components/workspace-drafts/WorkspacePrimitives';
 import { trackNextAction, trackUiAction, useTrackSurfaceView } from '@/lib/ux-telemetry';
 
 type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
 type RightTab = 'evidence' | 'proofread' | 'quality' | 'seo' | 'social' | 'context' | 'msi' | 'simulator' | 'xray';
-type GuideType = 'welcome' | 'action';
 type ActionId = 'quick_check' | 'verify' | 'proofread' | 'improve' | 'headlines' | 'seo' | 'links' | 'social' | 'quality' | 'publish_gate' | 'apply' | 'save' | 'manual_draft' | 'audience_test';
-type ViewMode = 'write' | 'improve' | 'advanced';
+type ViewMode = 'write';
 type EditorStage = 'writing' | 'review';
 type LeftTab = 'drafts' | 'source' | 'archive';
 type ClaimOverrideDraft = {
@@ -131,97 +123,6 @@ const TABS: Array<{ id: RightTab; label: string }> = [
     { id: 'xray', label: 'زوايا المنافسين' },
 ];
 
-const HELP_KEY = 'smart_editor_help_seen_v1';
-const ACTION_HELP_PREFIX = 'smart_editor_action_help_seen_v1_';
-
-const ACTION_HELP: Record<ActionId, { title: string; description: string; when: string; after: string; caution?: string }> = {
-    quick_check: {
-        title: 'زر الفحص السريع',
-        description: 'يشغل التحقق + الجودة + بوابة النشر دفعة واحدة ليعطيك حالة جاهزية سريعة.',
-        when: 'استخدمه عندما تريد صورة سريعة عمّا ينقص النص قبل الإرسال أو قبل الدخول في تفاصيل كثيرة.',
-        after: 'بعده ستعرف إن كان المطلوب هو تحقق، أو تدقيق، أو معالجة مانع نشر، أو أن النص جاهز للمرحلة التالية.',
-    },
-    verify: {
-        title: 'زر التحقق',
-        description: 'يستخرج الادعاءات ويعرض درجة الثقة قبل النشر.',
-        when: 'استخدمه عندما يحتوي النص على أرقام، اتهامات، تصريحات، أو معلومة قد تسبب خطأ تحريريًا.',
-        after: 'بعده راجع الادعاءات الحرجة أولاً ثم عد إلى الجودة أو الإرسال.',
-        caution: 'لا تعتبر غياب الادعاءات موافقة تلقائية على النشر؛ راجع السياق أيضًا.',
-    },
-    proofread: {
-        title: 'زر التدقيق اللغوي',
-        description: 'يصحح الإملاء والنحو والترقيم ويعرض الفروقات قبل اعتماد النسخة.',
-        when: 'استخدمه قبل الإرسال النهائي أو عندما تشعر أن النص جيد مضمونًا لكنه يحتاج صقلًا لغويًا.',
-        after: 'بعده راجع الفروقات بسرعة ثم احفظ أو أرسل للاعتماد.',
-    },
-    improve: {
-        title: 'زر التحسين',
-        description: 'يولد اقتراح تحسين كفرق (Diff) قابل للقبول أو الرفض.',
-        when: 'استخدمه عندما يكون النص مكتوبًا لكن يحتاج وضوحًا أو اختصارًا أو ترتيبًا أفضل.',
-        after: 'بعده قارن بين قبل/بعد، ثم اعتمد التحسين أو ارفضه وواصل العمل.',
-    },
-    headlines: {
-        title: 'زر العناوين',
-        description: 'يولد 5 عناوين متنوعة للاستخدام التحريري.',
-        when: 'استخدمه عندما يكون المتن جاهزًا نسبيًا وتحتاج عنوانًا أقوى أو أكثر دقة.',
-        after: 'بعده اختر أفضل عنوان وراجعه يدويًا قبل الاعتماد.',
-    },
-    seo: {
-        title: 'زر SEO',
-        description: 'يولد عنوان SEO والوصف والكلمات المفتاحية والوسوم.',
-        when: 'استخدمه عندما تكون النسخة شبه نهائية وتريد تجهيزها للنشر الرقمي ومحركات البحث.',
-        after: 'بعده راجع الملخص والكلمات المفتاحية ثم انتقل إلى الروابط أو السوشيال عند الحاجة.',
-    },
-    links: {
-        title: 'زر الروابط',
-        description: 'يقترح روابط داخلية وخارجية موثوقة يمكن إدراجها في المسودة بنقرة واحدة.',
-        when: 'استخدمه عندما يكون الخبر بحاجة إلى سياق إضافي أو مواد أرشيفية داعمة.',
-        after: 'بعده اختر الروابط الأكثر فائدة ثم احفظ النسخة.',
-    },
-    social: {
-        title: 'زر السوشيال',
-        description: 'ينشئ نسخ Facebook وX وPush والتنبيه العاجل.',
-        when: 'استخدمه عندما تقترب النسخة من الاكتمال وتريد تجهيز التسليم إلى الديجيتال.',
-        after: 'بعده راجع النسخ المقترحة أو انسخها إلى مسار النشر الرقمي.',
-    },
-    quality: {
-        title: 'زر الجودة',
-        description: 'يقيم وضوح وبنية وحياد النص مع توصيات عملية.',
-        when: 'استخدمه عندما تريد معرفة هل النص واضح ومتوازن قبل إرساله أو نشره.',
-        after: 'بعده عالج الملاحظات الأعلى أثرًا ثم أعد الفحص السريع أو التدقيق.',
-    },
-    publish_gate: {
-        title: 'زر بوابة النشر',
-        description: 'يفحص الجاهزية النهائية ويعرض ملاحظات الجودة قبل التسليم.',
-        when: 'استخدمه قبل إرسال النسخة للاعتماد أو عندما تريد تقييمًا سريعًا للنص.',
-        after: 'إذا ظهرت ملاحظات، عالج المهم أولًا أو أكمل ودوّن ما ستراجعه لاحقًا.',
-        caution: 'اعتبر النتيجة مرشدًا تحريريًا يساعدك على اتخاذ القرار.',
-    },
-    apply: {
-        title: 'زر إرسال الاعتماد',
-        description: 'يرسل النسخة النهائية إلى رئيس التحرير بعد فحص وكيل السياسة التحريرية.',
-        when: 'استخدمه عندما تكون النسخة مكتملة ومراجعة، أو عندما قررت إرسالها بتحفظات مبررة.',
-        after: 'بعده تنتقل المادة إلى طابور الاعتماد، ويمكنك العودة إذا طلبت ملاحظات إضافية.',
-    },
-    save: {
-        title: 'زر الحفظ',
-        description: 'يحفظ التعديلات فورياً ويحدّث النسخ.',
-        when: 'استخدمه بعد أي تعديل مهم أو قبل الانتقال بين الأوضاع إذا أردت حفظ النسخة الحالية.',
-        after: 'بعده تبقى النسخة محفوظة ويمكنك المتابعة بأمان أو مقارنة النسخ لاحقًا.',
-    },
-    manual_draft: {
-        title: 'زر مسودة جديدة',
-        description: 'ينشئ مسودة خاصة لموضوع غير وارد من المصادر الآلية.',
-        when: 'استخدمه عندما تريد بدء موضوع خاص من الصفر بدل فتح خبر وارد من النظام.',
-        after: 'بعده ستدخل إلى نفس مسار الكتابة والفحص ثم الإرسال للاعتماد.',
-    },
-    audience_test: {
-        title: 'زر محاكي الجمهور',
-        description: 'يحاكي ردود الجمهور المتوقعة ويعرض مخاطر المحتوى وقابلية الانتشار قبل الاعتماد.',
-        when: 'استخدمه فقط إذا احتجت قراءة أعمق للمخاطر أو التفاعل المتوقع قبل الاعتماد.',
-        after: 'بعده قرر إن كنت تحتاج تعديل العنوان أو النبرة أو زاوية التقديم.',
-    },
-};
 
 const ACTION_SOURCE_LABELS: Record<DecisionActionId, string> = {
     verify: 'تحقق الادعاءات',
@@ -735,20 +636,6 @@ function classifyClaimSource(text: string): { label: string; reason: string; sev
     };
 }
 
-function actionKey(action: ActionId): string {
-    return `${ACTION_HELP_PREFIX}${action}`;
-}
-
-function actionLabel(action: ActionId): string {
-    return ACTION_HELP[action].title.replace(/^زر /, '');
-}
-
-function workflowDot(status: 'done' | 'warn' | 'pending'): string {
-    if (status === 'done') return 'bg-emerald-400';
-    if (status === 'warn') return 'bg-amber-400';
-    return 'bg-slate-500';
-}
-
 function appendEvidenceLink(existing: string, nextValue: string): string {
     const cleaned = cleanText(nextValue || '').trim();
     if (!cleaned) return existing;
@@ -780,7 +667,7 @@ function WorkspaceDraftsPageContent() {
     const [baseVersion, setBaseVersion] = useState(1);
     const [saveState, setSaveState] = useState<SaveState>('saved');
     const [activeTab, setActiveTab] = useState<RightTab>('evidence');
-    const [viewMode, setViewMode] = useState<ViewMode>('write');
+    const viewMode: ViewMode = 'write';
     const [err, setErr] = useState<string | null>(null);
     const [ok, setOk] = useState<string | null>(null);
     const [claims, setClaims] = useState<FactCheckClaim[]>([]);
@@ -822,23 +709,11 @@ function WorkspaceDraftsPageContent() {
     const [archiveItems, setArchiveItems] = useState<ArchiveSearchItem[]>([]);
     const [archiveError, setArchiveError] = useState<string | null>(null);
 
-    const [guideOpen, setGuideOpen] = useState(false);
-    const [guideType, setGuideType] = useState<GuideType>('welcome');
-    const [guideAction, setGuideAction] = useState<ActionId | null>(null);
-    const pendingActionRef = useRef<null | (() => void)>(null);
-    const [reviewExpanded, setReviewExpanded] = useState(false);
-    const [explainExpanded, setExplainExpanded] = useState(false);
-    const [reviewOpen, setReviewOpen] = useState(false);
-    const [explainOpen, setExplainOpen] = useState(false);
     const [toolsExpanded, setToolsExpanded] = useState(true);
-    const [showUrgentAll, setShowUrgentAll] = useState(false);
-    const [showImproveAll, setShowImproveAll] = useState(false);
-    const [showExtraAll, setShowExtraAll] = useState(false);
     const [blockersOpen, setBlockersOpen] = useState(false);
     const [decisionDetailOpen, setDecisionDetailOpen] = useState(false);
     const [copilotExpanded, setCopilotExpanded] = useState(false);
     const [copilotOpen, setCopilotOpen] = useState(false);
-    const [detailsOpen, setDetailsOpen] = useState(false);
     const [focusMode, setFocusMode] = useState(false);
     const [headerToolsOpen, setHeaderToolsOpen] = useState(false);
     const [editorStage, setEditorStage] = useState<EditorStage>(isWriterRole ? 'writing' : 'review');
@@ -850,6 +725,7 @@ function WorkspaceDraftsPageContent() {
     const [paletteQuery, setPaletteQuery] = useState('');
     const [paletteIndex, setPaletteIndex] = useState(0);
     const paletteInputRef = useRef<HTMLInputElement | null>(null);
+    const reportPanelRef = useRef<HTMLDivElement | null>(null);
     const [diffOpen, setDiffOpen] = useState(false);
     const [storyOpen, setStoryOpen] = useState(false);
     const [storyAdvancedOpen, setStoryAdvancedOpen] = useState(false);
@@ -859,9 +735,9 @@ function WorkspaceDraftsPageContent() {
     const [memoryCaptureOpen, setMemoryCaptureOpen] = useState(false);
     const lastSimplifiedWorkRef = useRef<string | null>(null);
     const lastSavedRef = useRef<{ title: string; body: string }>({ title: '', body: '' });
-    const isWriteMode = viewMode === 'write';
-    const isImproveMode = viewMode === 'improve';
-    const isAdvancedMode = viewMode === 'advanced';
+    const isWriteMode = true;
+    const isImproveMode = false;
+    const isAdvancedMode = false;
     const allowedTabs = useMemo(() => TABS.filter((tab) => (tab.id === 'msi' ? isDirector : true)), [isDirector]);
     const visibleTabs = useMemo(() => {
         const writeIds = new Set<RightTab>(['evidence', 'proofread', 'quality']);
@@ -916,14 +792,6 @@ function WorkspaceDraftsPageContent() {
     const sources = (sourcesData?.data || []) as Source[];
 
     useEffect(() => {
-        if (typeof window === 'undefined') return;
-        if (window.localStorage.getItem(HELP_KEY)) return;
-        setGuideType('welcome');
-        setGuideAction(null);
-        setGuideOpen(true);
-    }, []);
-
-    useEffect(() => {
         if (!isDirector && activeTab === 'msi') setActiveTab('evidence');
     }, [isDirector, activeTab]);
     useEffect(() => {
@@ -974,40 +842,13 @@ function WorkspaceDraftsPageContent() {
     const invalidatePromptSuggestion = () => {
         queryClient.invalidateQueries({ queryKey: ['workspace-prompt-orchestrator', workId] });
     };
-    const memoryQueryText = useMemo(() => {
-        const parts = [
-            context?.article?.title_ar,
-            context?.article?.original_title,
-            context?.article?.summary,
-            title,
-        ].filter(Boolean);
-        return parts.join(' ').slice(0, 320);
-    }, [context?.article?.original_title, context?.article?.summary, context?.article?.title_ar, title]);
-    const memoryTags = useMemo(() => {
-        return [context?.article?.category, context?.article?.source_name]
-            .filter(Boolean)
-            .join(',');
-    }, [context?.article?.category, context?.article?.source_name]);
     const { data: storySuggestionsData, isLoading: storySuggestionsLoading } = useQuery({
         queryKey: ['smart-editor-story-suggest', articleContextId],
         queryFn: () => storiesApi.suggest(articleContextId!, { limit: 8 }),
         enabled: Boolean(articleContextId),
         staleTime: 1000 * 60 * 2,
     });
-    const memoryRecommendationsQuery = useQuery({
-        queryKey: ['workspace-memory-recommendations', articleContextId, memoryQueryText, memoryTags],
-        queryFn: () =>
-            memoryApi.recommendations({
-                article_id: articleContextId || undefined,
-                q: memoryQueryText || undefined,
-                tags: memoryTags || undefined,
-                limit: 4,
-            }),
-        enabled: Boolean(articleContextId || memoryQueryText.trim()),
-        staleTime: 1000 * 60 * 2,
-    });
     const storySuggestions = (storySuggestionsData?.data || []) as StorySuggestion[];
-    const memoryRecommendations = (memoryRecommendationsQuery.data?.data || []) as ProjectMemoryRecommendation[];
     useEffect(() => {
         if (!storySuggestions.length) {
             setSelectedStoryId(null);
@@ -1017,14 +858,6 @@ function WorkspaceDraftsPageContent() {
             setSelectedStoryId(storySuggestions[0].story_id);
         }
     }, [storySuggestions, selectedStoryId]);
-    const markMemoryUsedMutation = useMutation({
-        mutationFn: (itemId: number) => memoryApi.markUsed(itemId, 'استُخدم داخل المحرر أثناء التحرير'),
-        onSuccess: async () => {
-            setOk('تم تسجيل استخدام عنصر الذاكرة.');
-            await queryClient.invalidateQueries({ queryKey: ['workspace-memory-recommendations'] });
-        },
-        onError: () => setErr('تعذر تسجيل استخدام عنصر الذاكرة.'),
-    });
     const quickCaptureMutation = useMutation({
         mutationFn: (payload: {
             memory_type: 'operational' | 'knowledge' | 'session';
@@ -1286,7 +1119,13 @@ function WorkspaceDraftsPageContent() {
     });
     const runSeo = useMutation({
         mutationFn: () => runEditorialActionWithPolling(() => editorialApi.aiSeoSuggestion(workId!), 'تحسين SEO'),
-        onSuccess: (data) => { setSeoPack(data); setActiveTab('seo'); },
+        onSuccess: (data) => {
+            setSeoPack(data);
+            openReportTab('quality');
+            if (!runReadiness.isPending) {
+                runReadiness.mutate();
+            }
+        },
         onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر تشغيل اقتراحات SEO'),
     });
     const runLinks = useMutation({
@@ -1297,7 +1136,10 @@ function WorkspaceDraftsPageContent() {
         onSuccess: (data) => {
             setLinkRunId(data?.run_id || null);
             setLinkSuggestions((data?.items || []).map((x: any) => ({ ...x, selected: true })));
-            setActiveTab('seo');
+            openReportTab('quality');
+            if (!runReadiness.isPending) {
+                runReadiness.mutate();
+            }
             queryClient.invalidateQueries({ queryKey: ['smart-editor-links-history', workId] });
         },
         onError: (e: any) => setErr(e?.response?.data?.detail || 'تعذر توليد اقتراحات الروابط'),
@@ -1338,12 +1180,25 @@ function WorkspaceDraftsPageContent() {
     });
     const runSocial = useMutation({
         mutationFn: () => runEditorialActionWithPolling(() => editorialApi.aiSocialVariants(workId!), 'نسخ السوشيال'),
-        onSuccess: (data) => { setSocial(data?.variants || null); setActiveTab('social'); invalidatePromptSuggestion(); },
+        onSuccess: (data) => {
+            setSocial(data?.variants || null);
+            openReportTab('quality');
+            if (!runReadiness.isPending) {
+                runReadiness.mutate();
+            }
+            invalidatePromptSuggestion();
+        },
         onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر توليد نسخ السوشيال'),
     });
     const runHeadlines = useMutation({
         mutationFn: () => runEditorialActionWithPolling(() => editorialApi.aiHeadlineSuggestion(workId!, 5), 'اقتراح العناوين'),
-        onSuccess: (data) => { setHeadlines(data?.headlines || []); setActiveTab('seo'); },
+        onSuccess: (data) => {
+            setHeadlines(data?.headlines || []);
+            openReportTab('quality');
+            if (!runReadiness.isPending) {
+                runReadiness.mutate();
+            }
+        },
         onError: (e: any) => setErr(e?.message || e?.response?.data?.detail || 'تعذر توليد العناوين'),
     });
     const runArchiveSearch = useMutation({
@@ -1732,23 +1587,6 @@ function WorkspaceDraftsPageContent() {
         return cards;
     }, [claims, headlines, linkSuggestions.length, proofread, quality, readiness, seoPack, simResult, social, xrayItems.length]);
 
-    const explanationItems = useMemo(() => {
-        const items = [...decisionModel.urgent, ...decisionModel.improve, ...decisionModel.extra];
-        return items.slice(0, 12).map((item) => ({
-            ...item,
-            source: item.action ? ACTION_SOURCE_LABELS[item.action] : 'تحليل آلي',
-        }));
-    }, [decisionModel]);
-
-    const reviewCards = useMemo(
-        () => (reviewExpanded ? professionalReview : professionalReview.slice(0, 4)),
-        [reviewExpanded, professionalReview],
-    );
-    const explainCards = useMemo(
-        () => (explainExpanded ? explanationItems : explanationItems.slice(0, 5)),
-        [explainExpanded, explanationItems],
-    );
-
     const decisionActionHandlers: Record<DecisionActionId, () => void> = {
         verify: () => runVerifier.mutate(),
         quality: () => runQuality.mutate(),
@@ -1807,135 +1645,6 @@ function WorkspaceDraftsPageContent() {
 
     const bodyText = useMemo(() => htmlToReadableText(bodyHtml || ''), [bodyHtml]);
     const hasSubmissionBody = bodyText.trim().length >= 120;
-
-    const nextActionHelp = useMemo(() => ACTION_HELP[nextAction.actionId], [nextAction.actionId]);
-
-    const editorChecklist = useMemo(() => {
-        const hasDraftBody = bodyText.trim().length >= 240;
-        const hasQuickCheckSignal = Boolean(readiness || quality || proofread || claims.length > 0);
-        const isReadyForApproval = isJournalist
-            ? hasDraftBody
-            : Boolean(readiness?.ready_for_publish) && blockerSummary.count === 0;
-
-        if (isWriteMode) {
-            return [
-                {
-                    id: 'write_body',
-                    title: 'أكمل النص الأساسي',
-                    hint: hasDraftBody ? 'يوجد متن كافٍ للانتقال إلى الفحص.' : 'اكتب أو راجع المتن حتى يصبح واضحًا ومتماسكًا.',
-                    status: hasDraftBody ? 'done' : 'current',
-                },
-                {
-                    id: 'quick_check',
-                    title: 'شغّل الفحص السريع',
-                    hint: hasQuickCheckSignal ? 'ظهرت لك قراءة أولية للجودة والجاهزية.' : 'الفحص السريع سيعطيك أقصر طريق لمعرفة ما ينقص النص.',
-                    status: hasQuickCheckSignal ? 'done' : hasDraftBody ? 'current' : 'upcoming',
-                },
-                {
-                    id: 'send_to_chief',
-                    title: isJournalist ? 'اعتماد مباشر أو إرسال للرئيس' : 'أرسل لاعتماد رئيس التحرير',
-                    hint: isReadyForApproval
-                        ? 'يمكنك إنهاء الموضوع مباشرة، أو إرساله للرئيس إذا أردت مراجعة إضافية.'
-                        : 'أكمل المتن أولاً ثم اختر مسار الاعتماد المناسب.',
-                    status: isReadyForApproval ? 'current' : 'upcoming',
-                },
-            ];
-        }
-
-        if (isImproveMode) {
-            return [
-                {
-                    id: 'resolve_blockers',
-                    title: 'عالج أول مانع مهم',
-                    hint: blockerSummary.count > 0 ? `يوجد ${blockerSummary.count} ملاحظة عالية الأولوية.` : 'لا توجد ملاحظات حرجة ظاهرة الآن.',
-                    status: blockerSummary.count === 0 ? 'done' : 'current',
-                },
-                {
-                    id: 'run_best_tool',
-                    title: `نفّذ ${actionLabel(nextAction.actionId)}`,
-                    hint: nextActionHelp.after,
-                    status: blockerSummary.count === 0 ? 'current' : 'upcoming',
-                },
-                {
-                    id: 'recheck_send',
-                    title: 'راجع ثم أرسل',
-                    hint: 'بعد التحسين، أعد الفحص السريع أو بوابة النشر ثم انتقل إلى الإرسال.',
-                    status: isReadyForApproval ? 'current' : 'upcoming',
-                },
-            ];
-        }
-
-        const hasAdvancedSignal = Boolean(simResult) || xrayItems.length > 0 || msiTopDaily.length > 0 || msiTopWeekly.length > 0;
-        return [
-            {
-                id: 'choose_depth',
-                title: 'استخدم التحليل المتقدم عند الحاجة فقط',
-                hint: 'هذا الوضع مفيد للقرار التحريري العميق، لا لكل مادة يومية.',
-                status: 'done',
-            },
-            {
-                id: 'run_advanced',
-                title: `نفّذ ${actionLabel(nextAction.actionId)}`,
-                hint: hasAdvancedSignal ? 'بدأت تتوفر لديك إشارات تحليلية أعمق.' : nextActionHelp.after,
-                status: 'current',
-            },
-            {
-                id: 'return_to_flow',
-                title: 'عد إلى التحسين أو الإرسال',
-                hint: 'بعد التحليل المتقدم، خذ قرارًا عمليًا: عد إلى التحسين أو أرسل النسخة.',
-                status: 'upcoming',
-            },
-        ];
-    }, [
-        blockerSummary.count,
-        bodyText,
-        claims.length,
-        isJournalist,
-        isImproveMode,
-        isWriteMode,
-        msiTopDaily.length,
-        msiTopWeekly.length,
-        nextAction.actionId,
-        nextActionHelp.after,
-        proofread,
-        quality,
-        readiness,
-        simResult,
-        xrayItems.length,
-    ]);
-
-    const contextualGuideItems = useMemo(
-        () => [
-            {
-                title: 'ما الذي أفعله الآن؟',
-                description: nextActionHelp.when,
-            },
-            {
-                title: 'لماذا هذه الخطوة؟',
-                description: nextAction.description,
-            },
-            {
-                title: 'ماذا بعد هذه الخطوة؟',
-                description: nextActionHelp.after,
-            },
-            {
-                title: 'أي برومبت أستخدم هنا؟',
-                description:
-                    isWriteMode
-                        ? 'في مرحلة الكتابة نستخدم برومبتات Scribe لبدء المسودة الأولى فقط، ثم نترك التحسين والمراجعة للمرحلة التالية.'
-                        : isImproveMode
-                          ? 'في هذا الوضع نستخدم برومبتات Smart Editor للعناوين والتحسين اللغوي والأسلوبي دون تغيير الحقائق.'
-                          : 'في المراجعة نستخدم برومبتات فحص الجاهزية والادعاءات، لا برومبتات كتابة المسودة من جديد.',
-                actionLabel: 'افتح دليل البرومبتات',
-                href: isWriteMode
-                    ? '/prompt-playbook#scribe'
-                    : isImproveMode
-                      ? '/prompt-playbook#smart-editor-headlines'
-                      : '/prompt-playbook#quality-gates',
-            },
-        ],
-        [isImproveMode, isWriteMode, nextAction.description, nextActionHelp.after, nextActionHelp.when],
-    );
 
     const storyTimelineFromContext = useMemo(
         () => (context?.story_context?.timeline || []) as StoryContextItem[],
@@ -2127,21 +1836,6 @@ function WorkspaceDraftsPageContent() {
         });
         return lines.filter(Boolean);
     }, [storyTimelineChrono]);
-    const workflowSteps = useMemo(() => {
-        const hasContext = Boolean(cleanText(context?.article?.summary || context?.article?.original_content || '').trim());
-        const hasDraft = bodyText.trim().length >= 400;
-        const hasQuality = typeof quality?.score === 'number';
-        const hasVerification = claims.length > 0 || Boolean(readiness);
-        const readyToSend = Boolean(readiness?.ready_for_publish);
-        return [
-            { id: 'context', label: 'فهم الخبر', status: hasContext ? 'done' : 'pending' },
-            { id: 'draft', label: 'المسودة', status: hasDraft ? 'done' : hasContext ? 'warn' : 'pending' },
-            { id: 'quality', label: 'تحسين النص', status: hasQuality ? 'done' : 'pending' },
-            { id: 'verify', label: 'التحقق', status: hasVerification ? (claims.some((c: any) => c?.blocking) ? 'warn' : 'done') : 'pending' },
-            { id: 'send', label: 'الإرسال', status: readiness ? (readyToSend ? 'done' : 'warn') : 'pending' },
-        ] as Array<{ id: string; label: string; status: 'done' | 'warn' | 'pending' }>;
-    }, [context?.article?.summary, context?.article?.original_content, bodyText, quality, claims, readiness]);
-
     const runAudienceSimulation = useMutation({
         mutationFn: async () => {
             const headline = cleanText(title || context?.article?.title_ar || context?.article?.original_title || '');
@@ -2324,8 +2018,6 @@ function WorkspaceDraftsPageContent() {
         if (lastSimplifiedWorkRef.current === marker) return;
         lastSimplifiedWorkRef.current = marker;
         setEditorStage('writing');
-        setViewMode('write');
-        setDetailsOpen(true);
         setToolsExpanded(true);
         setHeaderToolsOpen(false);
         setCopilotOpen(false);
@@ -2335,12 +2027,19 @@ function WorkspaceDraftsPageContent() {
     const showSidePanels = !focusMode;
     const mainSpanClass = showSidePanels ? 'xl:col-span-7' : 'xl:col-span-12';
     const isWritingStage = isWriterRole && editorStage === 'writing';
-    const showWriterMinimal = isWritingStage && focusMode && !detailsOpen;
     const showTechnicalDiagnostics = !isWriterRole || decisionDetailOpen;
-    const showInlineResults = toolsExpanded && (detailsOpen || isWriterRole);
+    const showInlineResults = toolsExpanded;
+    const openReportTab = (tab: RightTab) => {
+        setToolsExpanded(true);
+        setActiveTab(tab);
+        setDecisionDetailOpen(true);
+        setTimeout(() => {
+            reportPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 0);
+    };
 
     const reportPanels = (
-        <>
+        <div ref={reportPanelRef} className="space-y-3">
         {showInlineResults && (
         <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4">
             <div className="flex gap-2 overflow-x-auto pb-1 xl:flex-wrap xl:overflow-visible">
@@ -2865,7 +2564,7 @@ function WorkspaceDraftsPageContent() {
                 </div>
             </Panel>
         )}
-        </>
+        </div>
     );
 
     useEffect(() => {
@@ -2931,18 +2630,6 @@ function WorkspaceDraftsPageContent() {
                 run: () => runWithGuide('social', () => runSocial.mutate()),
             },
             {
-                id: 'audience',
-                label: 'محاكي الجمهور',
-                keywords: ['audience', 'sim'],
-                run: () => runWithGuide('audience_test', () => runAudienceSimulation.mutate()),
-            },
-            {
-                id: 'toggle_details',
-                label: detailsOpen ? 'إخفاء التفاصيل' : 'عرض التفاصيل',
-                keywords: ['details'],
-                run: () => setDetailsOpen((prev) => !prev),
-            },
-            {
                 id: 'toggle_focus',
                 label: focusMode ? 'إلغاء وضع التركيز' : 'وضع التركيز',
                 keywords: ['focus'],
@@ -2958,25 +2645,19 @@ function WorkspaceDraftsPageContent() {
                 id: 'open_archive',
                 label: 'فتح الأرشيف',
                 keywords: ['archive'],
-                run: () => { setDetailsOpen(true); setLeftTab('archive'); },
+                run: () => { setLeftTab('archive'); },
             },
             {
                 id: 'open_drafts',
                 label: 'عرض المسودات',
                 keywords: ['drafts'],
-                run: () => { setDetailsOpen(true); setLeftTab('drafts'); },
+                run: () => { setLeftTab('drafts'); },
             },
             {
                 id: 'compare_versions',
                 label: 'مقارنة النسخ',
                 keywords: ['diff', 'versions'],
                 run: () => setDiffOpen(true),
-            },
-            {
-                id: 'story_mode',
-                label: 'Story Mode',
-                keywords: ['story', 'timeline'],
-                run: () => setStoryOpen(true),
             },
             {
                 id: 'submit_with_reservations',
@@ -2993,7 +2674,6 @@ function WorkspaceDraftsPageContent() {
         ];
         return items;
     }, [
-        detailsOpen,
         focusMode,
         smartHighlightEnabled,
         runQuickCheck,
@@ -3005,7 +2685,6 @@ function WorkspaceDraftsPageContent() {
         runLinks,
         runSocial,
         runAudienceSimulation,
-        setDetailsOpen,
     ]);
 
     const filteredPaletteItems = useMemo(() => {
@@ -3066,28 +2745,6 @@ function WorkspaceDraftsPageContent() {
         window.addEventListener('keydown', handler);
         return () => window.removeEventListener('keydown', handler);
     }, [paletteOpen, filteredPaletteItems, paletteIndex]);
-
-    const decisionSections = isAdvancedMode
-        ? [
-            { key: 'urgent', title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد ملاحظات حرجة حالياً.', showAll: showUrgentAll, toggle: () => setShowUrgentAll((v) => !v) },
-            { key: 'improve', title: 'يحسّن الجودة', items: decisionModel.improve, empty: 'لا توجد تحسينات عاجلة للجودة.', showAll: showImproveAll, toggle: () => setShowImproveAll((v) => !v) },
-            { key: 'extra', title: 'تحسينات إضافية', items: decisionModel.extra, empty: 'لا توجد تحسينات إضافية الآن.', showAll: showExtraAll, toggle: () => setShowExtraAll((v) => !v) },
-        ]
-        : isImproveMode
-            ? [
-                { key: 'urgent', title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد ملاحظات حرجة حالياً.', showAll: showUrgentAll, toggle: () => setShowUrgentAll((v) => !v) },
-                { key: 'improve', title: 'يحسّن الجودة', items: decisionModel.improve, empty: 'لا توجد تحسينات عاجلة للجودة.', showAll: showImproveAll, toggle: () => setShowImproveAll((v) => !v) },
-            ]
-            : [
-                { key: 'urgent', title: 'عاجل الآن', items: decisionModel.urgent, empty: 'لا توجد ملاحظات حرجة حالياً.', showAll: showUrgentAll, toggle: () => setShowUrgentAll((v) => !v) },
-            ];
-
-    const decisionSectionsForView = useMemo(() => {
-        if (blockerSummary.count > 0) {
-            return decisionSections.filter((section) => section.key !== 'urgent');
-        }
-        return decisionSections;
-    }, [decisionSections, blockerSummary.count]);
 
     const saveNode = useMemo(() => {
         if (saveState === 'saved') return <span className="text-emerald-300 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" />محفوظ</span>;
@@ -3174,7 +2831,7 @@ function WorkspaceDraftsPageContent() {
     const storyQuickActions = useMemo(() => {
         return storyGaps.slice(0, 3).map((gap) => {
             let actionLabel = 'معالجة';
-            let handler: () => void = () => setDetailsOpen(true);
+            let handler: () => void = () => setStoryOpen(false);
             if (gap.action && decisionActionHandlers[gap.action]) {
                 const runner = decisionActionHandlers[gap.action];
                 actionLabel = ACTION_SOURCE_LABELS[gap.action] || 'تشغيل';
@@ -3187,7 +2844,6 @@ function WorkspaceDraftsPageContent() {
                 actionLabel = storyTaskLabel(task);
                 if (task === 'source') {
                     handler = () => {
-                        setDetailsOpen(true);
                         setLeftTab('archive');
                         setStoryOpen(false);
                     };
@@ -3204,7 +2860,7 @@ function WorkspaceDraftsPageContent() {
             }
             return { ...gap, actionLabel, handler };
         });
-    }, [storyGaps, decisionActionHandlers, createStoryDraft, setStoryOpen, setDetailsOpen, setLeftTab, insertAutoTimeline]);
+    }, [storyGaps, decisionActionHandlers, createStoryDraft, setStoryOpen, setLeftTab, insertAutoTimeline]);
 
     const nextBestAction = useMemo(() => {
         if (storyQuickActions.length > 0) return storyQuickActions[0];
@@ -3252,42 +2908,8 @@ function WorkspaceDraftsPageContent() {
         setSaveState('unsaved');
     }
 
-    function openWelcomeGuide() {
-        setGuideType('welcome');
-        setGuideAction(null);
-        setGuideOpen(true);
-    }
-
-    function openActionGuide(action: ActionId) {
-        setGuideType('action');
-        setGuideAction(action);
-        setGuideOpen(true);
-    }
-
-    function applyViewMode(mode: ViewMode) {
-        const labels: Record<ViewMode, string> = {
-            write: 'وضع: اكتب وأنهِ',
-            improve: 'وضع: حسّن أكثر',
-            advanced: 'وضع: تحليل متقدم',
-        };
-        trackUiAction('workspace_drafts', labels[mode], { ...surfaceDetails, target_mode: mode });
-        setViewMode(mode);
-        setHeaderToolsOpen(false);
-
-        if (mode === 'write') {
-            setDetailsOpen(false);
-            setToolsExpanded(true);
-            setFocusMode(false);
-            return;
-        }
-
-        setDetailsOpen(true);
-        setToolsExpanded(true);
-    }
-
     function enterReviewStage() {
         setEditorStage('review');
-        setDetailsOpen(true);
         setToolsExpanded(true);
         setHeaderToolsOpen(false);
         setCopilotOpen(false);
@@ -3296,45 +2918,16 @@ function WorkspaceDraftsPageContent() {
 
     function returnToWritingStage() {
         setEditorStage('writing');
-        setViewMode('write');
-        setDetailsOpen(false);
         setToolsExpanded(true);
         setHeaderToolsOpen(false);
         setCopilotOpen(false);
         setFocusMode(false);
     }
 
-    function closeGuide() {
-        setGuideOpen(false);
-        setGuideAction(null);
-        pendingActionRef.current = null;
-    }
-
-    function runWithGuide(action: ActionId, callback: () => void) {
+    function runWithGuide(_action: ActionId, callback: () => void) {
         setErr(null);
         setOk(null);
-        if (typeof window === 'undefined') return callback();
-        try {
-            if (window.localStorage.getItem(actionKey(action))) return callback();
-        } catch {
-            // Privacy mode / blocked storage: never block the action.
-            callback();
-            return;
-        }
-        pendingActionRef.current = callback;
-        setGuideType('action');
-        setGuideAction(action);
-        setGuideOpen(true);
-    }
-
-    function confirmGuide() {
-        if (typeof window !== 'undefined') {
-            if (guideType === 'welcome') window.localStorage.setItem(HELP_KEY, '1');
-            if (guideType === 'action' && guideAction) window.localStorage.setItem(actionKey(guideAction), '1');
-        }
-        const next = pendingActionRef.current;
-        closeGuide();
-        if (next) next();
+        callback();
     }
 
     if (listLoading) return <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-8 text-center text-gray-300">جاري تحميل المسودات...</div>;
@@ -3425,244 +3018,75 @@ function WorkspaceDraftsPageContent() {
 
     return (
         <div className="space-y-4">
-            {isWritingStage ? (
-                <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-3" dir="rtl">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div className="space-y-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                                <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-100">
-                                    مساحة كتابة هادئة
-                                </span>
-                                <span className="text-[11px] text-gray-400">{saveNode}</span>
-                            </div>
-                            <p className="text-[12px] text-slate-300">اكتب فقط. بعد أن تنتهي اضغط «أنهيت الكتابة» لنفتح المراجعة والأدوات.</p>
-                        </div>
+            <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-3" dir="rtl">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="space-y-1">
                         <div className="flex flex-wrap items-center gap-2">
-                            <button
-                                disabled={autosave.isPending}
-                                onClick={() => {
-                                    trackUiAction('workspace_drafts', 'حفظ', surfaceDetails);
-                                    runWithGuide('save', () => {
-                                        setSaveState('saving');
-                                        autosave.mutate();
-                                    });
-                                }}
-                                className="min-h-10 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-slate-200 disabled:opacity-60"
-                            >
-                                حفظ
-                            </button>
-                            <button
-                                type="button"
-                                onClick={enterReviewStage}
-                                className="min-h-10 rounded-xl border border-cyan-500/30 bg-cyan-500/15 px-4 py-2 text-xs font-medium text-cyan-100"
-                            >
-                                أنهيت الكتابة
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setHeaderToolsOpen((prev) => !prev)}
-                                className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-slate-200"
-                            >
-                                {headerToolsOpen ? 'إغلاق' : 'المزيد'}
-                            </button>
+                            <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-100">
+                                مساحة كتابة هادئة
+                            </span>
+                            <span className="text-[11px] text-gray-400">{saveNode}</span>
                         </div>
+                        <p className="text-[12px] text-slate-300">اكتب فقط. بعد أن تنتهي اضغط «أنهيت الكتابة» لنفتح المراجعة والأدوات.</p>
                     </div>
-
-                    {headerToolsOpen && (
-                        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-4">
-                            <button
-                                onClick={() => setMemoryCaptureOpen(true)}
-                                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200"
-                            >
-                                حفظ في الذاكرة
-                            </button>
-                            <button
-                                onClick={openWelcomeGuide}
-                                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-200"
-                            >
-                                <CircleHelp className="w-4 h-4" />
-                                كيف يعمل؟
-                            </button>
-                            <button
-                                onClick={() => runWithGuide('manual_draft', () => setNewDraftOpen(true))}
-                                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200"
-                            >
-                                مسودة جديدة
-                            </button>
-                            <NextLink
-                                href="/services/multimedia"
-                                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-xs text-violet-200"
-                            >
-                                أدوات الوسائط
-                            </NextLink>
-                        </div>
-                    )}
-
-                    {(err || ok) && <div className={cn('mt-3 rounded-xl px-3 py-2 text-xs', err ? 'bg-red-500/15 text-red-200 border border-red-500/30' : 'bg-emerald-500/15 text-emerald-200 border border-emerald-500/30')}>{err || ok}</div>}
-                </div>
-            ) : (
-            <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4">
-                {!isWriterRole && (
-                    <RoleOnboardingBanner
-                        storageKey={`ech_workspace_onboarding_v1_${(user?.role || 'guest').toLowerCase()}`}
-                        title="كيف تبدأ داخل المحرر؟"
-                        description="المحرر الآن يعمل بثلاثة أوضاع بسيطة. ابدأ بوضع الكتابة، ثم افتح التحسين أو التحليل فقط إذا احتجت ذلك."
-                        steps={[
-                            {
-                                title: 'اكتب وأنهِ',
-                                description: 'اكتب النص، شغّل الفحص السريع، ثم أرسل لاعتماد رئيس التحرير.',
-                            },
-                            {
-                                title: 'حسّن أكثر',
-                                description: 'افتح أدوات التحقق، التدقيق، الجودة، SEO، والسوشيال عندما تحتاج رفع النسخة.',
-                            },
-                            {
-                                title: 'تحليل متقدم',
-                                description: 'استخدم المحاكي وMSI وزوايا المنافسين فقط عند الحاجة إلى مراجعة أعمق.',
-                            },
-                        ]}
-                    />
-                )}
-
-                {isWritingStage ? (
-                    <div className="space-y-3" dir="rtl">
-                        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-                            <div className="space-y-1">
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-100">
-                                        مرحلة الكتابة
-                                    </span>
-                                    <span className="text-[11px] text-gray-400">{saveNode}</span>
-                                </div>
-                                <p className="text-sm text-white">اكتب العنوان والمتن فقط. سنفتح أدوات المراجعة بعد أن تضغط «أنهيت الكتابة».</p>
-                            </div>
-
-                            <div className="flex flex-wrap items-center gap-2">
-                                <button
-                                    disabled={autosave.isPending}
-                                    onClick={() => {
-                                        trackUiAction('workspace_drafts', 'حفظ', surfaceDetails);
-                                        runWithGuide('save', () => {
-                                            setSaveState('saving');
-                                            autosave.mutate();
-                                        });
-                                    }}
-                                    className="min-h-10 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-slate-200 disabled:opacity-60"
-                                >
-                                    حفظ
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={enterReviewStage}
-                                    className="min-h-10 rounded-xl border border-cyan-500/30 bg-cyan-500/15 px-4 py-2 text-xs font-medium text-cyan-100"
-                                >
-                                    أنهيت الكتابة
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setHeaderToolsOpen((prev) => !prev)}
-                                    className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-slate-200"
-                                >
-                                    {headerToolsOpen ? 'إغلاق' : 'المزيد'}
-                                </button>
-                            </div>
-                        </div>
-
-                        {headerToolsOpen && (
-                            <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                                <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
-                                    <button
-                                        onClick={() => setMemoryCaptureOpen(true)}
-                                        className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200"
-                                    >
-                                        حفظ في الذاكرة
-                                    </button>
-                                    <button
-                                        onClick={openWelcomeGuide}
-                                        className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-200"
-                                    >
-                                        <CircleHelp className="w-4 h-4" />
-                                        كيف يعمل؟
-                                    </button>
-                                    <button
-                                        onClick={() => runWithGuide('manual_draft', () => setNewDraftOpen(true))}
-                                        className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200"
-                                    >
-                                        مسودة جديدة
-                                    </button>
-                                    <NextLink
-                                        href="/services/multimedia"
-                                        className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-xs text-violet-200"
-                                    >
-                                        أدوات الوسائط
-                                    </NextLink>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                ) : (
-                <>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                        <h1 className="text-xl font-semibold text-white">المحرر الذكي لغرفة الشروق</h1>
-                        <p className="text-xs text-gray-400">واجهة كتابة مبسطة: خطوة رئيسية واضحة، والأدوات الثقيلة عند الطلب فقط.</p>
-                    </div>
-                    <div className="flex w-full sm:w-auto flex-wrap items-center justify-start sm:justify-end gap-2">
-                        <div className="text-xs">{saveNode}</div>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <button
+                            disabled={autosave.isPending}
+                            onClick={() => {
+                                trackUiAction('workspace_drafts', 'حفظ', surfaceDetails);
+                                runWithGuide('save', () => {
+                                    setSaveState('saving');
+                                    autosave.mutate();
+                                });
+                            }}
+                            className="min-h-10 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-slate-200 disabled:opacity-60"
+                        >
+                            حفظ
+                        </button>
+                        <button
+                            type="button"
+                            onClick={enterReviewStage}
+                            className="min-h-10 rounded-xl border border-cyan-500/30 bg-cyan-500/15 px-4 py-2 text-xs font-medium text-cyan-100"
+                        >
+                            أنهيت الكتابة
+                        </button>
                         <button
                             type="button"
                             onClick={() => setHeaderToolsOpen((prev) => !prev)}
                             className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-slate-200"
                         >
-                            {headerToolsOpen ? 'إخفاء الأدوات الإضافية' : 'أدوات إضافية'}
+                            {headerToolsOpen ? 'إغلاق' : 'المزيد'}
                         </button>
                     </div>
                 </div>
 
                 {headerToolsOpen && (
-                    <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3">
-                        <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
-                            <button
-                                onClick={() => setMemoryCaptureOpen(true)}
-                                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200"
-                            >
-                                حفظ في الذاكرة
-                            </button>
-                            <button
-                                onClick={() => runWithGuide('manual_draft', () => setNewDraftOpen(true))}
-                                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200"
-                            >
-                                مسودة جديدة
-                            </button>
-                            <button
-                                onClick={openWelcomeGuide}
-                                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-200"
-                            >
-                                <CircleHelp className="w-4 h-4" />
-                                دليل الاستخدام
-                            </button>
-                            <NextLink
-                                href="/services/multimedia"
-                                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-xs text-violet-200"
-                            >
-                                أدوات الوسائط
-                            </NextLink>
-                        </div>
+                    <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-4">
+                        <button
+                            onClick={() => setMemoryCaptureOpen(true)}
+                            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200"
+                        >
+                            حفظ في الذاكرة
+                        </button>
+                        <button
+                            onClick={() => runWithGuide('manual_draft', () => setNewDraftOpen(true))}
+                            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200"
+                        >
+                            مسودة جديدة
+                        </button>
+                        <NextLink
+                            href="/services/multimedia"
+                            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-xs text-violet-200"
+                        >
+                            أدوات الوسائط
+                        </NextLink>
                     </div>
                 )}
 
-                {(!isWriterRole || detailsOpen) && (
-                    <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] text-gray-300">
-                        {workflowSteps.map((step, idx) => (
-                            <div key={step.id} className="flex items-center gap-1">
-                                <span className={cn('h-2 w-2 rounded-full', workflowDot(step.status))} />
-                                <span>{step.label}</span>
-                                {idx < workflowSteps.length - 1 && <span className="text-gray-600">—</span>}
-                            </div>
-                        ))}
-                    </div>
-                )}
+                {(err || ok) && <div className={cn('mt-3 rounded-xl px-3 py-2 text-xs', err ? 'bg-red-500/15 text-red-200 border border-red-500/30' : 'bg-emerald-500/15 text-emerald-200 border border-emerald-500/30')}>{err || ok}</div>}
+            </div>
 
+            <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4" dir="rtl">
                 {blockerSummary.count > 0 ? (
                     <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
                         <div className="space-y-0.5">
@@ -3681,272 +3105,49 @@ function WorkspaceDraftsPageContent() {
                 <div className="mt-3 space-y-3">
                     <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-3">
                         <div className="flex flex-wrap items-center gap-2">
-                            {showWriterMinimal && (
-                                <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-1 text-[11px] text-cyan-100">
-                                    الخطوة الآن: {nextAction.label}
-                                </span>
-                            )}
-                        <button
-                            onClick={() => {
-                                trackNextAction('workspace_drafts', nextAction.label, surfaceDetails);
-                                nextAction.handler();
-                            }}
-                            className={cn('min-h-10 px-4 py-2 rounded-xl border text-xs flex items-center gap-2 font-medium', severityStyles(nextAction.severity).badge, 'border-white/15')}
-                        >
-                            {nextAction.label}
-                        </button>
-                        <button
-                            onClick={() => setDetailsOpen((prev) => !prev)}
-                            className="min-h-10 px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-slate-200 text-xs"
-                        >
-                            {detailsOpen ? 'إخفاء اللوحة المساعدة' : 'إظهار اللوحة المساعدة'}
-                        </button>
-                        {detailsOpen && (
                             <button
-                                type="button"
-                                onClick={() => setCopilotOpen(true)}
-                                className="min-h-10 px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-slate-200 text-xs"
-                            >
-                                مساعد التحرير
-                            </button>
-                        )}
-                        <button
-                            disabled={autosave.isPending}
-                            onClick={() => {
-                                trackUiAction('workspace_drafts', 'حفظ', surfaceDetails);
-                                runWithGuide('save', () => { setSaveState('saving'); autosave.mutate(); });
-                            }}
-                            className="min-h-10 px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-slate-200 text-xs flex items-center gap-2 disabled:opacity-60"
-                        >
-                            <Save className="w-4 h-4" />حفظ
-                        </button>
-                        <button
-                            disabled={applyToArticle.isPending || !hasSubmissionBody}
-                            onClick={() => {
-                                trackNextAction('workspace_drafts', 'إرسال لاعتماد رئيس التحرير', surfaceDetails);
-                                runWithGuide('apply', () => applyToArticle.mutate());
-                            }}
-                            className="min-h-10 px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-100 text-xs disabled:opacity-60"
-                        >
-                            {applyToArticle.isPending ? 'جاري الإرسال...' : 'إرسال لاعتماد رئيس التحرير'}
-                        </button>
-                        {isJournalist && (
-                            <button
-                                disabled={selfApproveDraft.isPending || !hasSubmissionBody}
                                 onClick={() => {
-                                    trackNextAction('workspace_drafts', 'اعتماد مباشر', surfaceDetails);
-                                    runWithGuide('apply', () => selfApproveDraft.mutate());
+                                    trackNextAction('workspace_drafts', nextAction.label, surfaceDetails);
+                                    nextAction.handler();
                                 }}
-                                className="min-h-10 px-3 py-2 rounded-xl bg-cyan-500/15 border border-cyan-500/30 text-cyan-100 text-xs disabled:opacity-60"
+                                className={cn('min-h-10 px-4 py-2 rounded-xl border text-xs flex items-center gap-2 font-medium', severityStyles(nextAction.severity).badge, 'border-white/15')}
                             >
-                                {selfApproveDraft.isPending ? 'جاري الاعتماد...' : 'اعتماد مباشر'}
+                                {nextAction.label}
                             </button>
-                        )}
-                        <div className="mr-auto flex items-center gap-2">
-                            {isWriterRole && (
-                                <button
-                                    type="button"
-                                    onClick={returnToWritingStage}
-                                    className="min-h-10 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-slate-200"
-                                >
-                                    عودة إلى الكتابة
-                                </button>
-                            )}
-                            {showWriterMinimal ? (
-                                <button
-                                    type="button"
-                                    onClick={() => setDetailsOpen(true)}
-                                    className="min-h-10 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-slate-200"
-                                >
-                                    أحتاج مساعدة
-                                </button>
-                            ) : null}
-                            {!showWriterMinimal && (
-                            <>
-                            <label className="text-[11px] text-slate-400">الوضع</label>
-                            <select
-                                value={viewMode}
-                                onChange={(e) => applyViewMode(e.target.value as ViewMode)}
-                                className="min-h-10 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-white focus:outline-none"
-                            >
-                                <option value="write">اكتب وأنهِ</option>
-                                <option value="improve">حسّن أكثر</option>
-                                <option value="advanced">تحليل متقدم</option>
-                            </select>
-                            </>
-                            )}
-                        </div>
-                        </div>
-                        {showWriterMinimal && (
-                            <p className="mt-2 text-[11px] text-slate-400">
-                                المطلوب الآن ببساطة: اكتب النص ثم اختر الإجراء المناسب لك (اعتماد مباشر أو إرسال للرئيس).
-                            </p>
-                        )}
-                        {!showWriterMinimal && (
-                            <p className="mt-2 text-[11px] text-slate-400">
-                                {nextAction.description || 'لا توجد خطوة عاجلة حالياً.'}
-                            </p>
-                        )}
-                        {promptSuggestion && (
-                            <WorkspacePromptSuggestionCard
-                                suggestion={promptSuggestion}
-                                isPending={runPromptOrchestrator.isPending}
-                                onRun={() => {
-                                    trackUiAction('workspace_drafts', 'تشغيل التوليد الذكي', {
-                                        ...surfaceDetails,
-                                        task_key: promptSuggestion.task_key,
-                                        template_key: promptSuggestion.template_key,
-                                    });
-                                    runPromptOrchestrator.mutate({
-                                        task_key: promptSuggestion.task_key,
-                                        auto_apply: promptSuggestion.auto_apply_default,
-                                    });
-                                }}
-                            />
-                        )}
-                    </div>
-                    {!showWriterMinimal && (
-                    <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-[11px] text-gray-300" dir="rtl">
-                        {isWriteMode
-                            ? 'هذا الوضع مخصص للصحفي: اكتب النص، شغّل الفحص السريع، ثم اختر اعتماد مباشر أو إرسال للرئيس.'
-                            : isImproveMode
-                                ? 'هذا الوضع يفتح أدوات التحسين العملية: التحقق، التدقيق، الجودة، SEO، والسوشيال.'
-                                : 'هذا الوضع مخصص للمراجعة العميقة: التفسير، محاكاة التفاعل، MSI، وزوايا المنافسين.'}
-                    </div>
-                    )}
-                    {detailsOpen ? (
-                    <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-4 space-y-4" dir="rtl">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div className="space-y-2">
-                                <div className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-[11px] text-cyan-100">
-                                    <CircleHelp className="h-3.5 w-3.5" />
-                                    الخطوة التالية الآن
-                                </div>
-                                <div className="text-base font-semibold text-white">{nextAction.label}</div>
-                                <p className="max-w-3xl text-sm leading-7 text-slate-300">{nextAction.description}</p>
-                            </div>
                             <button
-                                type="button"
-                                onClick={() => openActionGuide(nextAction.actionId)}
-                                className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-200 hover:text-white"
+                                disabled={autosave.isPending}
+                                onClick={() => {
+                                trackUiAction('workspace_drafts', 'حفظ', surfaceDetails);
+                                    runWithGuide('save', () => { setSaveState('saving'); autosave.mutate(); });
+                                }}
+                                className="min-h-10 px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-slate-200 text-xs flex items-center gap-2 disabled:opacity-60"
                             >
-                                <CircleHelp className="h-4 w-4" />
-                                شرح هذه الخطوة
+                                <Save className="w-4 h-4" />حفظ
                             </button>
-                        </div>
-
-                        <MemoryRecommendationPanel
-                            items={memoryRecommendations}
-                            isLoading={memoryRecommendationsQuery.isLoading}
-                            onMarkUsed={(itemId) => markMemoryUsedMutation.mutate(itemId)}
-                            onQuickCapture={() => setMemoryCaptureOpen(true)}
-                            onOpenLibrary={() => {
-                                if (typeof window !== 'undefined') {
-                                    window.open('/memory', '_blank', 'noopener,noreferrer');
-                                }
-                            }}
-                        />
-
-                        <WorkflowHelpPanel title="كيف نستخدم هذا المحرر الآن؟" items={contextualGuideItems} />
-
-                        {promptSuggestion && (
-                            <div className="rounded-xl border border-fuchsia-500/15 bg-black/20 p-3">
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <div>
-                                        <div className="text-xs font-medium text-fuchsia-100">كيف يملأ النظام القالب تلقائيًا؟</div>
-                                        <p className="mt-1 text-[11px] leading-6 text-slate-300">
-                                            هذا هو البرومبت العملي الذي سيُبنى تلقائيًا لهذه الحالة دون أن يكتبه الصحفي يدويًا.
-                                        </p>
-                                    </div>
-                                    <NextLink
-                                        href={promptSuggestion.playbook_href}
-                                        className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-[11px] text-slate-200"
-                                    >
-                                        افتح الدليل الكامل
-                                    </NextLink>
-                                </div>
-                                <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-xl border border-white/10 bg-slate-950/70 p-3 text-[11px] leading-7 text-slate-200">
-                                    {promptSuggestion.prompt_preview}
-                                </pre>
-                            </div>
-                        )}
-
-                        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1.1fr_0.9fr]">
-                            <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                                <div className="mb-2 text-xs font-medium text-slate-200">خارطة التنفيذ السريعة</div>
-                                <div className="space-y-2">
-                                    {editorChecklist.map((step) => (
-                                        <div key={step.id} className="flex items-start gap-3 rounded-xl border border-white/5 bg-white/[0.03] px-3 py-2">
-                                            <span
-                                                className={cn(
-                                                    'mt-1 h-2.5 w-2.5 rounded-full',
-                                                    workflowDot(step.status === 'done' ? 'done' : step.status === 'current' ? 'warn' : 'pending'),
-                                                )}
-                                            />
-                                            <div className="min-w-0 flex-1">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-sm text-white">{step.title}</span>
-                                                    <span
-                                                        className={cn(
-                                                            'rounded-full border px-2 py-0.5 text-[10px]',
-                                                            step.status === 'done'
-                                                                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
-                                                                : step.status === 'current'
-                                                                  ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
-                                                                  : 'border-white/10 bg-white/5 text-slate-400',
-                                                        )}
-                                                    >
-                                                        {step.status === 'done' ? 'تم' : step.status === 'current' ? 'الآن' : 'بعد ذلك'}
-                                                    </span>
-                                                </div>
-                                                <p className="mt-1 text-[11px] leading-6 text-slate-400">{step.hint}</p>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-
-                            <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-3">
-                                <div className="text-xs font-medium text-slate-200">حالة النسخة الحالية</div>
-                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                                    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-                                        <p className="text-[11px] text-slate-400">الجاهزية</p>
-                                        <p className="mt-1 text-sm text-white">{compactStatus.readinessLabel}</p>
-                                    </div>
-                                    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-                                        <p className="text-[11px] text-slate-400">ادعاءات حرجة</p>
-                                        <p className="mt-1 text-sm text-white">{compactStatus.blockingClaims}</p>
-                                    </div>
-                                    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-                                        <p className="text-[11px] text-slate-400">الجودة</p>
-                                        <p className="mt-1 text-sm text-white">{compactStatus.qualityScore}</p>
-                                    </div>
-                                </div>
-                                {nextActionHelp.caution && (
-                                    <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] leading-6 text-amber-100">
-                                        تنبيه: {nextActionHelp.caution}
-                                    </div>
-                                )}
-                            </div>
+                            <button
+                                disabled={applyToArticle.isPending || !hasSubmissionBody}
+                                onClick={() => {
+                                    trackNextAction('workspace_drafts', 'إرسال لاعتماد رئيس التحرير', surfaceDetails);
+                                    runWithGuide('apply', () => applyToArticle.mutate());
+                                }}
+                                className="min-h-10 px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-100 text-xs disabled:opacity-60"
+                            >
+                                {applyToArticle.isPending ? 'جاري الإرسال...' : 'إرسال لاعتماد رئيس التحرير'}
+                            </button>
+                            {isJournalist && (
+                                <button
+                                    disabled={selfApproveDraft.isPending || !hasSubmissionBody}
+                                    onClick={() => {
+                                        trackNextAction('workspace_drafts', 'اعتماد مباشر', surfaceDetails);
+                                        runWithGuide('apply', () => selfApproveDraft.mutate());
+                                    }}
+                                    className="min-h-10 px-3 py-2 rounded-xl bg-cyan-500/15 border border-cyan-500/30 text-cyan-100 text-xs disabled:opacity-60"
+                                >
+                                    {selfApproveDraft.isPending ? 'جاري الاعتماد...' : 'اعتماد مباشر'}
+                                </button>
+                            )}
                         </div>
                     </div>
-                    ) : (
-                        <div className="rounded-xl border border-white/10 bg-gray-950/50 p-3">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                                <div>
-                                    <p className="text-sm text-gray-200">الخطوة الحالية: {nextAction.label}</p>
-                                    <p className="text-[11px] text-gray-400 mt-1">{nextAction.description || 'لا توجد خطوة عاجلة حالياً.'}</p>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={() => openActionGuide(nextAction.actionId)}
-                                    className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-200"
-                                >
-                                    شرح الخطوة
-                                </button>
-                            </div>
-                        </div>
-                    )}
                     <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-3">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className="text-xs text-slate-300">أدوات التحرير السريعة داخل الصفحة</div>
@@ -3976,31 +3177,25 @@ function WorkspaceDraftsPageContent() {
                                 </button>
                             </div>
                         </div>
+                        {toolsExpanded && (
+                            <div className="flex flex-wrap gap-2">
+                                <button disabled={runVerifier.isPending} onClick={() => runWithGuide('verify', () => runVerifier.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-cyan-500/20 border border-cyan-500/30 text-cyan-200 text-xs flex items-center gap-2 disabled:opacity-60"><SearchCheck className="w-4 h-4" />{runVerifier.isPending ? 'جاري التحقق...' : 'تحقق'}</button>
+                                <button disabled={runProofread.isPending} onClick={() => runWithGuide('proofread', () => runProofread.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-lime-500/20 border border-lime-500/30 text-lime-200 text-xs disabled:opacity-60">{runProofread.isPending ? 'جاري التدقيق...' : 'تدقيق لغوي'}</button>
+                                <button disabled={runQuality.isPending} onClick={() => runWithGuide('quality', () => runQuality.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs disabled:opacity-60">{runQuality.isPending ? 'جاري التقييم...' : 'جودة'}</button>
+                                <button disabled={runReadiness.isPending} onClick={() => runWithGuide('publish_gate', () => runReadiness.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-200 text-xs disabled:opacity-60">{runReadiness.isPending ? 'جاري الفحص...' : 'بوابة النشر'}</button>
+                                <button disabled={rewrite.isPending} onClick={() => runWithGuide('improve', () => rewrite.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-2 disabled:opacity-60"><Sparkles className="w-4 h-4" />{rewrite.isPending ? 'جاري التحسين...' : 'تحسين'}</button>
+                                <button disabled={runHeadlines.isPending} onClick={() => runWithGuide('headlines', () => runHeadlines.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-200 text-xs disabled:opacity-60">{runHeadlines.isPending ? 'جاري التوليد...' : 'عناوين'}</button>
+                                <button disabled={runSeo.isPending} onClick={() => runWithGuide('seo', () => runSeo.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-200 text-xs disabled:opacity-60">{runSeo.isPending ? 'جاري التحليل...' : 'SEO'}</button>
+                                <button disabled={runLinks.isPending} onClick={() => runWithGuide('links', () => runLinks.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-teal-500/20 border border-teal-500/30 text-teal-200 text-xs disabled:opacity-60">{runLinks.isPending ? 'جاري جلب الروابط...' : 'روابط'}</button>
+                                <button disabled={runSocial.isPending} onClick={() => runWithGuide('social', () => runSocial.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-sky-500/20 border border-sky-500/30 text-sky-200 text-xs disabled:opacity-60">{runSocial.isPending ? 'جاري التوليد...' : 'سوشيال'}</button>
+                                {isAdvancedMode && (
+                                    <button disabled={runAudienceSimulation.isPending} onClick={() => runWithGuide('audience_test', () => runAudienceSimulation.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-100 text-xs disabled:opacity-60">محاكي الجمهور</button>
+                                )}
+                            </div>
+                        )}
                     </div>
-                    {toolsExpanded && (
-                        <div className="flex flex-wrap gap-2">
-                            <button disabled={runVerifier.isPending} onClick={() => runWithGuide('verify', () => runVerifier.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-cyan-500/20 border border-cyan-500/30 text-cyan-200 text-xs flex items-center gap-2 disabled:opacity-60"><SearchCheck className="w-4 h-4" />{runVerifier.isPending ? 'جاري التحقق...' : 'تحقق'}</button>
-                            <button disabled={runProofread.isPending} onClick={() => runWithGuide('proofread', () => runProofread.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-lime-500/20 border border-lime-500/30 text-lime-200 text-xs disabled:opacity-60">{runProofread.isPending ? 'جاري التدقيق...' : 'تدقيق لغوي'}</button>
-                            <button disabled={runQuality.isPending} onClick={() => runWithGuide('quality', () => runQuality.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs disabled:opacity-60">{runQuality.isPending ? 'جاري التقييم...' : 'جودة'}</button>
-                            <button disabled={runReadiness.isPending} onClick={() => runWithGuide('publish_gate', () => runReadiness.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-200 text-xs disabled:opacity-60">{runReadiness.isPending ? 'جاري الفحص...' : 'بوابة النشر'}</button>
-                            <button disabled={rewrite.isPending} onClick={() => runWithGuide('improve', () => rewrite.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-2 disabled:opacity-60"><Sparkles className="w-4 h-4" />{rewrite.isPending ? 'جاري التحسين...' : 'تحسين'}</button>
-                            <button disabled={runHeadlines.isPending} onClick={() => runWithGuide('headlines', () => runHeadlines.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-200 text-xs disabled:opacity-60">{runHeadlines.isPending ? 'جاري التوليد...' : 'عناوين'}</button>
-                            <button disabled={runSeo.isPending} onClick={() => runWithGuide('seo', () => runSeo.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-200 text-xs disabled:opacity-60">{runSeo.isPending ? 'جاري التحليل...' : 'SEO'}</button>
-                            <button disabled={runLinks.isPending} onClick={() => runWithGuide('links', () => runLinks.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-teal-500/20 border border-teal-500/30 text-teal-200 text-xs disabled:opacity-60">{runLinks.isPending ? 'جاري جلب الروابط...' : 'روابط'}</button>
-                            <button disabled={runSocial.isPending} onClick={() => runWithGuide('social', () => runSocial.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-sky-500/20 border border-sky-500/30 text-sky-200 text-xs disabled:opacity-60">{runSocial.isPending ? 'جاري التوليد...' : 'سوشيال'}</button>
-                            {isAdvancedMode && (
-                                <button disabled={runAudienceSimulation.isPending} onClick={() => runWithGuide('audience_test', () => runAudienceSimulation.mutate())} className="min-h-9 px-3 py-2 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-100 text-xs disabled:opacity-60">محاكي الجمهور</button>
-                            )}
-                        </div>
-                    )}
                 </div>
-                </>
-                )}
-
-                {(err || ok) && <div className={cn('mt-3 rounded-xl px-3 py-2 text-xs', err ? 'bg-red-500/15 text-red-200 border border-red-500/30' : 'bg-emerald-500/15 text-emerald-200 border border-emerald-500/30')}>{err || ok}</div>}
             </div>
-            )}
-
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
                 <div className={cn('order-1 xl:order-2 space-y-4', mainSpanClass)}>
                     <div className="rounded-2xl border border-white/10 bg-gray-900/50 overflow-hidden">
@@ -4149,12 +3344,6 @@ function WorkspaceDraftsPageContent() {
                                     >
                                         مقارنة النسخ
                                     </button>
-                                    <button
-                                        onClick={() => setStoryOpen(true)}
-                                        className="px-2 py-1 rounded-lg bg-white/10 text-[10px] text-gray-200 border border-white/10"
-                                    >
-                                        Story Mode
-                                    </button>
                                 </div>
                             </div>
                         )}
@@ -4238,115 +3427,6 @@ function WorkspaceDraftsPageContent() {
                 </aside>
                 )}
             </div>
-
-            {detailsOpen && (
-                <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-4 space-y-4" dir="rtl">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <h2 className="text-sm text-white font-semibold">ملخص القرار</h2>
-                            <p className="text-[11px] text-gray-400">نظرة سريعة تساعدك على اتخاذ القرار.</p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <button
-                                onClick={() => setDecisionDetailOpen((prev) => !prev)}
-                                className="rounded-lg border border-white/15 bg-white/10 px-2 py-1 text-[10px] text-gray-200"
-                            >
-                                {decisionDetailOpen ? 'إخفاء التفاصيل' : 'عرض التفاصيل'}
-                            </button>
-                            <button
-                                onClick={() => decisionActionHandlers.quick_check()}
-                                className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[10px] text-emerald-200"
-                            >
-                                فحص سريع
-                            </button>
-                        </div>
-                    </div>
-
-                    {blockerSummary.count > 0 ? (
-                        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-amber-100">
-                            <p className="font-semibold">ملاحظات جودة عاجلة: {blockerSummary.count}</p>
-                            <p className="text-[10px] text-amber-200 mt-1">
-                                {blockerSummary.top?.title || 'لا توجد ملاحظات حرجة الآن.'}
-                            </p>
-                            <div className="mt-2 flex flex-wrap gap-2">
-                                {isJournalist && (
-                                    <button
-                                        onClick={() => selfApproveDraft.mutate()}
-                                        disabled={selfApproveDraft.isPending || !hasSubmissionBody}
-                                        className="px-2 py-1 rounded bg-cyan-500/20 border border-cyan-500/30 text-[10px] text-cyan-100 disabled:opacity-60"
-                                    >
-                                        {selfApproveDraft.isPending ? 'جاري الاعتماد...' : 'اعتماد مباشر'}
-                                    </button>
-                                )}
-                                <button
-                                    onClick={() => setOverrideOpen(true)}
-                                    disabled={!workId}
-                                    className="px-2 py-1 rounded bg-amber-500/20 border border-amber-500/30 text-[10px] text-amber-100 disabled:opacity-60"
-                                >
-                                    إرسال بتحفّظ
-                                </button>
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-2 text-[11px] text-emerald-100">
-                            لا توجد عوائق تمنع الاعتماد الآن.
-                        </div>
-                    )}
-
-                    <MemoryRecommendationPanel
-                        items={memoryRecommendations}
-                        isLoading={memoryRecommendationsQuery.isLoading}
-                        onMarkUsed={(itemId) => markMemoryUsedMutation.mutate(itemId)}
-                        onQuickCapture={() => setMemoryCaptureOpen(true)}
-                        onOpenLibrary={() => {
-                            if (typeof window !== 'undefined') {
-                                window.open('/memory', '_blank', 'noopener,noreferrer');
-                            }
-                        }}
-                    />
-
-                    <WorkflowHelpPanel title="كيف نستخدم هذا المحرر الآن؟" items={contextualGuideItems} />
-
-                    <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
-                        <p className="text-xs text-gray-300">ملخص الملاحظات التشغيلية</p>
-                        <div className="space-y-2">
-                            {decisionSectionsForView.map((section) => (
-                                <div key={section.title} className="rounded-lg border border-white/10 bg-white/5 p-2 space-y-2">
-                                    <div className="flex items-center justify-between gap-2">
-                                        <p className="text-xs text-gray-200">{section.title}</p>
-                                        <span className="text-[10px] text-gray-400">{section.items.length} عنصر</span>
-                                    </div>
-                                    {section.items.length === 0 && (
-                                        <p className="text-[11px] text-gray-500">لا توجد ملاحظات إضافية.</p>
-                                    )}
-                                    {section.items.map((item) => {
-                                        const styles = severityStyles(item.severity);
-                                        return (
-                                            <div key={item.id} className={cn('rounded-lg border p-2 text-[11px] space-y-1', styles.border)}>
-                                                <div className="flex items-center justify-between gap-2">
-                                                    <p className="text-gray-200">{item.title}</p>
-                                                    <span className={cn('px-2 py-0.5 rounded text-[10px]', styles.badge)}>
-                                                        {severityLabel(item.severity)}
-                                                    </span>
-                                                </div>
-                                                <p className="text-gray-400">{item.reason}</p>
-                                                {item.action && (
-                                                    <button
-                                                        onClick={() => decisionActionHandlers[item.action as DecisionActionId]()}
-                                                        className="px-2 py-1 rounded bg-white/10 text-[10px] text-gray-200"
-                                                    >
-                                                        فتح
-                                                    </button>
-                                                )}
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-            )}
 
             {paletteOpen && (
                 <div className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-sm flex items-start justify-center p-4">
@@ -4513,7 +3593,6 @@ function WorkspaceDraftsPageContent() {
                                 </button>
                                 <button
                                     onClick={() => {
-                                        setDetailsOpen(true);
                                         setLeftTab('archive');
                                         setStoryOpen(false);
                                     }}
@@ -4772,36 +3851,6 @@ function WorkspaceDraftsPageContent() {
                 />
             )}
 
-            <WorkspaceGuideModal
-                open={guideOpen}
-                title={guideType === 'welcome' ? 'مرحباً بك في المحرر الذكي' : guideAction ? ACTION_HELP[guideAction].title : 'شرح الزر'}
-                introLines={
-                    guideType === 'welcome'
-                        ? [
-                            'هذا دليل سريع للمحرر المبتدئ.',
-                            '- النظام لا يكتب مكانك تلقائياً، كل شيء يأتي كمقترح قابل للقبول أو الرفض.',
-                            '- ابدأ بكتابة النص في الوسط.',
-                            '- استخدم «فحص سريع» للحصول على التحقق والجودة والجاهزية بضغطة واحدة.',
-                            '- إذا ظهرت ملاحظات جودة، عالج المهم أولاً ثم أكمل عملك.',
-                        ]
-                        : []
-                }
-                items={
-                    guideType === 'action' && guideAction
-                        ? [
-                            { label: 'ماذا يفعل؟', value: ACTION_HELP[guideAction].description },
-                            { label: 'متى أستخدمه؟', value: ACTION_HELP[guideAction].when },
-                            { label: 'ماذا سيحدث بعده؟', value: ACTION_HELP[guideAction].after },
-                            ...(ACTION_HELP[guideAction].caution
-                                ? [{ label: 'تنبيه', value: ACTION_HELP[guideAction].caution, tone: 'warn' as const }]
-                                : []),
-                        ]
-                        : []
-                }
-                confirmLabel={guideType === 'welcome' ? 'فهمت، ابدأ' : 'فهمت، نفّذ'}
-                onClose={closeGuide}
-                onConfirm={confirmGuide}
-            />
         </div>
     );
 }
