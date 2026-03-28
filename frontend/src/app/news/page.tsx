@@ -46,6 +46,8 @@ function NewsPageContent() {
     const router = useRouter();
     const { state: tutorialState, update: updateTutorial, complete: completeTutorial, active: tutorialActive } = useTutorialState();
     const tutorialRole = tutorialState.role;
+    const tutorialStep = tutorialState.step;
+    const showNewsOverlay = tutorialActive && tutorialRole === 'journalist' && tutorialStep === 'news_open';
     const { user } = useAuth();
     const initialStatus = searchParams.get('status') || '';
     const initialCategory = searchParams.get('category') || '';
@@ -236,10 +238,7 @@ function NewsPageContent() {
         return out;
     }, [articles, insightsMap]);
 
-    const tutorialRole = tutorialState.role;
-    const tutorialStep = tutorialState.step;
     const tutorialArticle = visibleArticles[0];
-    const showNewsOverlay = tutorialActive && tutorialRole === 'journalist' && tutorialStep === 'news_open';
 
     const handleNewsNext = () => {
         if (tutorialArticle) {
