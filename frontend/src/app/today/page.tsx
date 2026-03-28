@@ -547,9 +547,9 @@ export default function TodayPage() {
             <TutorialWelcomeModal open={showWelcome} onSelectRole={handleTutorialStart} onSkip={handleTutorialSkip} />
             <TutorialOverlay
                 open={showJournalistOverlay}
-                stepLabel="الخطوة 1 / 4"
-                title="ابدأ من هنا"
-                description="هنا تجد كل ما يحتاج عملك اليوم. افتح أول مادة لتبدأ التحرير مباشرة."
+                stepLabel="الخطوة 1 / 5"
+                title="ابدأ من Today"
+                description="هنا تجد موادك اليومية. افتح أول مادة لننتقل مباشرة للمحرر ونكمل الجولة خلال دقيقتين."
                 targetSelector={journalistFirst ? '[data-tutorial=\"today-first-card\"]' : undefined}
                 primaryLabel={journalistFirst ? 'افتح أول مادة' : 'أنشئ مادة تجريبية'}
                 onPrimary={handleTodayNext}

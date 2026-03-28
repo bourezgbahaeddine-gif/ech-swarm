@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 export function TutorialWelcomeModal({
     open,
@@ -15,9 +15,9 @@ export function TutorialWelcomeModal({
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 px-4" dir="rtl">
             <div className="w-full max-w-lg rounded-3xl border border-white/10 bg-slate-950/95 p-6 text-white">
                 <div className="text-sm text-cyan-200">مرحبًا بك في غرفة الأخبار</div>
-                <h2 className="mt-2 text-2xl font-semibold">من أي دور تبدأ المهمة؟</h2>
+                <h2 className="mt-2 text-2xl font-semibold">جولة سريعة خلال دقيقتين</h2>
                 <p className="mt-3 text-sm text-slate-300 leading-7">
-                    هذه الجولة تساعدك على إنجاز أول مهمة خلال دقائق. اختر دورك لنقودك خطوة بخطوة داخل المنصة.
+                    هدف الجولة هو إنجاز أول مهمة بسرعة: افتح مادة، عدّلها، ثم أرسلها للاعتماد. اختر دورك لنقودك خطوة بخطوة.
                 </p>
                 <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <button

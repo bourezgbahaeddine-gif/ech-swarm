@@ -397,9 +397,9 @@ function NewsPageContent() {
         <div className="space-y-6">
             <TutorialOverlay
                 open={showNewsOverlay}
-                stepLabel="الخطوة 2 / 4"
+                stepLabel="الخطوة 2 / 5"
                 title="افتح المادة الأولى"
-                description="هذه مادة وصلت إليك للعمل عليها. افتح المحرر للبدء الفعلي."
+                description="هذه مادة جاهزة للعمل. افتح المحرر لنبدأ التعديل السريع."
                 targetSelector='[data-tutorial="news-first-edit"]'
                 primaryLabel="افتح المحرر"
                 onPrimary={handleNewsNext}

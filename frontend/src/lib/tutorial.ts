@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 
-const STORAGE_KEY = 'ech_tutorial_state_v1';
-const VERSION = 'v1';
+const STORAGE_KEY = 'ech_tutorial_state_v2';
+const VERSION = 'v2';
 
 export type TutorialRole = 'journalist' | 'editor_chief';
 export type TutorialStep =
@@ -9,6 +9,7 @@ export type TutorialStep =
     | 'today_open'
     | 'news_open'
     | 'editor_edit'
+    | 'editor_tools'
     | 'editor_submit'
     | 'chief_today'
     | 'chief_editorial'
