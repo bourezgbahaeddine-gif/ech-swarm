@@ -260,6 +260,8 @@ async def test_setting(
                         return {"ok": False, "status": resp.status}
                     payload = await resp.json()
                     return {"ok": bool(payload.get("items"))}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
     if key == "GOOGLE_FACT_CHECK_API_KEY":
         api_key = await settings_service.get_value("GOOGLE_FACT_CHECK_API_KEY", settings.google_fact_check_api_key or "")
         if not api_key:
