@@ -918,8 +918,13 @@ title, body_html, note, issues
             query_text = str(claim.get("text") or "").strip()
             if not query_text:
                 continue
-            external_summary["queries"] += 1
-            matches = await fact_check_tools_service.search_claims(query_text, language="ar", page_size=4)
+            matches, search_traces = await fact_check_tools_service.search_claims_with_fallbacks(
+                query_text,
+                language="ar",
+                page_size=4,
+            )
+            claim["external_search_queries"] = search_traces
+            external_summary["queries"] += len(search_traces)
             if not matches:
                 continue
             external_summary["matches"] += len(matches)

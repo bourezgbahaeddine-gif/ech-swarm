@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
@@ -8,6 +8,12 @@ import { journalistServicesApi } from '@/lib/journalist-services-api';
 
 const btnClass =
     'px-4 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/30 text-sm disabled:opacity-50';
+
+type GoogleQueryTrace = {
+    query: string;
+    language: string;
+    matches: number;
+};
 
 function cleanResult(value: string): string {
     return (value || '')
@@ -38,6 +44,7 @@ function FactCheckPageContent() {
     const [googleQuery, setGoogleQuery] = useState('');
     const [googleMatches, setGoogleMatches] = useState<any[]>([]);
     const [googleSummary, setGoogleSummary] = useState<{ total?: number; verdicts?: Record<string, number>; primary_verdict?: string } | null>(null);
+    const [googleQueries, setGoogleQueries] = useState<GoogleQueryTrace[]>([]);
     const [googleBusy, setGoogleBusy] = useState(false);
 
     useEffect(() => {
@@ -73,6 +80,7 @@ function FactCheckPageContent() {
             const res = await journalistServicesApi.googleFactCheck(googleQuery);
             setGoogleMatches(Array.isArray(res?.data?.matches) ? res.data.matches : []);
             setGoogleSummary(res?.data?.summary || null);
+            setGoogleQueries(Array.isArray(res?.data?.queries) ? res.data.queries : []);
         } finally {
             setGoogleBusy(false);
         }
@@ -172,6 +180,22 @@ function FactCheckPageContent() {
                         <span className="text-xs text-emerald-200">الخلاصة: {verdictLabel(googleSummary.primary_verdict)}</span>
                     )}
                 </div>
+                {googleQueries.length > 0 && (
+                    <div className="text-[11px] text-gray-400">
+                        <span className="text-gray-300">محاولات البحث:</span>
+                        <div className="mt-1 space-y-1">
+                            {googleQueries.map((item, idx) => (
+                                <div key={`query-${idx}`} className="flex flex-wrap items-center gap-2">
+                                    <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-0.5 text-[10px] text-emerald-200">
+                                        {String(item.language || '').toUpperCase()}
+                                    </span>
+                                    <span className="text-gray-300">{item.query}</span>
+                                    <span className="text-gray-500">({item.matches || 0})</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
                 {googleMatches.length === 0 ? (
                     <p className="text-xs text-gray-500">لا توجد نتائج بعد.</p>
                 ) : (

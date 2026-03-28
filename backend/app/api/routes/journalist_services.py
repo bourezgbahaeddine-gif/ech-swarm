@@ -161,9 +161,26 @@ async def factcheck_google(payload: dict):
     if not query:
         raise HTTPException(400, "Missing query")
     page_size = int(payload.get("page_size") or 4)
-    matches = await fact_check_tools_service.search_claims(query, language=language, page_size=page_size)
+
+    async def translate_to_english(text: str) -> str:
+        if not ai_service:
+            return ""
+        prompt = (
+            "Translate this claim into concise English (single sentence). "
+            "Return only the translated sentence without quotes or explanation.\n\n"
+            f"Claim:\n{text}"
+        )
+        result = await ai_service.generate_text(prompt)
+        return _sanitize_ai_text(result).splitlines()[0].strip()
+
+    matches, queries = await fact_check_tools_service.search_claims_with_fallbacks(
+        query,
+        language=language,
+        page_size=page_size,
+        translate_fn=translate_to_english if language == "ar" else None,
+    )
     summary = fact_check_tools_service.summarize_matches(matches)
-    return {"matches": matches, "summary": summary}
+    return {"matches": matches, "summary": summary, "queries": queries}
 
 
 @router.post("/seo/keywords")

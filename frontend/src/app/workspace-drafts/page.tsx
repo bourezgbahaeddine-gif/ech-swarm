@@ -2152,6 +2152,20 @@ function WorkspaceDraftsPageContent() {
                                                     </p>
                                                 </div>
                                             ))}
+                                            {Array.isArray(claim?.external_search_queries) && claim.external_search_queries.length > 0 && (
+                                                <div className="mt-1 rounded border border-white/10 bg-black/20 px-2 py-1 text-[10px] text-gray-300 space-y-1">
+                                                    <div className="text-cyan-100">محاولات البحث:</div>
+                                                    {claim.external_search_queries.map((item: any, idx: number) => (
+                                                        <div key={`query-${claimId}-${idx}`} className="flex flex-wrap items-center gap-2">
+                                                            <span className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2 py-0.5 text-[9px] text-cyan-200">
+                                                                {String(item?.language || '').toUpperCase()}
+                                                            </span>
+                                                            <span className="text-gray-300">{cleanText(item?.query || '')}</span>
+                                                            <span className="text-gray-500">({item?.matches ?? 0})</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                     <textarea

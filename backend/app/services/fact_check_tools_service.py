@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable, Awaitable
+
+import re
 
 import httpx
 
@@ -72,6 +74,43 @@ class FactCheckToolsService:
         return "unknown"
 
     @classmethod
+    def _simplify_query(cls, query: str, *, max_tokens: int = 8) -> str:
+        text = cls._clean_text(query)
+        if not text:
+            return ""
+        cleaned = re.sub(r"[^\w\u0600-\u06FF\s-]", " ", text, flags=re.UNICODE)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        tokens = cleaned.split()
+        ar_stop = {
+            "من",
+            "في",
+            "على",
+            "إلى",
+            "عن",
+            "هذا",
+            "هذه",
+            "ذلك",
+            "تلك",
+            "قد",
+            "تم",
+            "حيث",
+            "كما",
+            "مع",
+            "أو",
+            "و",
+            "أن",
+            "إن",
+            "ثم",
+            "أعلنت",
+            "قال",
+            "أكد",
+        }
+        filtered = [t for t in tokens if t not in ar_stop and len(t) > 2]
+        if not filtered:
+            filtered = tokens
+        return " ".join(filtered[:max_tokens])
+
+    @classmethod
     def _normalize_claims(cls, payload: dict[str, Any]) -> list[dict[str, Any]]:
         claims = payload.get("claims") if isinstance(payload, dict) else None
         if not isinstance(claims, list):
@@ -135,6 +174,63 @@ class FactCheckToolsService:
             return []
 
         return self._normalize_claims(payload)
+
+    async def search_claims_with_fallbacks(
+        self,
+        query: str,
+        *,
+        language: str = "ar",
+        page_size: int = 4,
+        translate_fn: Callable[[str], Awaitable[str]] | None = None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        base_query = self._clean_text(query)
+        if not base_query:
+            return [], []
+
+        attempts: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+
+        def add_attempt(q: str, lang: str) -> None:
+            q = self._clean_text(q)
+            key = (q, lang)
+            if not q or key in seen:
+                return
+            seen.add(key)
+            attempts.append(key)
+
+        add_attempt(base_query, language or "ar")
+        simplified = self._simplify_query(base_query)
+        if simplified and simplified != base_query:
+            add_attempt(simplified, language or "ar")
+
+        if (language or "ar") != "en":
+            translated = ""
+            if translate_fn:
+                try:
+                    translated = self._clean_text(await translate_fn(base_query))
+                except Exception:
+                    translated = ""
+            translated = translated or base_query
+            add_attempt(translated, "en")
+            simplified_en = self._simplify_query(translated)
+            if simplified_en and simplified_en != translated:
+                add_attempt(simplified_en, "en")
+
+        results: list[dict[str, Any]] = []
+        traces: list[dict[str, Any]] = []
+        seen_urls: set[str] = set()
+
+        for q, lang in attempts:
+            matches = await self.search_claims(q, language=lang, page_size=page_size)
+            traces.append({"query": q, "language": lang, "matches": len(matches)})
+            for match in matches:
+                url = self._clean_text(match.get("url")) or self._clean_text(match.get("title")) or self._clean_text(match.get("claim"))
+                if url in seen_urls:
+                    continue
+                seen_urls.add(url)
+                results.append(match)
+
+        return results, traces
 
     def summarize_matches(self, matches: list[dict[str, Any]]) -> dict[str, Any]:
         verdicts = {"true": 0, "false": 0, "mixed": 0, "unknown": 0}
