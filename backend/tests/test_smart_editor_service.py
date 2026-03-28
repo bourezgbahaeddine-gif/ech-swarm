@@ -21,7 +21,7 @@ def test_build_diff_returns_add_remove_counts():
 
 def test_fact_check_report_blocks_low_confidence_claims():
     text = 'Official source said the number reached 3 in 2026.'
-    report = smart_editor_service.fact_check_report(text=text, source_url=None, threshold=0.95)
+    report = asyncio.run(smart_editor_service.fact_check_report(text=text, source_url=None, threshold=0.95))
     assert report['passed'] is False
     assert report['blocking_reasons']
     assert report['claims']

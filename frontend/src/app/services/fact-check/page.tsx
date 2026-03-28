@@ -19,6 +19,14 @@ function cleanResult(value: string): string {
         .trim();
 }
 
+function verdictLabel(value?: string): string {
+    const verdict = String(value || '').toLowerCase();
+    if (verdict === 'true') return 'صحيح';
+    if (verdict === 'false') return 'غير صحيح';
+    if (verdict === 'mixed') return 'مختلط';
+    return 'غير واضح';
+}
+
 function FactCheckPageContent() {
     const searchParams = useSearchParams();
     const [imageUrl, setImageUrl] = useState('');
@@ -27,6 +35,10 @@ function FactCheckPageContent() {
     const [reference, setReference] = useState('');
     const [result, setResult] = useState('');
     const [busy, setBusy] = useState(false);
+    const [googleQuery, setGoogleQuery] = useState('');
+    const [googleMatches, setGoogleMatches] = useState<any[]>([]);
+    const [googleSummary, setGoogleSummary] = useState<{ total?: number; verdicts?: Record<string, number>; primary_verdict?: string } | null>(null);
+    const [googleBusy, setGoogleBusy] = useState(false);
 
     useEffect(() => {
         const nextText = searchParams.get('text');
@@ -52,6 +64,17 @@ function FactCheckPageContent() {
             setResult(cleanResult(res?.data?.result || ''));
         } finally {
             setBusy(false);
+        }
+    };
+
+    const runGoogle = async () => {
+        setGoogleBusy(true);
+        try {
+            const res = await journalistServicesApi.googleFactCheck(googleQuery);
+            setGoogleMatches(Array.isArray(res?.data?.matches) ? res.data.matches : []);
+            setGoogleSummary(res?.data?.summary || null);
+        } finally {
+            setGoogleBusy(false);
         }
     };
 
@@ -128,6 +151,44 @@ function FactCheckPageContent() {
                         مثال: هل الصورة قديمة؟ هل المكان مطابق للخبر؟ هل توجد مؤشرات تعديل أو تركيب؟
                     </p>
                 </div>
+            </div>
+
+            <div className="space-y-3 rounded-2xl border border-white/5 bg-gray-900/40 p-4">
+                <h2 className="flex items-center gap-2 text-sm text-gray-300">
+                    <ShieldCheck className="h-4 w-4 text-emerald-400" />
+                    نتائج Google Fact Check
+                </h2>
+                <input
+                    className="h-10 w-full rounded-xl border border-white/10 bg-white/5 px-3 text-sm text-white"
+                    placeholder="اكتب الادعاء أو الجملة المراد البحث عنها"
+                    value={googleQuery}
+                    onChange={(e) => setGoogleQuery(e.target.value)}
+                />
+                <div className="flex items-center gap-2">
+                    <button className={btnClass} disabled={!googleQuery.trim() || googleBusy} onClick={runGoogle}>
+                        {googleBusy ? 'جاري البحث...' : 'بحث خارجي'}
+                    </button>
+                    {googleSummary?.primary_verdict && (
+                        <span className="text-xs text-emerald-200">الخلاصة: {verdictLabel(googleSummary.primary_verdict)}</span>
+                    )}
+                </div>
+                {googleMatches.length === 0 ? (
+                    <p className="text-xs text-gray-500">لا توجد نتائج بعد.</p>
+                ) : (
+                    <div className="space-y-2">
+                        {googleMatches.slice(0, 6).map((match, idx) => (
+                            <div key={`match-${idx}`} className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-gray-200">
+                                <a href={match.url || '#'} target="_blank" rel="noreferrer" className="text-cyan-200 underline decoration-dotted">
+                                    {match.title || match.claim || 'تدقيق خارجي'}
+                                </a>
+                                <p className="mt-1 text-[11px] text-gray-400">
+                                    {match.publisher || 'بدون ناشر'}
+                                    {match.rating ? ` • ${match.rating}` : ''}
+                                </p>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
 
             <div className="rounded-2xl border border-white/5 bg-gray-900/40 p-4">

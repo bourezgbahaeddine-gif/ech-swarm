@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.services.ai_service import ai_service
+from app.services.fact_check_tools_service import fact_check_tools_service
 
 router = APIRouter(prefix="/services", tags=["Journalist Services"])
 
@@ -151,6 +152,18 @@ async def factcheck_extract(payload: dict):
     )
     result = await ai_service.generate_text(prompt)
     return {"result": _sanitize_ai_text(result)}
+
+
+@router.post("/factcheck/google")
+async def factcheck_google(payload: dict):
+    query = payload.get("query") or payload.get("text") or ""
+    language = _target_language(payload)
+    if not query:
+        raise HTTPException(400, "Missing query")
+    page_size = int(payload.get("page_size") or 4)
+    matches = await fact_check_tools_service.search_claims(query, language=language, page_size=page_size)
+    summary = fact_check_tools_service.summarize_matches(matches)
+    return {"matches": matches, "summary": summary}
 
 
 @router.post("/seo/keywords")

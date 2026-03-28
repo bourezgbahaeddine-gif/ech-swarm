@@ -471,6 +471,14 @@ function severityLabel(sev: DecisionSeverity): string {
     return sev === 'critical' ? 'حرج' : sev === 'high' ? 'عاجل' : sev === 'medium' ? 'متوسط' : 'خفيف';
 }
 
+function externalVerdictLabel(value?: string): string {
+    const verdict = String(value || '').toLowerCase();
+    if (verdict === 'true') return 'صحيح';
+    if (verdict === 'false') return 'غير صحيح';
+    if (verdict === 'mixed') return 'مختلط';
+    return 'غير واضح';
+}
+
 function mapStoryGapSeverity(severity?: string | null): DecisionSeverity {
     const value = String(severity || '').toLowerCase();
     if (value === 'high' || value === 'critical') return 'high';
@@ -2120,6 +2128,32 @@ function WorkspaceDraftsPageContent() {
                                         </div>
                                         <p className="text-gray-200 mt-1">{sourceInfo.reason}</p>
                                     </div>
+                                    {Array.isArray(claim?.external_matches) && claim.external_matches.length > 0 && (
+                                        <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-2 py-1 text-[10px] space-y-1">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <span className="text-cyan-200">نتائج Google Fact Check</span>
+                                                {claim?.external_verdict && (
+                                                    <span className="text-cyan-100">الخلاصة: {externalVerdictLabel(claim.external_verdict)}</span>
+                                                )}
+                                            </div>
+                                            {claim.external_matches.slice(0, 3).map((match, idx) => (
+                                                <div key={`match-${claimId}-${idx}`} className="rounded border border-white/10 bg-black/20 px-2 py-1">
+                                                    <a
+                                                        href={match.url || '#'}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="text-cyan-200 underline decoration-dotted"
+                                                    >
+                                                        {cleanText(match.title || match.claim || 'تدقيق خارجي')}
+                                                    </a>
+                                                    <p className="text-gray-400 mt-0.5">
+                                                        {cleanText(match.publisher || '')}
+                                                        {match.rating ? ` • ${cleanText(match.rating)}` : ''}
+                                                    </p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                     <textarea
                                         value={draft.evidenceLinksRaw}
                                         onChange={(e) => setClaimOverrideDraftField(claimId, { evidenceLinksRaw: e.target.value })}
@@ -3201,6 +3235,9 @@ function WorkspaceDraftsPageContent() {
                                     {selfApproveDraft.isPending ? 'جاري الاعتماد...' : 'اعتماد مباشر'}
                                 </button>
                             )}
+                        </div>
+                        <div className="mt-2 text-[10px] text-slate-400">
+                            إرسال للاعتماد = إنهاء المسودة وإرسالها إلى رئيس التحرير. اعتماد مباشر = إنهاء سريع مع تسجيل القرار.
                         </div>
                     </div>
                     <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-3">

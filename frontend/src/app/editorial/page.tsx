@@ -423,6 +423,9 @@ export default function EditorialPage() {
                             <button onClick={() => submitChiefDecision(item, 'reject')} disabled={chiefDecisionMutation.isPending} className="rounded-xl border border-red-500/30 bg-red-500/20 px-3 py-2 text-xs text-red-200">رفض</button>
                             <button onClick={() => setMemoryCaptureArticle(item)} className="rounded-xl border border-amber-500/30 bg-amber-500/20 px-3 py-2 text-xs text-amber-200">حفظ في الذاكرة</button>
                         </div>
+                        <p className="text-[10px] text-slate-400">
+                            الاعتماد النهائي يحوّل المادة إلى &#34;جاهز للنشر اليدوي&#34;. التحفظات تسجّل السبب وتبقي القرار بيدك.
+                        </p>
 
                         <input type="text" value={note} onChange={(e) => setNotesMap((prev) => ({ ...prev, [item.id]: e.target.value }))} placeholder="سبب القرار (إلزامي للتحفظات أو الرفض)..." className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white placeholder:text-gray-500" dir="rtl" />
                     </div>

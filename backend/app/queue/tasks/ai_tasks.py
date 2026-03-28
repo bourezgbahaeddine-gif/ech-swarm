@@ -276,7 +276,7 @@ async def _execute_editorial_ai_payload(
 
         if op == "claims":
             threshold = float(payload.get("threshold", 0.70))
-            report = smart_editor_service.fact_check_report(
+            report = await smart_editor_service.fact_check_report(
                 text=smart_editor_service.html_to_text(draft_html),
                 source_url=article.original_url,
                 threshold=threshold,

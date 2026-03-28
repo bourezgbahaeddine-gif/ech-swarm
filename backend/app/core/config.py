@@ -101,6 +101,7 @@ class Settings(BaseSettings):
     echorouk_archive_rag_prefer_category_match: bool = True
     youtube_data_api_key: str = ""
     youtube_trends_enabled: bool = False
+    google_fact_check_api_key: str = ""
 
     # Notifications
     telegram_bot_token: str = ""

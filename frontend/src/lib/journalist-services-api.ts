@@ -9,6 +9,8 @@ export const journalistServicesApi = {
     vision: (image_url: string, question: string) => api.post('/services/factcheck/vision', { image_url, question }),
     consistency: (text: string, reference: string) => api.post('/services/factcheck/consistency', { text, reference }),
     extract: (text: string) => api.post('/services/factcheck/extract', { text }),
+    googleFactCheck: (query: string, language = 'ar', page_size = 4) =>
+        api.post('/services/factcheck/google', { query, language, page_size }),
 
     keywords: (text: string, language = 'ar') => api.post('/services/seo/keywords', { text, language }),
     internalLinks: (text: string, archive_titles: string[], language = 'ar') => api.post('/services/seo/internal-links', { text, archive_titles, language }),

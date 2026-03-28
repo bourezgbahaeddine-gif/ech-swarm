@@ -114,7 +114,8 @@ class SmartEditorService:
     @staticmethod
     def _get_ai_service():
         try:
-            from app.services.ai_service import ai_service
+from app.services.ai_service import ai_service
+from app.services.fact_check_tools_service import fact_check_tools_service
 
             return ai_service
         except Exception:
@@ -846,10 +847,17 @@ facebook, x, push, summary_120, breaking_alert
             )
         return claims
 
-    def fact_check_report(self, *, text: str, source_url: str | None = None, threshold: float = 0.70) -> dict[str, Any]:
+    async def fact_check_report(self, *, text: str, source_url: str | None = None, threshold: float = 0.70) -> dict[str, Any]:
         clean_text = self._strip_side_comments(text or "")
         template_noise = self._contains_template_noise(clean_text)
         claims = self.extract_claims(text=clean_text, source_url=source_url)
+        external_summary = {
+            "provider": "google_fact_check_tools",
+            "queries": 0,
+            "matches": 0,
+            "false_claims": 0,
+            "true_claims": 0,
+        }
         for claim in claims:
             has_support = bool(claim.get("evidence_links")) or (
                 bool(claim.get("unverifiable")) and bool(claim.get("unverifiable_reason"))
@@ -857,6 +865,41 @@ facebook, x, push, summary_120, breaking_alert
             if has_support:
                 claim["blocking"] = False
                 claim["supported"] = True
+            claim["external_matches"] = []
+            claim["external_verdict"] = "unknown"
+            claim["external_match_count"] = 0
+
+        queries = []
+        for claim in claims:
+            if claim.get("blocking") or claim.get("risk_level") == "high":
+                queries.append(claim)
+        queries = (queries or claims)[:4]
+
+        for claim in queries:
+            query_text = str(claim.get("text") or "").strip()
+            if not query_text:
+                continue
+            matches = await fact_check_tools_service.search_claims(query_text, language="ar", page_size=4)
+            if not matches:
+                continue
+            external_summary["queries"] += 1
+            external_summary["matches"] += len(matches)
+            verdict = fact_check_tools_service.infer_verdict(matches)
+            claim["external_matches"] = matches
+            claim["external_match_count"] = len(matches)
+            claim["external_verdict"] = verdict
+            links = [m.get("url") for m in matches if m.get("url")]
+            if links:
+                claim["evidence_links"] = list(dict.fromkeys((claim.get("evidence_links") or []) + links))
+            if verdict == "false":
+                external_summary["false_claims"] += 1
+                claim["blocking"] = True
+                claim["risk_level"] = "high"
+            elif verdict == "true":
+                external_summary["true_claims"] += 1
+                claim["blocking"] = False
+                claim["supported"] = True
+
         unresolved = [c for c in claims if c.get("blocking")]
 
         blocking_reasons: list[str] = []
@@ -875,6 +918,7 @@ facebook, x, push, summary_120, breaking_alert
             "passed": passed,
             "score": score,
             "claims": claims,
+            "external_fact_checks": external_summary,
             "blocking_reasons": blocking_reasons,
             "actionable_fixes": actionable_fixes,
             "threshold": threshold,

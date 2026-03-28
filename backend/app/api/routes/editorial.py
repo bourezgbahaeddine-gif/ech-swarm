@@ -727,7 +727,7 @@ async def _build_workspace_publish_readiness(
                 elif stage == "FACT_CHECK":
                     text_value = latest.body or article.body_html or article.summary or article.original_content or article.original_title
                     clean_text = smart_editor_service.html_to_text(text_value or "")
-                    payload = smart_editor_service.fact_check_report(
+                    payload = await smart_editor_service.fact_check_report(
                         text=clean_text,
                         source_url=article.original_url,
                         threshold=0.70,

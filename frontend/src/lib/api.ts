@@ -652,6 +652,22 @@ export interface FactCheckClaim {
     evidence_links?: string[];
     unverifiable?: boolean;
     unverifiable_reason?: string;
+    external_matches?: FactCheckExternalMatch[];
+    external_match_count?: number;
+    external_verdict?: 'true' | 'false' | 'mixed' | 'unknown' | string;
+}
+
+export interface FactCheckExternalMatch {
+    claim: string;
+    claimant?: string;
+    claim_date?: string;
+    publisher?: string;
+    publisher_site?: string;
+    title?: string;
+    url?: string;
+    rating?: string;
+    review_date?: string;
+    language_code?: string;
 }
 
 export interface FactCheckReport {
@@ -659,6 +675,13 @@ export interface FactCheckReport {
     passed: boolean;
     score: number;
     claims: FactCheckClaim[];
+    external_fact_checks?: {
+        provider: string;
+        queries: number;
+        matches: number;
+        false_claims: number;
+        true_claims: number;
+    };
     claim_coverage?: {
         high_risk_total: number;
         high_risk_supported: number;

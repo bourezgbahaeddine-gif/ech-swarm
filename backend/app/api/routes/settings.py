@@ -165,6 +165,7 @@ async def import_from_env(
         "GROQ_API_KEY": settings.groq_api_key,
         "YOUTUBE_DATA_API_KEY": settings.youtube_data_api_key,
         "YOUTUBE_TRENDS_ENABLED": str(settings.youtube_trends_enabled).lower(),
+        "GOOGLE_FACT_CHECK_API_KEY": settings.google_fact_check_api_key,
         "TELEGRAM_BOT_TOKEN": settings.telegram_bot_token,
         "TELEGRAM_CHANNEL_EDITORS": settings.telegram_channel_editors,
         "TELEGRAM_CHANNEL_ALERTS": settings.telegram_channel_alerts,
@@ -259,6 +260,26 @@ async def test_setting(
                         return {"ok": False, "status": resp.status}
                     payload = await resp.json()
                     return {"ok": bool(payload.get("items"))}
+    if key == "GOOGLE_FACT_CHECK_API_KEY":
+        api_key = await settings_service.get_value("GOOGLE_FACT_CHECK_API_KEY", settings.google_fact_check_api_key or "")
+        if not api_key:
+            return {"ok": False, "missing": "GOOGLE_FACT_CHECK_API_KEY"}
+        url = "https://factchecktools.googleapis.com/v1alpha1/claims:search"
+        params = {
+            "query": "test",
+            "pageSize": 1,
+            "key": api_key,
+        }
+        try:
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url, params=params) as resp:
+                    if resp.status != 200:
+                        return {"ok": False, "status": resp.status}
+                    payload = await resp.json()
+                    return {"ok": "claims" in payload}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": str(exc)}
     if key == "YOUTUBE_TRENDS_ENABLED":
