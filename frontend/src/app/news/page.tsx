@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { Suspense, useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { isAxiosError } from 'axios';
 import { newsApi, dashboardApi, editorialApi, type ArticleBrief, type DashboardNotification } from '@/lib/api';
 import { cn, formatRelativeTime, getStatusColor, getCategoryLabel, isFreshBreaking, truncate } from '@/lib/utils';
@@ -11,6 +11,8 @@ import { useAuth } from '@/lib/auth';
 import { WorkflowCard } from '@/components/workflow/WorkflowCard';
 import { WorkflowHelpPanel } from '@/components/workflow/WorkflowHelpPanel';
 import { trackNextAction, useTrackSurfaceView } from '@/lib/ux-telemetry';
+import { TutorialOverlay } from '@/components/onboarding/TutorialOverlay';
+import { useTutorialState } from '@/lib/tutorial';
 import {
     Newspaper, Search, ExternalLink,
     ChevronLeft, ChevronRight,
@@ -41,6 +43,8 @@ function getApiErrorMessage(error: unknown, fallback: string): string {
 function NewsPageContent() {
     const queryClient = useQueryClient();
     const searchParams = useSearchParams();
+    const router = useRouter();
+    const { state: tutorialState, update: updateTutorial, complete: completeTutorial, active: tutorialActive } = useTutorialState();
     const { user } = useAuth();
     const initialStatus = searchParams.get('status') || '';
     const initialCategory = searchParams.get('category') || '';
@@ -74,6 +78,18 @@ function NewsPageContent() {
         const t = setTimeout(() => setDebouncedSearch(search.trim()), 400);
         return () => clearTimeout(t);
     }, [search]);
+
+    useEffect(() => {
+        if (tutorialActive && tutorialRole === 'journalist' && tutorialStep === 'today_open') {
+            updateTutorial({ step: 'news_open' });
+        }
+    }, [tutorialActive, tutorialRole, tutorialStep, updateTutorial]);
+
+    useEffect(() => {
+        if (showNewsOverlay && viewMode !== 'queue') {
+            setViewMode('queue');
+        }
+    }, [showNewsOverlay, viewMode]);
 
     const surfaceDetails = useMemo(
         () => ({
@@ -218,6 +234,20 @@ function NewsPageContent() {
         }
         return out;
     }, [articles, insightsMap]);
+
+    const tutorialRole = tutorialState.role;
+    const tutorialStep = tutorialState.step;
+    const tutorialArticle = visibleArticles[0];
+    const showNewsOverlay = tutorialActive && tutorialRole === 'journalist' && tutorialStep === 'news_open';
+
+    const handleNewsNext = () => {
+        if (tutorialArticle) {
+            updateTutorial({ step: 'editor_edit' });
+            router.push(`/workspace-drafts?article_id=${tutorialArticle.id}`);
+            return;
+        }
+        completeTutorial();
+    };
 
     const { data: dailySnapshot, isLoading: dailySnapshotLoading } = useQuery({
         queryKey: ['news-daily-snapshot'],
@@ -365,6 +395,16 @@ function NewsPageContent() {
 
     return (
         <div className="space-y-6">
+            <TutorialOverlay
+                open={showNewsOverlay}
+                stepLabel="الخطوة 2 / 4"
+                title="افتح المادة الأولى"
+                description="هذه مادة وصلت إليك للعمل عليها. افتح المحرر للبدء الفعلي."
+                targetSelector="[data-tutorial=\"news-first-edit\"]"
+                primaryLabel="افتح المحرر"
+                onPrimary={handleNewsNext}
+                onSkip={completeTutorial}
+            />
             {errorMessage && (
                 <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200 flex items-center justify-between">
                     <span>{errorMessage}</span>
@@ -580,7 +620,7 @@ function NewsPageContent() {
             ) : visibleArticles.length > 0 ? (
                 viewMode === 'queue' ? (
                     <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                        {visibleArticles.map((article: ArticleBrief) => {
+                        {visibleArticles.map((article: ArticleBrief, index: number) => {
                             const freshBreaking = isFreshBreaking(article.is_breaking, article.crawled_at);
                             const editHref = `/workspace-drafts?article_id=${article.id}`;
                             const importanceChip = getImportanceChip(article);
@@ -639,6 +679,7 @@ function NewsPageContent() {
                                                 </Link>
                                                 <Link
                                                     href={editHref}
+                                                    data-tutorial={showNewsOverlay && index === 0 ? 'news-first-edit' : undefined}
                                                     onClick={() =>
                                                         trackNextAction('news', 'تحرير', {
                                                             ...surfaceDetails,

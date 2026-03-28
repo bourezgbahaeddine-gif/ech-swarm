@@ -51,6 +51,8 @@ import { cn, formatRelativeTime, truncate } from '@/lib/utils';
 import { MemoryQuickCaptureModal } from '@/components/memory/MemoryQuickCaptureModal';
 import { WorkspaceEmpty as Empty, WorkspaceInfoBlock as InfoBlock, WorkspacePanel as Panel } from '@/components/workspace-drafts/WorkspacePrimitives';
 import { trackNextAction, trackUiAction, useTrackSurfaceView } from '@/lib/ux-telemetry';
+import { TutorialOverlay } from '@/components/onboarding/TutorialOverlay';
+import { useTutorialState } from '@/lib/tutorial';
 
 type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
 type RightTab = 'evidence' | 'proofread' | 'quality' | 'seo' | 'social' | 'context' | 'msi' | 'simulator' | 'xray';
@@ -647,6 +649,7 @@ function appendEvidenceLink(existing: string, nextValue: string): string {
 function WorkspaceDraftsPageContent() {
     const queryClient = useQueryClient();
     const { user } = useAuth();
+    const { state: tutorialState, update: updateTutorial, complete: completeTutorial, active: tutorialActive } = useTutorialState();
     const userRole = (user?.role || '').toLowerCase();
     const isDirector = userRole === 'director';
     const isJournalist = userRole === 'journalist';
@@ -1885,6 +1888,9 @@ function WorkspaceDraftsPageContent() {
         mutationFn: () => editorialApi.submitWorkspaceDraftForChief(workId!),
         onSuccess: (res) => {
             handleSubmissionSuccess(res.data || {}, 'تم إرسال النسخة إلى رئيس التحرير.');
+            if (tutorialActive && tutorialState.role === 'journalist' && tutorialState.step === 'editor_submit') {
+                completeTutorial();
+            }
         },
         onError: (e: any) => {
             const detail = e?.response?.data?.detail;
@@ -1915,6 +1921,17 @@ function WorkspaceDraftsPageContent() {
         },
         onError: (e: any) => setErr(e?.response?.data?.detail || e?.message || 'تعذر إرسال الطلب بتحفظات'),
     });
+    const handleTutorialEditNext = () => {
+        updateTutorial({ step: 'editor_submit' });
+    };
+    const handleTutorialSubmit = () => {
+        if (applyToArticle.isPending) return;
+        if (!hasSubmissionBody) {
+            completeTutorial();
+            return;
+        }
+        applyToArticle.mutate();
+    };
     const createManualDraft = useMutation({
         mutationFn: () =>
             editorialApi.createManualWorkspaceDraft({
@@ -2013,6 +2030,12 @@ function WorkspaceDraftsPageContent() {
     }, [articleNumericId, listLoading, workId, drafts.length, createDraftFromArticle]);
 
     useEffect(() => {
+        if (tutorialActive && tutorialState.role === 'journalist' && tutorialState.step === 'news_open' && workId) {
+            updateTutorial({ step: 'editor_edit' });
+        }
+    }, [tutorialActive, tutorialState.role, tutorialState.step, updateTutorial, workId]);
+
+    useEffect(() => {
         if (!isWriterRole) return;
         const marker = workId || articleId || 'initial';
         if (lastSimplifiedWorkRef.current === marker) return;
@@ -2029,6 +2052,9 @@ function WorkspaceDraftsPageContent() {
     const isWritingStage = isWriterRole && editorStage === 'writing';
     const showTechnicalDiagnostics = !isWriterRole || decisionDetailOpen;
     const showInlineResults = toolsExpanded;
+    const tutorialStep = tutorialState.step;
+    const showEditorEditOverlay = tutorialActive && tutorialState.role === 'journalist' && tutorialStep === 'editor_edit';
+    const showEditorSubmitOverlay = tutorialActive && tutorialState.role === 'journalist' && tutorialStep === 'editor_submit';
     const openReportTab = (tab: RightTab) => {
         setToolsExpanded(true);
         setActiveTab(tab);
@@ -3018,6 +3044,26 @@ function WorkspaceDraftsPageContent() {
 
     return (
         <div className="space-y-4">
+            <TutorialOverlay
+                open={showEditorEditOverlay}
+                stepLabel="الخطوة 3 / 4"
+                title="هذا هو مكان العمل الأساسي"
+                description="قم بتعديل العنوان أو أضف جملة بسيطة لتبدأ."
+                targetSelector="[data-tutorial=\"editor-title\"]"
+                primaryLabel="تم التعديل"
+                onPrimary={handleTutorialEditNext}
+                onSkip={completeTutorial}
+            />
+            <TutorialOverlay
+                open={showEditorSubmitOverlay}
+                stepLabel="الخطوة 4 / 4"
+                title="أرسل المادة للاعتماد"
+                description="عندما تنتهي من التعديل، أرسل المادة مباشرة للاعتماد."
+                targetSelector="[data-tutorial=\"editor-submit\"]"
+                primaryLabel="إرسال للاعتماد"
+                onPrimary={handleTutorialSubmit}
+                onSkip={completeTutorial}
+            />
             <div className="rounded-2xl border border-white/10 bg-gray-900/50 p-3" dir="rtl">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="space-y-1">
@@ -3138,6 +3184,7 @@ function WorkspaceDraftsPageContent() {
                                     trackNextAction('workspace_drafts', 'إرسال لاعتماد رئيس التحرير', surfaceDetails);
                                     runWithGuide('apply', () => applyToArticle.mutate());
                                 }}
+                                data-tutorial={showEditorSubmitOverlay ? 'editor-submit' : undefined}
                                 className="min-h-10 px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-100 text-xs disabled:opacity-60"
                             >
                                 {applyToArticle.isPending ? 'جاري الإرسال...' : 'إرسال لاعتماد رئيس التحرير'}
@@ -3209,6 +3256,7 @@ function WorkspaceDraftsPageContent() {
                     <div className="rounded-2xl border border-white/10 bg-gray-900/50 overflow-hidden">
                         <div className="border-b border-white/10 p-4">
                             <input
+                                data-tutorial={showEditorEditOverlay ? 'editor-title' : undefined}
                                 value={title}
                                 onChange={(e) => { setTitle(cleanText(e.target.value)); setSaveState('unsaved'); }}
                                 className="w-full rounded-xl bg-white/5 border border-white/15 px-3 py-2 text-white text-lg"

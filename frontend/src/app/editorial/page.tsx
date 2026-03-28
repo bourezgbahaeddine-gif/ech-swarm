@@ -1,7 +1,7 @@
 ﻿
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { isAxiosError } from 'axios';
@@ -18,11 +18,19 @@ import { useAuth } from '@/lib/auth';
 import { AlertTriangle, CheckCircle2, RotateCcw, Send, ShieldCheck } from 'lucide-react';
 import { WorkflowCard } from '@/components/workflow/WorkflowCard';
 import { WorkflowHelpPanel } from '@/components/workflow/WorkflowHelpPanel';
+import { TutorialOverlay } from '@/components/onboarding/TutorialOverlay';
+import { useTutorialState } from '@/lib/tutorial';
 import { MemoryQuickCaptureModal } from '@/components/memory/MemoryQuickCaptureModal';
+import { ActionDialog } from '@/components/ui/ActionDialog';
 import { getWorkflowStatusLabel } from '@/lib/workflow-language';
 import { trackNextAction, useTrackSurfaceView } from '@/lib/ux-telemetry';
 
 type EditorialTabKey = 'pending' | 'returned' | 'reservations' | 'manual';
+type PendingChiefDecision = {
+    item: ChiefPendingItem;
+    decision: 'approve' | 'approve_with_reservations' | 'send_back' | 'reject' | 'return_for_revision';
+    blockersPreview: string[];
+};
 
 function normalizeStatus(status: string | null | undefined): string {
     return (status || '').toLowerCase();
@@ -93,17 +101,25 @@ export default function EditorialPage() {
     const queryClient = useQueryClient();
     const { user } = useAuth();
     const router = useRouter();
+    const { state: tutorialState, update: updateTutorial, complete: completeTutorial, active: tutorialActive } = useTutorialState();
 
     const role = (user?.role || '').toLowerCase();
     const isChief = role === 'director' || role === 'editor_chief';
     const isSocial = role === 'social_media';
     const canNominate = role === 'journalist' || role === 'social_media' || role === 'director' || role === 'editor_chief';
 
+    useEffect(() => {
+        if (tutorialActive && tutorialState.role === 'editor_chief' && tutorialState.step === 'chief_today') {
+            updateTutorial({ step: 'chief_editorial' });
+        }
+    }, [tutorialActive, tutorialState.role, tutorialState.step, updateTutorial]);
+
     const [activeTab, setActiveTab] = useState<EditorialTabKey>('pending');
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
     const [notesMap, setNotesMap] = useState<Record<number, string>>({});
     const [memoryCaptureArticle, setMemoryCaptureArticle] = useState<ArticleBrief | ChiefPendingItem | null>(null);
+    const [pendingChiefDecision, setPendingChiefDecision] = useState<PendingChiefDecision | null>(null);
     const surfaceDetails = useMemo(
         () => ({
             role: role || 'guest',
@@ -228,6 +244,9 @@ export default function EditorialPage() {
                 setSuccessMessage(message);
             }
             setErrorMessage(null);
+            if (tutorialActive && tutorialState.role === 'editor_chief' && tutorialState.step === 'chief_decision') {
+                completeTutorial();
+            }
             queryClient.invalidateQueries({ queryKey: ['chief-pending-queue'] });
             queryClient.invalidateQueries({ queryKey: ['editorial-draft-generated'] });
             queryClient.invalidateQueries({ queryKey: ['editorial-reservations'] });
@@ -269,6 +288,11 @@ export default function EditorialPage() {
     const chiefPendingItems = useMemo(() => chiefItems.filter((item) => normalizeStatus(item.status) !== 'approval_request_with_reservations'), [chiefItems]);
     const chiefReservationItems = useMemo(() => chiefItems.filter((item) => normalizeStatus(item.status) === 'approval_request_with_reservations'), [chiefItems]);
 
+    const tutorialRole = tutorialState.role;
+    const tutorialStep = tutorialState.step;
+    const showChiefOverlay = tutorialActive && tutorialRole === 'editor_chief' && tutorialStep === 'chief_editorial';
+    const tutorialChiefItem = chiefPendingItems[0];
+
     const tabs = useMemo(
         () => [
             {
@@ -303,6 +327,9 @@ export default function EditorialPage() {
 
     const submitChiefDecision = (item: ChiefPendingItem, decision: 'approve' | 'approve_with_reservations' | 'send_back' | 'reject' | 'return_for_revision') => {
         const note = (notesMap[item.id] || '').trim();
+        if (tutorialActive && tutorialState.role === 'editor_chief' && tutorialState.step === 'chief_editorial') {
+            updateTutorial({ step: 'chief_decision' });
+        }
         if (decisionRequiresReason[decision] && !note) {
             setErrorMessage(`سبب القرار مطلوب عند اختيار: ${decisionLabel[decision]}`);
             setSuccessMessage(null);
@@ -311,19 +338,34 @@ export default function EditorialPage() {
         const blockersPreview = decision === 'approve_with_reservations'
             ? [...(item.decision_card?.quality_issues || []), ...(item.decision_card?.claims_issues || [])].slice(0, 3)
             : [];
-        const confirmationMessage = blockersPreview.length
-            ? `تأكيد إجراء: ${decisionLabel[decision]}؟\n\nسيتم تجاوز العوائق التالية:\n- ${blockersPreview.join('\n- ')}`
-            : `تأكيد إجراء: ${decisionLabel[decision]}؟`;
-        const confirmed = typeof window === 'undefined' ? true : window.confirm(confirmationMessage);
-        if (!confirmed) return;
+        setPendingChiefDecision({ item, decision, blockersPreview });
+    };
 
+    const handleChiefNext = () => {
+        if (!tutorialChiefItem) {
+            completeTutorial();
+            return;
+        }
+        updateTutorial({ step: 'chief_decision' });
+        submitChiefDecision(tutorialChiefItem, 'approve');
+    };
+
+    const confirmChiefDecision = () => {
+        if (!pendingChiefDecision) return;
+        const { item, decision } = pendingChiefDecision;
+        const note = (notesMap[item.id] || '').trim();
         trackNextAction('editorial', decisionLabel[decision], {
             ...surfaceDetails,
             queue_view: normalizeStatus(item.status) === 'approval_request_with_reservations' ? 'reservations' : 'pending',
             article_id: item.id,
             current_status: item.status,
         });
-        chiefDecisionMutation.mutate({ articleId: item.id, decision, notes: note || undefined });
+        chiefDecisionMutation.mutate(
+            { articleId: item.id, decision, notes: note || undefined },
+            {
+                onSettled: () => setPendingChiefDecision(null),
+            },
+        );
     };
 
     const renderChiefCard = (item: ChiefPendingItem) => {
@@ -368,7 +410,14 @@ export default function EditorialPage() {
 
                         <div className="grid grid-cols-1 gap-2 md:grid-cols-6">
                             <a href={item.work_id ? `/workspace-drafts?article_id=${item.id}&work_id=${item.work_id}` : `/workspace-drafts?article_id=${item.id}`} className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-center text-xs text-gray-200 hover:text-white">افتح في المحرر</a>
-                            <button onClick={() => submitChiefDecision(item, 'approve')} disabled={chiefDecisionMutation.isPending} className="flex items-center justify-center gap-1 rounded-xl border border-emerald-500/30 bg-emerald-500/20 px-3 py-2 text-xs text-emerald-200"><CheckCircle2 className="h-4 w-4" /> اعتماد نهائي</button>
+                            <button
+                                onClick={() => submitChiefDecision(item, 'approve')}
+                                disabled={chiefDecisionMutation.isPending}
+                                data-tutorial={showChiefOverlay && tutorialChiefItem?.id === item.id ? 'chief-approve' : undefined}
+                                className="flex items-center justify-center gap-1 rounded-xl border border-emerald-500/30 bg-emerald-500/20 px-3 py-2 text-xs text-emerald-200"
+                            >
+                                <CheckCircle2 className="h-4 w-4" /> اعتماد نهائي
+                            </button>
                             <button onClick={() => submitChiefDecision(item, 'approve_with_reservations')} disabled={chiefDecisionMutation.isPending} className="rounded-xl border border-orange-500/30 bg-orange-500/20 px-3 py-2 text-xs text-orange-200">اعتماد بتحفظات</button>
                             <button onClick={() => submitChiefDecision(item, 'send_back')} disabled={chiefDecisionMutation.isPending} className="flex items-center justify-center gap-1 rounded-xl border border-amber-500/30 bg-amber-500/20 px-3 py-2 text-xs text-amber-200"><RotateCcw className="h-4 w-4" /> إعادة للمراجعة</button>
                             <button onClick={() => submitChiefDecision(item, 'reject')} disabled={chiefDecisionMutation.isPending} className="rounded-xl border border-red-500/30 bg-red-500/20 px-3 py-2 text-xs text-red-200">رفض</button>
@@ -521,6 +570,16 @@ export default function EditorialPage() {
 
     return (
         <div className="space-y-6">
+            <TutorialOverlay
+                open={showChiefOverlay}
+                stepLabel="الخطوة 2 / 2"
+                title="اتخذ القرار"
+                description="اقرأ الملخص سريعًا ثم اعتمد المادة الآن."
+                targetSelector="[data-tutorial=\"chief-approve\"]"
+                primaryLabel="اعتماد نهائي"
+                onPrimary={handleChiefNext}
+                onSkip={completeTutorial}
+            />
             <div>
                 <h1 className="text-2xl font-bold text-white">الاعتماد والمراجعة</h1>
                 <p className="mt-1 text-sm text-gray-400">
@@ -586,6 +645,45 @@ export default function EditorialPage() {
                     suggestedSubtype="editorial_decision"
                 />
             )}
+            <ActionDialog
+                open={Boolean(pendingChiefDecision)}
+                title={pendingChiefDecision ? `تأكيد ${decisionLabel[pendingChiefDecision.decision]}` : 'تأكيد القرار'}
+                description={
+                    pendingChiefDecision ? (
+                        <div className="space-y-3">
+                            <p>
+                                المادة:
+                                <span className="mr-2 font-semibold text-white">
+                                    {pendingChiefDecision.item.title_ar || pendingChiefDecision.item.original_title}
+                                </span>
+                            </p>
+                            {pendingChiefDecision.blockersPreview.length ? (
+                                <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-100">
+                                    <p className="font-semibold">سيتم تجاوز هذه الملاحظات أو التحفظات:</p>
+                                    <ul className="mt-2 list-disc space-y-1 pr-4">
+                                        {pendingChiefDecision.blockersPreview.map((blocker) => (
+                                            <li key={blocker}>{blocker}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            ) : (
+                                <p className="text-slate-300">سيُسجَّل القرار فورًا ضمن المسار التحريري ويُحدَّث وضع المادة.</p>
+                            )}
+                        </div>
+                    ) : undefined
+                }
+                tone={
+                    pendingChiefDecision?.decision === 'reject'
+                        ? 'danger'
+                        : pendingChiefDecision?.decision === 'approve_with_reservations'
+                            ? 'warn'
+                            : 'default'
+                }
+                confirmLabel={pendingChiefDecision ? decisionLabel[pendingChiefDecision.decision] : 'تأكيد'}
+                isSubmitting={chiefDecisionMutation.isPending}
+                onClose={() => setPendingChiefDecision(null)}
+                onConfirm={confirmChiefDecision}
+            />
         </div>
     );
 }

@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { CheckCircle2, Inbox, LayoutDashboard, RefreshCw, Send, AlertTriangle, ShieldAlert, Zap } from 'lucide-react';
@@ -20,6 +21,9 @@ import { WorkflowHelpPanel } from '@/components/workflow/WorkflowHelpPanel';
 import { getWorkflowStatusLabel } from '@/lib/workflow-language';
 import { RoleOnboardingBanner } from '@/components/workflow/RoleOnboardingBanner';
 import { trackNextAction, useTrackSurfaceView } from '@/lib/ux-telemetry';
+import { TutorialOverlay } from '@/components/onboarding/TutorialOverlay';
+import { TutorialWelcomeModal } from '@/components/onboarding/TutorialWelcomeModal';
+import { useTutorialState } from '@/lib/tutorial';
 
 type Role =
     | 'director'
@@ -200,6 +204,8 @@ function WorkflowStrip({ items }: { items: Array<{ label: string; count: number;
 
 export default function TodayPage() {
     const { user } = useAuth();
+    const router = useRouter();
+    const { state: tutorialState, update: updateTutorial, complete: completeTutorial, active: tutorialActive } = useTutorialState();
     const role = normalizeRole(user?.role || '');
     const isChiefFlow = role === 'editor_chief' || role === 'director';
     const isAuthorFlow = !isChiefFlow;
@@ -477,6 +483,56 @@ export default function TodayPage() {
         ];
     }, [draftGenerated.length, isChiefFlow, pendingCandidates.length, chiefPending.length, readyManualPublish.length, reservations.length]);
 
+    const tutorialRole = tutorialState.role;
+    const tutorialStep = tutorialState.step;
+    const journalistFirst = journalistNow[0] || journalistNext[0];
+    const chiefFirst = chiefNow[0] || chiefNext[0];
+    const showWelcome = tutorialActive && !tutorialRole;
+    const showJournalistOverlay = tutorialActive && tutorialRole === 'journalist' && tutorialStep === 'today_open';
+    const showChiefOverlay = tutorialActive && tutorialRole === 'editor_chief' && tutorialStep === 'chief_today';
+
+    const handleTutorialStart = (selectedRole: 'journalist' | 'editor_chief') => {
+        updateTutorial({ role: selectedRole, step: selectedRole === 'editor_chief' ? 'chief_today' : 'today_open', done: false });
+    };
+
+    const handleTutorialSkip = () => {
+        completeTutorial();
+    };
+
+    const handleTodayNext = async () => {
+        if (tutorialRole === 'journalist') {
+            if (journalistFirst?.href) {
+                updateTutorial({ step: 'news_open' });
+                router.push(journalistFirst.href);
+                return;
+            }
+            try {
+                const res = await editorialApi.createManualWorkspaceDraft({
+                    title: 'مادة تدريبية سريعة',
+                    body: 'هذه مادة تجريبية هدفها تدريبك على المسار بسرعة قبل العمل على المواد الحقيقية.',
+                    summary: 'مادة تدريبية لاختبار التحرير.',
+                    category: 'general',
+                    urgency: 'low',
+                    source_action: 'tutorial_sandbox',
+                });
+                const workId = res.data?.work_id;
+                if (workId) {
+                    updateTutorial({ step: 'editor_edit' });
+                    router.push(`/workspace-drafts?work_id=${workId}`);
+                    return;
+                }
+            } catch (err) {
+                // ignore and let user continue
+            }
+        }
+        if (tutorialRole === 'editor_chief') {
+            updateTutorial({ step: 'chief_editorial' });
+            router.push('/editorial');
+            return;
+        }
+        completeTutorial();
+    };
+
     const isLoading =
         pendingCandidatesQuery.isLoading ||
         draftGeneratedQuery.isLoading ||
@@ -488,6 +544,27 @@ export default function TodayPage() {
 
     return (
         <div className="space-y-6" dir="rtl">
+            <TutorialWelcomeModal open={showWelcome} onSelectRole={handleTutorialStart} onSkip={handleTutorialSkip} />
+            <TutorialOverlay
+                open={showJournalistOverlay}
+                stepLabel="الخطوة 1 / 4"
+                title="ابدأ من هنا"
+                description="هنا تجد كل ما يحتاج عملك اليوم. افتح أول مادة لتبدأ التحرير مباشرة."
+                targetSelector={journalistFirst ? '[data-tutorial=\"today-first-card\"]' : undefined}
+                primaryLabel={journalistFirst ? 'افتح أول مادة' : 'أنشئ مادة تجريبية'}
+                onPrimary={handleTodayNext}
+                onSkip={handleTutorialSkip}
+            />
+            <TutorialOverlay
+                open={showChiefOverlay}
+                stepLabel="الخطوة 1 / 2"
+                title="ابدأ طابور القرار"
+                description="هذه الخطوة توصلك مباشرة إلى المواد التي تنتظر قرارك التحريري."
+                targetSelector="[data-tutorial=\"today-chief-queue\"]"
+                primaryLabel="افتح طابور الاعتماد"
+                onPrimary={handleTodayNext}
+                onSkip={handleTutorialSkip}
+            />
             <RoleOnboardingBanner
                 storageKey={`ech_today_onboarding_v1_${role || 'guest'}`}
                 title={isChiefFlow ? 'ابدأ يومك من هنا كرئيس تحرير' : 'ابدأ يومك من هنا كصحفي'}
@@ -524,7 +601,11 @@ export default function TodayPage() {
                     </p>
                 </div>
                 <div className="flex items-center gap-2">
-                    <Link href={isChiefFlow ? '/editorial' : '/news'} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-200 hover:text-white">
+                    <Link
+                        href={isChiefFlow ? '/editorial' : '/news'}
+                        data-tutorial={showChiefOverlay ? 'today-chief-queue' : undefined}
+                        className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-200 hover:text-white"
+                    >
                         <Inbox className="w-4 h-4" />
                         {isChiefFlow ? 'فتح طابور الاعتماد' : 'فتح طابور الأخبار'}
                     </Link>
@@ -559,31 +640,35 @@ export default function TodayPage() {
                     >
                         {(isChiefFlow ? chiefNow : journalistNow).length === 0 ? undefined : (
                             <div className="space-y-3">
-                                {(isChiefFlow ? chiefNow : journalistNow).map((item) => (
-                                    <WorkflowCard
+                                {(isChiefFlow ? chiefNow : journalistNow).map((item, index) => (
+                                    <div
                                         key={item.id}
-                                        title={item.title}
-                                        subtitle={item.subtitle}
-                                        statusLabel={getWorkflowStatusLabel(item.status)}
-                                        chips={[{ label: item.workflowLabel }]}
-                                        reason={item.reason}
-                                        nextActionLabel={item.nextAction}
-                                        timestamp={item.timestamp}
-                                        blockers={item.blockers}
-                                        tone={item.tone}
-                                        primaryAction={{
-                                            label: item.nextAction,
-                                            href: item.href,
-                                            onClick: () =>
-                                                trackNextAction('today', item.nextAction, {
-                                                    ...surfaceDetails,
-                                                    queue_section: 'now',
-                                                    item_id: item.id,
-                                                    workflow_label: item.workflowLabel,
-                                                    target_href: item.href,
-                                                }),
-                                        }}
-                                    />
+                                        data-tutorial={showJournalistOverlay && index === 0 ? 'today-first-card' : undefined}
+                                    >
+                                        <WorkflowCard
+                                            title={item.title}
+                                            subtitle={item.subtitle}
+                                            statusLabel={getWorkflowStatusLabel(item.status)}
+                                            chips={[{ label: item.workflowLabel }]}
+                                            reason={item.reason}
+                                            nextActionLabel={item.nextAction}
+                                            timestamp={item.timestamp}
+                                            blockers={item.blockers}
+                                            tone={item.tone}
+                                            primaryAction={{
+                                                label: item.nextAction,
+                                                href: item.href,
+                                                onClick: () =>
+                                                    trackNextAction('today', item.nextAction, {
+                                                        ...surfaceDetails,
+                                                        queue_section: 'now',
+                                                        item_id: item.id,
+                                                        workflow_label: item.workflowLabel,
+                                                        target_href: item.href,
+                                                    }),
+                                            }}
+                                        />
+                                    </div>
                                 ))}
                             </div>
                         )}
@@ -598,31 +683,35 @@ export default function TodayPage() {
                     >
                         {(isChiefFlow ? chiefNext : journalistNext).length === 0 ? undefined : (
                             <div className="space-y-3">
-                                {(isChiefFlow ? chiefNext : journalistNext).map((item) => (
-                                    <WorkflowCard
+                                {(isChiefFlow ? chiefNext : journalistNext).map((item, index) => (
+                                    <div
                                         key={item.id}
-                                        title={item.title}
-                                        subtitle={item.subtitle}
-                                        statusLabel={getWorkflowStatusLabel(item.status)}
-                                        chips={[{ label: item.workflowLabel }]}
-                                        reason={item.reason}
-                                        nextActionLabel={item.nextAction}
-                                        timestamp={item.timestamp}
-                                        blockers={item.blockers}
-                                        tone={item.tone}
-                                        primaryAction={{
-                                            label: item.nextAction,
-                                            href: item.href,
-                                            onClick: () =>
-                                                trackNextAction('today', item.nextAction, {
-                                                    ...surfaceDetails,
-                                                    queue_section: 'next',
-                                                    item_id: item.id,
-                                                    workflow_label: item.workflowLabel,
-                                                    target_href: item.href,
-                                                }),
-                                        }}
-                                    />
+                                        data-tutorial={showJournalistOverlay && journalistNow.length === 0 && index === 0 ? 'today-first-card' : undefined}
+                                    >
+                                        <WorkflowCard
+                                            title={item.title}
+                                            subtitle={item.subtitle}
+                                            statusLabel={getWorkflowStatusLabel(item.status)}
+                                            chips={[{ label: item.workflowLabel }]}
+                                            reason={item.reason}
+                                            nextActionLabel={item.nextAction}
+                                            timestamp={item.timestamp}
+                                            blockers={item.blockers}
+                                            tone={item.tone}
+                                            primaryAction={{
+                                                label: item.nextAction,
+                                                href: item.href,
+                                                onClick: () =>
+                                                    trackNextAction('today', item.nextAction, {
+                                                        ...surfaceDetails,
+                                                        queue_section: 'next',
+                                                        item_id: item.id,
+                                                        workflow_label: item.workflowLabel,
+                                                        target_href: item.href,
+                                                    }),
+                                            }}
+                                        />
+                                    </div>
                                 ))}
                             </div>
                         )}
