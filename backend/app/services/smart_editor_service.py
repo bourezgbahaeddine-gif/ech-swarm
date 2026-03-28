@@ -864,6 +864,7 @@ title, body_html, note, issues
             "matches": 0,
             "false_claims": 0,
             "true_claims": 0,
+            "enabled": False,
         }
         for claim in claims:
             has_support = bool(claim.get("evidence_links")) or (
@@ -876,19 +877,27 @@ title, body_html, note, issues
             claim["external_verdict"] = "unknown"
             claim["external_match_count"] = 0
 
-        queries = []
-        for claim in claims:
-            if claim.get("blocking") or claim.get("risk_level") == "high":
-                queries.append(claim)
-        queries = (queries or claims)[:4]
+        def _risk_rank(level: str) -> int:
+            return {"high": 0, "medium": 1, "low": 2}.get(level, 3)
 
-        if not fact_check_tools_service:
+        api_enabled = bool(fact_check_tools_service) and await fact_check_tools_service.is_enabled()
+        external_summary["enabled"] = api_enabled
+
+        queries = sorted(
+            claims,
+            key=lambda c: (_risk_rank(str(c.get("risk_level"))), -float(c.get("confidence") or 0.0)),
+        )[:6]
+
+        if not fact_check_tools_service or not api_enabled:
             unresolved = [c for c in claims if c.get("blocking")]
             blocking_reasons: list[str] = []
             actionable_fixes: list[str] = []
             if template_noise:
                 blocking_reasons.append("النص يحتوي قوالب أو تعليقات جانبية وغير صالح للنشر")
                 actionable_fixes.append("استخدم زر تحسين الصياغة لإزالة القوالب والتعليقات")
+            if claims:
+                blocking_reasons.append("خدمة التحقق من الادعاءات غير مفعلة، لا يمكن اعتماد التقرير دونها.")
+                actionable_fixes.append("أضف مفتاح Google Fact Check من صفحة الإعدادات ثم أعد التحقق.")
             if unresolved:
                 blocking_reasons.append("توجد ادعاءات غير مؤكدة تحت الحد المطلوب")
                 actionable_fixes.append("تحقق من الادعاءات منخفضة الثقة قبل طلب النشر")
@@ -909,10 +918,10 @@ title, body_html, note, issues
             query_text = str(claim.get("text") or "").strip()
             if not query_text:
                 continue
+            external_summary["queries"] += 1
             matches = await fact_check_tools_service.search_claims(query_text, language="ar", page_size=4)
             if not matches:
                 continue
-            external_summary["queries"] += 1
             external_summary["matches"] += len(matches)
             verdict = fact_check_tools_service.infer_verdict(matches)
             claim["external_matches"] = matches

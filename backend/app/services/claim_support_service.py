@@ -120,10 +120,10 @@ class ClaimSupportService:
         blockers = [str(item) for item in (report.get("blocking_reasons") or [])]
         fixes = [str(item) for item in (report.get("actionable_fixes") or [])]
         if unsupported_ids:
-            blocker_msg = "High-risk claims are missing support links or documented unverifiable reasons."
+            blocker_msg = "الادعاءات عالية المخاطر تفتقد روابط دعم أو أسباب موثقة لعدم إمكانية التحقق."
             if blocker_msg not in blockers:
                 blockers.append(blocker_msg)
-            fix_msg = "Attach evidence links or mark each unsupported high-risk claim as unverifiable with a reason."
+            fix_msg = "أضف روابط دعم لكل ادعاء عالي المخاطر أو علّم الادعاء بأنه غير قابل للتحقق مع سبب واضح."
             if fix_msg not in fixes:
                 fixes.append(fix_msg)
             report["unsupported_high_risk_claim_ids"] = unsupported_ids
@@ -237,4 +237,3 @@ class ClaimSupportService:
 
 
 claim_support_service = ClaimSupportService()
-

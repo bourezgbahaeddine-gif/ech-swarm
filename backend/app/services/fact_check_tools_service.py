@@ -20,7 +20,6 @@ NEGATIVE_RATINGS = {
     "fake",
     "misleading",
     "wrong",
-    "kاذب",
     "كاذب",
     "خاطئ",
     "غير صحيح",
@@ -52,6 +51,9 @@ class FactCheckToolsService:
         )
         return (key or "").strip()
 
+    async def is_enabled(self) -> bool:
+        return bool(await self._get_api_key())
+
     @staticmethod
     def _clean_text(value: Any) -> str:
         return str(value or "").strip()
@@ -65,7 +67,7 @@ class FactCheckToolsService:
             return "false"
         if any(token in low for token in POSITIVE_RATINGS):
             return "true"
-        if "mixed" in low or "partly" in low or "جزئ" in low:
+        if "mixed" in low or "partly" in low or "جزئ" in low or "مختلط" in low:
             return "mixed"
         return "unknown"
 
