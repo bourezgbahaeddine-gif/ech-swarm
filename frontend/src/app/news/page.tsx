@@ -45,6 +45,7 @@ function NewsPageContent() {
     const searchParams = useSearchParams();
     const router = useRouter();
     const { state: tutorialState, update: updateTutorial, complete: completeTutorial, active: tutorialActive } = useTutorialState();
+    const tutorialRole = tutorialState.role;
     const { user } = useAuth();
     const initialStatus = searchParams.get('status') || '';
     const initialCategory = searchParams.get('category') || '';
