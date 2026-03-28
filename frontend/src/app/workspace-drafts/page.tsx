@@ -3093,7 +3093,7 @@ function WorkspaceDraftsPageContent() {
                 stepLabel="الخطوة 4 / 4"
                 title="أرسل المادة للاعتماد"
                 description="عندما تنتهي من التعديل، أرسل المادة مباشرة للاعتماد."
-                targetSelector="[data-tutorial=\"editor-submit\"]"
+                targetSelector='[data-tutorial="editor-submit"]'
                 primaryLabel="إرسال للاعتماد"
                 onPrimary={handleTutorialSubmit}
                 onSkip={completeTutorial}
