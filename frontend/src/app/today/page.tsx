@@ -560,7 +560,7 @@ export default function TodayPage() {
                 stepLabel="الخطوة 1 / 2"
                 title="ابدأ طابور القرار"
                 description="هذه الخطوة توصلك مباشرة إلى المواد التي تنتظر قرارك التحريري."
-                targetSelector="[data-tutorial=\"today-chief-queue\"]"
+                targetSelector='[data-tutorial="today-chief-queue"]'
                 primaryLabel="افتح طابور الاعتماد"
                 onPrimary={handleTodayNext}
                 onSkip={handleTutorialSkip}

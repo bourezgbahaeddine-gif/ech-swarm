@@ -3083,7 +3083,7 @@ function WorkspaceDraftsPageContent() {
                 stepLabel="الخطوة 3 / 4"
                 title="هذا هو مكان العمل الأساسي"
                 description="قم بتعديل العنوان أو أضف جملة بسيطة لتبدأ."
-                targetSelector="[data-tutorial=\"editor-title\"]"
+                targetSelector='[data-tutorial="editor-title"]'
                 primaryLabel="تم التعديل"
                 onPrimary={handleTutorialEditNext}
                 onSkip={completeTutorial}

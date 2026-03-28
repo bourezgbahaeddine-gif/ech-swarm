@@ -400,7 +400,7 @@ function NewsPageContent() {
                 stepLabel="الخطوة 2 / 4"
                 title="افتح المادة الأولى"
                 description="هذه مادة وصلت إليك للعمل عليها. افتح المحرر للبدء الفعلي."
-                targetSelector="[data-tutorial=\"news-first-edit\"]"
+                targetSelector='[data-tutorial="news-first-edit"]'
                 primaryLabel="افتح المحرر"
                 onPrimary={handleNewsNext}
                 onSkip={completeTutorial}
@@ -689,6 +689,7 @@ function NewsPageContent() {
                                                             target_href: editHref,
                                                         })
                                                     }
+                                                    title="افتح المحرر لبدء التحرير"
                                                     className="px-3 py-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-[11px] text-cyan-100 hover:bg-cyan-500/20 transition-colors flex items-center justify-center"
                                                 >
                                                     التحرير

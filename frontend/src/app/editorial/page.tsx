@@ -578,7 +578,7 @@ export default function EditorialPage() {
                 stepLabel="الخطوة 2 / 2"
                 title="اتخذ القرار"
                 description="اقرأ الملخص سريعًا ثم اعتمد المادة الآن."
-                targetSelector="[data-tutorial=\"chief-approve\"]"
+                targetSelector='[data-tutorial="chief-approve"]'
                 primaryLabel="اعتماد نهائي"
                 onPrimary={handleChiefNext}
                 onSkip={completeTutorial}
