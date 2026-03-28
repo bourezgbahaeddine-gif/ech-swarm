@@ -75,7 +75,7 @@ export function TutorialOverlay({
                         onClick={onSkip}
                         className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300"
                     >
-                        ????
+                        تخطي
                     </button>
                 </div>
             </div>
