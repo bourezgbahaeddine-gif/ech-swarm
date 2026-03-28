@@ -655,6 +655,7 @@ export interface FactCheckClaim {
     external_matches?: FactCheckExternalMatch[];
     external_match_count?: number;
     external_verdict?: 'true' | 'false' | 'mixed' | 'unknown' | string;
+    external_search_queries?: Array<{ query: string; language: string; matches: number }>;
 }
 
 export interface FactCheckExternalMatch {
@@ -681,6 +682,7 @@ export interface FactCheckReport {
         matches: number;
         false_claims: number;
         true_claims: number;
+        enabled?: boolean;
     };
     claim_coverage?: {
         high_risk_total: number;
