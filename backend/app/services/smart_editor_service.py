@@ -9,6 +9,16 @@ from typing import Any
 import bleach
 from bs4 import BeautifulSoup
 
+try:
+    from app.services.ai_service import ai_service
+except Exception:  # pragma: no cover - optional AI backend
+    ai_service = None
+
+try:
+    from app.services.fact_check_tools_service import fact_check_tools_service
+except Exception:  # pragma: no cover - optional external service
+    fact_check_tools_service = None
+
 ALLOWED_TAGS = [
     "p",
     "h1",
@@ -113,13 +123,7 @@ class DiffResult:
 class SmartEditorService:
     @staticmethod
     def _get_ai_service():
-        try:
-from app.services.ai_service import ai_service
-from app.services.fact_check_tools_service import fact_check_tools_service
-
-            return ai_service
-        except Exception:
-            return None
+        return ai_service
 
     @staticmethod
     def _contains_html(value: str) -> bool:
@@ -874,6 +878,29 @@ facebook, x, push, summary_120, breaking_alert
             if claim.get("blocking") or claim.get("risk_level") == "high":
                 queries.append(claim)
         queries = (queries or claims)[:4]
+
+        if not fact_check_tools_service:
+            unresolved = [c for c in claims if c.get("blocking")]
+            blocking_reasons: list[str] = []
+            actionable_fixes: list[str] = []
+            if template_noise:
+                blocking_reasons.append("النص يحتوي قوالب أو تعليقات جانبية وغير صالح للنشر")
+                actionable_fixes.append("استخدم زر تحسين الصياغة لإزالة القوالب والتعليقات")
+            if unresolved:
+                blocking_reasons.append("توجد ادعاءات غير مؤكدة تحت الحد المطلوب")
+                actionable_fixes.append("تحقق من الادعاءات منخفضة الثقة قبل طلب النشر")
+            passed = not blocking_reasons
+            score = max(0, 100 - len(unresolved) * 20 - (30 if template_noise else 0))
+            return {
+                "stage": "FACT_CHECK_PASSED" if passed else "FACT_CHECK_BLOCKED",
+                "passed": passed,
+                "score": score,
+                "claims": claims,
+                "external_fact_checks": external_summary,
+                "blocking_reasons": blocking_reasons,
+                "actionable_fixes": actionable_fixes,
+                "threshold": threshold,
+            }
 
         for claim in queries:
             query_text = str(claim.get("text") or "").strip()
