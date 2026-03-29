@@ -1918,6 +1918,19 @@ export interface DigitalComposeResult {
         id: number | null;
         title: string;
     };
+    coverage_pack?: {
+        core_statement?: string | null;
+        headline_short?: string | null;
+        summary_mobile?: string | null;
+        push_text?: string | null;
+        social_text?: string | null;
+        breaking_alert?: string | null;
+        checks?: Array<{
+            code: string;
+            level: string;
+            message: string;
+        }>;
+    };
 }
 
 export interface DigitalTaskActionItem {

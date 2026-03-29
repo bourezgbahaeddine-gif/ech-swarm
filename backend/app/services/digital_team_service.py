@@ -9,6 +9,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from pathlib import Path
+import re
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -906,6 +907,22 @@ class DigitalTeamService:
             or _fallback_social_text(task=task, source_title=source_title, source_text=source_text)
         )
 
+        plain_text = smart_editor_service.html_to_text(draft_html or "")
+        core_statement = _extract_core_statement(plain_text or source_text or draft_title)
+        headline_short = _shorten_headline(draft_title or source_title)
+        summary_mobile = variants.get("summary_120") or _truncate_chars(core_statement or source_text, 130)
+        push_text = variants.get("push") or _truncate_chars(core_statement or source_text, 120)
+        social_text = variants.get("facebook") or variants.get("x") or recommended_text
+        breaking_alert = variants.get("breaking_alert") or ""
+        coverage_checks = _coverage_checks(
+            core_statement=core_statement,
+            headline=headline_short,
+            summary=summary_mobile,
+            push=push_text,
+            source_title=source_title,
+            source_text=source_text,
+        )
+
         hashtags = _build_hashtag_list(
             source_title=source_title,
             tags=candidate_tags,
@@ -923,6 +940,15 @@ class DigitalTeamService:
                 "type": source_type,
                 "id": source_id,
                 "title": source_title,
+            },
+            "coverage_pack": {
+                "core_statement": core_statement,
+                "headline_short": headline_short,
+                "summary_mobile": summary_mobile,
+                "push_text": push_text,
+                "social_text": social_text,
+                "breaking_alert": breaking_alert or None,
+                "checks": coverage_checks,
             },
         }
 
@@ -1210,6 +1236,108 @@ def _fallback_social_text(*, task: SocialTask, source_title: str, source_text: s
     if body:
         return f"{headline}\n\n{body}\n\nتابعوا التغطية عبر منصات الشروق."
     return f"{headline}\n\nتابعوا التغطية عبر منصات الشروق."
+
+
+def _normalize_space(value: str) -> str:
+    return " ".join((value or "").split()).strip()
+
+
+def _truncate_chars(value: str, limit: int) -> str:
+    clean = _normalize_space(value)
+    if not clean:
+        return ""
+    if len(clean) <= limit:
+        return clean
+    trimmed = clean[: max(0, limit - 3)].rstrip()
+    return f"{trimmed}..."
+
+
+def _extract_core_statement(value: str, limit: int = 220) -> str:
+    clean = _normalize_space(value)
+    if not clean:
+        return ""
+    parts = [part.strip() for part in re.split(r"[.!?\n\r\u061f]+", clean) if part.strip()]
+    for part in parts:
+        if len(part) >= 20:
+            return _truncate_chars(part, limit)
+    return _truncate_chars(clean, limit)
+
+
+def _shorten_headline(value: str, limit: int = 70) -> str:
+    clean = _normalize_space(value)
+    if not clean:
+        return ""
+    for sep in [" - ", " | ", ":"]:
+        if sep in clean:
+            clean = clean.split(sep, 1)[0].strip()
+            break
+    return _truncate_chars(clean, limit)
+
+
+def _contains_any(text: str, tokens: list[str]) -> bool:
+    clean = text or ""
+    return any(token in clean for token in tokens)
+
+
+def _coverage_checks(
+    *,
+    core_statement: str,
+    headline: str,
+    summary: str,
+    push: str,
+    source_title: str,
+    source_text: str,
+) -> list[dict[str, str]]:
+    checks: list[dict[str, str]] = []
+    source_tokens = [
+        "\u0623\u0639\u0644\u0646\u062a",
+        "\u0623\u0643\u062f",
+        "\u0642\u0627\u0644",
+        "\u0635\u0631\u062d",
+        "\u0628\u062d\u0633\u0628",
+        "\u0648\u0641\u0642",
+        "\u0623\u0641\u0627\u062f",
+        "\u0623\u0648\u0636\u062d",
+        "\u0630\u0643\u0631",
+    ]
+    time_tokens = [
+        "\u0627\u0644\u064a\u0648\u0645",
+        "\u0623\u0645\u0633",
+        "\u0627\u0644\u0622\u0646",
+        "\u0642\u0628\u0644 \u0642\u0644\u064a\u0644",
+        "\u0635\u0628\u0627\u062d",
+        "\u0645\u0633\u0627\u0621",
+        "\u0641\u062c\u0631",
+        "\u0638\u0647\u0631",
+        "\u0628\u062a\u0627\u0631\u064a\u062e",
+        "202",
+    ]
+
+    core = _normalize_space(core_statement)
+    headline_clean = _normalize_space(headline)
+    summary_clean = _normalize_space(summary)
+    push_clean = _normalize_space(push)
+    combined = " ".join(
+        part for part in [headline_clean, summary_clean, push_clean, source_title, source_text] if part
+    )
+
+    if not core:
+        checks.append({"code": "missing_core", "level": "warning", "message": "Core statement missing"})
+    if not _contains_any(combined, source_tokens):
+        checks.append({"code": "missing_source", "level": "warning", "message": "Source not explicit"})
+    if not _contains_any(combined, time_tokens):
+        checks.append({"code": "missing_time", "level": "warning", "message": "Time/context missing"})
+
+    if headline_clean and (len(headline_clean) < 12 or len(headline_clean) > 70):
+        checks.append({"code": "headline_length", "level": "info", "message": "Headline length off"})
+    if summary_clean and (len(summary_clean) < 90 or len(summary_clean) > 140):
+        checks.append({"code": "summary_length", "level": "info", "message": "Summary length off"})
+    if push_clean:
+        word_count = len(push_clean.split())
+        if word_count < 12 or word_count > 18:
+            checks.append({"code": "push_length", "level": "info", "message": "Push length off"})
+
+    return checks
 
 
 def _build_hashtag_list(*, source_title: str, tags: list[str], channel: str, max_items: int) -> list[str]:

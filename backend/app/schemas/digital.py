@@ -321,6 +321,22 @@ class DigitalComposeRequest(BaseModel):
     max_hashtags: int = Field(default=6, ge=1, le=12)
 
 
+class DigitalCoverageCheck(BaseModel):
+    code: str
+    level: str = Field(default="info", max_length=16)
+    message: str
+
+
+class DigitalCoveragePack(BaseModel):
+    core_statement: str | None = None
+    headline_short: str | None = None
+    summary_mobile: str | None = None
+    push_text: str | None = None
+    social_text: str | None = None
+    breaking_alert: str | None = None
+    checks: list[DigitalCoverageCheck] = Field(default_factory=list)
+
+
 class DigitalComposeResponse(BaseModel):
     task_id: int
     platform: str
@@ -328,6 +344,7 @@ class DigitalComposeResponse(BaseModel):
     hashtags: list[str] = Field(default_factory=list)
     variants: dict[str, str] = Field(default_factory=dict)
     source: dict
+    coverage_pack: DigitalCoveragePack | None = None
 
 
 class DigitalTaskActionItem(BaseModel):

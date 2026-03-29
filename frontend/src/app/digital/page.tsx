@@ -17,6 +17,7 @@ import {
     type DigitalTask,
     type DigitalTaskActionItem,
     type DigitalTaskStatus,
+    type DigitalComposeResult,
     type TeamMember,
 } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -32,6 +33,14 @@ const PLATFORM_CHAR_LIMITS: Record<string, number> = {
     instagram: 2200,
     tiktok: 2200,
     youtube: 5000,
+};
+const COVERAGE_CHECK_LABELS: Record<string, string> = {
+    missing_core: 'جملة الجوهر غير واضحة.',
+    missing_source: 'المصدر غير ظاهر في الصياغات.',
+    missing_time: 'الزمن أو السياق غير واضح.',
+    headline_length: 'طول العنوان يحتاج ضبطًا.',
+    summary_length: 'طول الملخص غير مناسب للجوال.',
+    push_length: 'طول إشعار الدفع يحتاج ضبطًا.',
 };
 
 function normalizePlatform(platform: string): string {
@@ -359,6 +368,15 @@ function taskObjectiveLabel(taskType: string): string {
     return 'general';
 }
 
+function coverageCheckLabel(code: string): string {
+    return COVERAGE_CHECK_LABELS[code] || 'تنبيه جودة يحتاج مراجعة.';
+}
+
+function coverageCheckClass(level: string): string {
+    if (level === 'warning') return 'border-rose-500/30 bg-rose-500/10 text-rose-200';
+    return 'border-amber-500/30 bg-amber-500/10 text-amber-200';
+}
+
 export default function DigitalPage() {
     const { user } = useAuth();
     const role = (user?.role || '').toLowerCase();
@@ -394,6 +412,7 @@ export default function DigitalPage() {
     const [postContent, setPostContent] = useState('');
     const [postHashtags, setPostHashtags] = useState('');
     const [postScheduledAt, setPostScheduledAt] = useState('');
+    const [coveragePack, setCoveragePack] = useState<DigitalComposeResult['coverage_pack'] | null>(null);
 
     const [scopeUserId, setScopeUserId] = useState('');
     const [scopeNews, setScopeNews] = useState(true);
@@ -417,6 +436,10 @@ export default function DigitalPage() {
         enabled: canRead,
         refetchInterval: 30000,
     });
+
+    useEffect(() => {
+        setCoveragePack(null);
+    }, [selectedTaskId]);
 
     const actionDeskQuery = useQuery({
         queryKey: ['digital-action-desk', channel],
@@ -834,6 +857,7 @@ export default function DigitalPage() {
             const data = res.data;
             setPostContent(data.recommended_text || '');
             setPostHashtags((data.hashtags || []).join(', '));
+            setCoveragePack(data.coverage_pack || null);
             setError(null);
             setMessage(`تمت صياغة منشور تلقائي من مصدر: ${data.source?.title || 'المهمة'}`);
         },
@@ -1739,6 +1763,91 @@ export default function DigitalPage() {
                             >
                                 صياغة تلقائية للمنشور
                             </button>
+                        )}
+                        {coveragePack && (
+                            <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-3 space-y-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div>
+                                        <div className="text-xs text-cyan-300">حزمة التغطية الرقمية</div>
+                                        <div className="text-sm text-slate-200">نتائج مختصرة جاهزة للنشر السريع</div>
+                                    </div>
+                                    <button
+                                        onClick={() =>
+                                            copySimple(
+                                                [
+                                                    coveragePack.core_statement,
+                                                    coveragePack.headline_short,
+                                                    coveragePack.summary_mobile,
+                                                    coveragePack.push_text,
+                                                    coveragePack.social_text,
+                                                ]
+                                                    .filter(Boolean)
+                                                    .join('\n\n')
+                                            )
+                                        }
+                                        className="h-8 px-3 rounded-lg border border-slate-600 bg-slate-800/60 text-slate-200 text-xs"
+                                    >
+                                        نسخ الحزمة
+                                    </button>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                                    {coveragePack.headline_short && (
+                                        <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-3 space-y-2">
+                                            <div className="text-slate-400">عنوان رقمي قصير</div>
+                                            <div className="text-sm text-white">{coveragePack.headline_short}</div>
+                                            <button onClick={() => copySimple(coveragePack.headline_short || '')} className="h-7 px-2 rounded-md border border-slate-600 bg-slate-800/60 text-slate-200 text-[11px]">نسخ</button>
+                                        </div>
+                                    )}
+                                    {coveragePack.core_statement && (
+                                        <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-3 space-y-2">
+                                            <div className="text-slate-400">جملة الجوهر</div>
+                                            <div className="text-sm text-white">{coveragePack.core_statement}</div>
+                                            <button onClick={() => copySimple(coveragePack.core_statement || '')} className="h-7 px-2 rounded-md border border-slate-600 bg-slate-800/60 text-slate-200 text-[11px]">نسخ</button>
+                                        </div>
+                                    )}
+                                    {coveragePack.summary_mobile && (
+                                        <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-3 space-y-2">
+                                            <div className="text-slate-400">ملخص للجوال</div>
+                                            <div className="text-sm text-white">{coveragePack.summary_mobile}</div>
+                                            <button onClick={() => copySimple(coveragePack.summary_mobile || '')} className="h-7 px-2 rounded-md border border-slate-600 bg-slate-800/60 text-slate-200 text-[11px]">نسخ</button>
+                                        </div>
+                                    )}
+                                    {coveragePack.push_text && (
+                                        <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-3 space-y-2">
+                                            <div className="text-slate-400">إشعار دفع</div>
+                                            <div className="text-sm text-white">{coveragePack.push_text}</div>
+                                            <button onClick={() => copySimple(coveragePack.push_text || '')} className="h-7 px-2 rounded-md border border-slate-600 bg-slate-800/60 text-slate-200 text-[11px]">نسخ</button>
+                                        </div>
+                                    )}
+                                    {coveragePack.social_text && (
+                                        <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-3 space-y-2 md:col-span-2">
+                                            <div className="text-slate-400">صيغة سوشيال</div>
+                                            <div className="text-sm text-white whitespace-pre-wrap">{coveragePack.social_text}</div>
+                                            <button onClick={() => copySimple(coveragePack.social_text || '')} className="h-7 px-2 rounded-md border border-slate-600 bg-slate-800/60 text-slate-200 text-[11px]">نسخ</button>
+                                        </div>
+                                    )}
+                                    {coveragePack.breaking_alert && (
+                                        <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 space-y-2 md:col-span-2">
+                                            <div className="text-rose-200">تنبيه عاجل</div>
+                                            <div className="text-sm text-white whitespace-pre-wrap">{coveragePack.breaking_alert}</div>
+                                            <button onClick={() => copySimple(coveragePack.breaking_alert || '')} className="h-7 px-2 rounded-md border border-rose-500/40 bg-rose-500/10 text-rose-200 text-[11px]">نسخ</button>
+                                        </div>
+                                    )}
+                                </div>
+                                {!!coveragePack.checks?.length && (
+                                    <div className="space-y-2">
+                                        <div className="text-xs text-slate-400">ملاحظات جودة سريعة</div>
+                                        <div className="flex flex-wrap gap-2">
+                                            {coveragePack.checks.map((check, idx) => (
+                                                <span key={`${check.code}-${idx}`} className={cn('inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px]', coverageCheckClass(check.level))}>
+                                                    <AlertTriangle className="w-3 h-3" />
+                                                    {coverageCheckLabel(check.code)}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         )}
                         <textarea value={postContent} onChange={(e) => setPostContent(e.target.value)} rows={3} placeholder="نص المنشور" className="w-full rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-white" />
                         <div className={cn('text-xs', postDraftLength.over ? 'text-rose-300' : 'text-slate-400')}>
