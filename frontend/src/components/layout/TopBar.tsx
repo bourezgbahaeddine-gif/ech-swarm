@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bell, Search, LogOut, User, Shield, FileText, Sparkles, Loader2, Clipboard, X, Radar, AlertTriangle, Moon, Sun, Menu } from 'lucide-react';
+import Link from 'next/link';
+import { Bell, Search, LogOut, User, Shield, FileText, Sparkles, Loader2, Clipboard, X, Radar, AlertTriangle, Moon, Sun, Menu, BookOpen, GitBranch } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { dashboardApi, type DashboardNotification, type PublishedMonitorLatestResponse } from '@/lib/api';
 import { journalistServicesApi } from '@/lib/journalist-services-api';
@@ -114,6 +115,28 @@ export default function TopBar({
                                 مهام سريعة
                             </button>
                         )}
+                        <Link
+                            href="/how-editorial-os-works"
+                            className={`hidden md:flex h-10 px-3 rounded-xl border text-xs items-center gap-1.5 ${
+                                theme === 'dark'
+                                    ? 'bg-white/5 border-white/10 text-gray-200 hover:bg-white/10'
+                                    : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100'
+                            }`}
+                        >
+                            <BookOpen className="w-4 h-4" />
+                            كيف تعمل المنصة؟
+                        </Link>
+                        <Link
+                            href="/newsroom-flow"
+                            className={`hidden md:flex h-10 px-3 rounded-xl border text-xs items-center gap-1.5 ${
+                                theme === 'dark'
+                                    ? 'bg-white/5 border-white/10 text-gray-200 hover:bg-white/10'
+                                    : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100'
+                            }`}
+                        >
+                            <GitBranch className="w-4 h-4" />
+                            مسار غرفة الأخبار
+                        </Link>
                         <button
                             onClick={() => setShowPublishedMonitor(true)}
                             className={`hidden md:flex h-10 px-3 rounded-xl border text-xs items-center gap-1.5 ${
