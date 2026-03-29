@@ -173,6 +173,95 @@ class SmartEditorService:
         return combined
 
     @staticmethod
+    def _ensure_title_length(value: str, fallback: str, min_len: int = 40, max_len: int = 60) -> str:
+        text = re.sub(r"\s+", " ", (value or "").strip())
+        backup = re.sub(r"\s+", " ", (fallback or "").strip())
+        if not text:
+            text = backup
+        if len(text) > max_len:
+            return text[: max_len - 3].rstrip() + "..."
+        if len(text) >= min_len:
+            return text
+        combined = f"{text} {backup}".strip()
+        combined = re.sub(r"\s+", " ", combined)
+        if len(combined) > max_len:
+            combined = combined[: max_len - 3].rstrip() + "..."
+        return combined
+
+    @staticmethod
+    def _contains_phrase(text: str, phrase: str) -> bool:
+        if not text or not phrase:
+            return False
+        return phrase.strip().lower() in text.strip().lower()
+
+    @staticmethod
+    def _ensure_title_with_phrase(title: str, phrase: str, fallback: str, min_len: int, max_len: int) -> str:
+        base = re.sub(r"\s+", " ", (title or "").strip())
+        if phrase and not SmartEditorService._contains_phrase(base, phrase):
+            if base:
+                base = f"{phrase} | {base}"
+            else:
+                base = phrase
+        return SmartEditorService._ensure_title_length(base, fallback, min_len=min_len, max_len=max_len)
+
+    @staticmethod
+    def _ensure_meta_with_phrase(meta: str, phrase: str, fallback: str, min_len: int, max_len: int) -> str:
+        base = re.sub(r"\s+", " ", (meta or "").strip())
+        if phrase and not SmartEditorService._contains_phrase(base, phrase):
+            base = f"{phrase} - {base}".strip(" -")
+        combined = SmartEditorService._ensure_meta_length(base, fallback, min_len=min_len, max_len=max_len)
+        if phrase and not SmartEditorService._contains_phrase(combined, phrase):
+            trimmed = f"{phrase} - {fallback}".strip(" -")
+            combined = SmartEditorService._ensure_meta_length(trimmed, fallback, min_len=min_len, max_len=max_len)
+        return combined
+
+    @staticmethod
+    def _extract_first_paragraph(html: str, plain_text: str) -> str:
+        if not html:
+            return (plain_text or "").strip().split("\n")[0]
+        soup = BeautifulSoup(html, "html.parser")
+        first = soup.find("p")
+        if first:
+            return first.get_text(" ", strip=True)
+        return (plain_text or "").strip().split("\n")[0]
+
+    @staticmethod
+    def _extract_headings(html: str) -> list[str]:
+        if not html:
+            return []
+        soup = BeautifulSoup(html, "html.parser")
+        headings = [tag.get_text(" ", strip=True) for tag in soup.find_all(["h2", "h3"])]
+        return [h for h in headings if h]
+
+    @staticmethod
+    def _extract_links(html: str) -> tuple[list[str], list[str]]:
+        if not html:
+            return [], []
+        soup = BeautifulSoup(html, "html.parser")
+        hrefs: list[str] = []
+        texts: list[str] = []
+        for tag in soup.find_all("a"):
+            href = str(tag.get("href") or "").strip()
+            if href:
+                hrefs.append(href)
+                texts.append(tag.get_text(" ", strip=True) or "")
+        return hrefs, texts
+
+    @staticmethod
+    def _extract_images(html: str) -> tuple[int, int]:
+        if not html:
+            return 0, 0
+        soup = BeautifulSoup(html, "html.parser")
+        imgs = soup.find_all("img")
+        total = len(imgs)
+        with_alt = 0
+        for img in imgs:
+            alt = str(img.get("alt") or "").strip()
+            if alt:
+                with_alt += 1
+        return total, with_alt
+
+    @staticmethod
     def _uniq(values: list[str], limit: int) -> list[str]:
         out: list[str] = []
         seen: set[str] = set()
@@ -706,11 +795,13 @@ title, body_html, note, issues
 
         seo_title = self._strip_side_comments(str(data.get("seo_title") or draft_title or "").strip())[:60]
         meta = self._strip_side_comments(str(data.get("meta_description") or "").strip())
-        meta = self._ensure_meta_length(meta, fallback_meta, min_len=140, max_len=155)
 
         focus_keyphrase = self._strip_side_comments(str(data.get("focus_keyphrase") or "").strip())
         if not focus_keyphrase:
             focus_keyphrase = self._strip_side_comments((draft_title or "").split(" - ")[0].strip())
+
+        seo_title = self._ensure_title_with_phrase(seo_title, focus_keyphrase, draft_title or "", min_len=40, max_len=60)
+        meta = self._ensure_meta_with_phrase(meta, focus_keyphrase, fallback_meta, min_len=140, max_len=155)
 
         secondary = data.get("secondary_keyphrases") or []
         keywords = data.get("keywords") or []
@@ -731,6 +822,10 @@ title, body_html, note, issues
             keywords = self._uniq(tokens, 6)
         if not tags:
             tags = keywords[:6]
+        if focus_keyphrase and focus_keyphrase not in keywords:
+            keywords = self._uniq([focus_keyphrase] + keywords, 6)
+        if focus_keyphrase and focus_keyphrase not in tags:
+            tags = self._uniq([focus_keyphrase] + tags, 6)
 
         slug_raw = self._strip_side_comments(str(data.get("slug") or "").strip())
         slug = self._normalize_slug(slug_raw or draft_title or focus_keyphrase)
@@ -750,6 +845,108 @@ title, body_html, note, issues
             max_len=155,
         )
 
+        first_paragraph = self._extract_first_paragraph(draft_html, plain_text)
+        headings = self._extract_headings(draft_html)
+        hrefs, link_texts = self._extract_links(draft_html)
+        image_count, images_with_alt = self._extract_images(draft_html)
+
+        def _is_internal(href: str) -> bool:
+            clean = (href or "").strip().lower()
+            if not clean:
+                return False
+            if clean.startswith("/"):
+                return True
+            if not clean.startswith("http"):
+                return True
+            return any(token in clean for token in ["echorouk", "echoroukonline"])
+
+        internal_links = sum(1 for href in hrefs if _is_internal(href))
+        external_links = sum(1 for href in hrefs if href and href.lower().startswith("http") and not _is_internal(href))
+
+        word_count = len(re.findall(r"\S+", plain_text))
+        sentences = [s.strip() for s in re.split(r"[.!?\u061f]+", plain_text) if s.strip()]
+        paragraphs = []
+        if draft_html:
+            soup = BeautifulSoup(draft_html, "html.parser")
+            paragraphs = [p.get_text(" ", strip=True) for p in soup.find_all("p") if p.get_text(" ", strip=True)]
+        if not paragraphs:
+            paragraphs = [p.strip() for p in re.split(r"\n{2,}", plain_text) if p.strip()]
+
+        transition_words = [
+            "\u0628\u0627\u0644\u0625\u0636\u0627\u0641\u0629",
+            "\u0645\u0646 \u062c\u0647\u0629 \u0623\u062e\u0631\u0649",
+            "\u0644\u0630\u0644\u0643",
+            "\u0643\u0645\u0627 \u0623\u0646",
+            "\u0641\u064a \u0627\u0644\u0645\u0642\u0627\u0628\u0644",
+            "\u0645\u0646 \u0646\u0627\u062d\u064a\u0629 \u0623\u062e\u0631\u0649",
+            "\u0623\u062e\u064a\u0631\u0627\u064b",
+            "\u0628\u064a\u0646\u0645\u0627",
+        ]
+        has_transition = any(word in plain_text for word in transition_words)
+
+        passive_markers = [
+            "\u062a\u0645",
+            "\u064a\u062a\u0645",
+            "\u062c\u0631\u0649",
+            "\u064a\u062c\u0631\u064a",
+            "\u0642\u062f \u062a\u0645",
+        ]
+        passive_count = sum(1 for sentence in sentences if any(marker in sentence for marker in passive_markers))
+        passive_ratio = passive_count / max(1, len(sentences))
+
+        long_sentence_count = sum(1 for sentence in sentences if len(sentence.split()) > 25)
+        long_paragraph_count = sum(1 for paragraph in paragraphs if len(paragraph.split()) > 120)
+
+        first_words = []
+        for sentence in sentences:
+            words = sentence.split()
+            if words:
+                first_words.append(words[0])
+        consecutive_starts = sum(
+            1 for idx in range(1, len(first_words)) if first_words[idx] == first_words[idx - 1]
+        )
+
+        keyphrase_in_title = self._contains_phrase(seo_title, focus_keyphrase)
+        keyphrase_in_meta = self._contains_phrase(meta, focus_keyphrase)
+        keyphrase_in_intro = self._contains_phrase(first_paragraph, focus_keyphrase)
+        keyphrase_in_headings = any(self._contains_phrase(item, focus_keyphrase) for item in headings)
+
+        keyphrase_occurrences = (
+            len(re.findall(re.escape(focus_keyphrase), plain_text, flags=re.IGNORECASE))
+            if focus_keyphrase
+            else 0
+        )
+        keyphrase_density = (
+            round((keyphrase_occurrences / max(1, word_count)) * 100, 2) if word_count else 0.0
+        )
+        keyphrase_density_ok = 0.5 <= keyphrase_density <= 2.5
+
+        competing_links = 0
+        if focus_keyphrase:
+            competing_links = sum(
+                1 for text in link_texts if self._contains_phrase(text, focus_keyphrase)
+            )
+
+        yoast_checks = [
+            {"code": "focus_keyphrase", "status": "ok" if focus_keyphrase else "warn"},
+            {"code": "keyphrase_in_title", "status": "ok" if keyphrase_in_title else "warn"},
+            {"code": "keyphrase_in_intro", "status": "ok" if keyphrase_in_intro else "warn"},
+            {"code": "keyphrase_in_meta", "status": "ok" if keyphrase_in_meta else "warn"},
+            {"code": "keyphrase_in_headings", "status": "ok" if keyphrase_in_headings else "warn"},
+            {"code": "keyphrase_density", "status": "ok" if keyphrase_density_ok else "warn"},
+            {"code": "word_count", "status": "ok" if word_count >= 300 else "warn"},
+            {"code": "internal_links", "status": "ok" if internal_links >= 1 else "warn"},
+            {"code": "external_links", "status": "ok" if external_links >= 1 else "warn"},
+            {"code": "images_alt", "status": "ok" if images_with_alt >= 1 else "warn"},
+            {"code": "transition_words", "status": "ok" if has_transition else "warn"},
+            {"code": "sentence_length", "status": "ok" if long_sentence_count == 0 else "warn"},
+            {"code": "paragraph_length", "status": "ok" if long_paragraph_count == 0 else "warn"},
+            {"code": "passive_voice", "status": "ok" if passive_ratio <= 0.2 else "warn"},
+            {"code": "consecutive_starts", "status": "ok" if consecutive_starts == 0 else "warn"},
+            {"code": "competing_links", "status": "ok" if competing_links <= 1 else "warn"},
+            {"code": "previously_used_keyphrase", "status": "unknown"},
+        ]
+
         return {
             "seo_title": seo_title,
             "meta_description": meta,
@@ -767,6 +964,26 @@ title, body_html, note, issues
                 "meta_ok": 140 <= len(meta) <= 155,
                 "title_length": len(seo_title),
                 "title_ok": 40 <= len(seo_title) <= 60,
+                "keyphrase_in_title": keyphrase_in_title,
+                "keyphrase_in_intro": keyphrase_in_intro,
+                "keyphrase_in_meta": keyphrase_in_meta,
+                "keyphrase_in_headings": keyphrase_in_headings,
+                "keyphrase_density": keyphrase_density,
+                "keyphrase_density_ok": keyphrase_density_ok,
+                "word_count": word_count,
+                "word_count_ok": word_count >= 300,
+                "internal_links": internal_links,
+                "external_links": external_links,
+                "images": image_count,
+                "images_with_alt": images_with_alt,
+                "transition_words_ok": has_transition,
+                "passive_voice_ratio": round(passive_ratio, 2),
+                "passive_voice_ok": passive_ratio <= 0.2,
+                "long_sentences": long_sentence_count,
+                "long_paragraphs": long_paragraph_count,
+                "consecutive_starts": consecutive_starts,
+                "competing_links": competing_links,
+                "checks": yoast_checks,
             },
         }
 

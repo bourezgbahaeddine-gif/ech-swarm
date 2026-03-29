@@ -152,6 +152,32 @@ const STAGE_ACTIONS: Record<string, DecisionActionId | null> = {
     QUALITY_SCORE: 'quality',
 };
 
+const YOAST_CHECK_LABELS: Record<string, string> = {
+    focus_keyphrase: 'تحديد الكلمة المفتاحية الرئيسية',
+    keyphrase_in_title: 'الكلمة المفتاحية داخل عنوان SEO',
+    keyphrase_in_intro: 'الكلمة المفتاحية في المقدمة',
+    keyphrase_in_meta: 'الكلمة المفتاحية في الوصف التعريفي',
+    keyphrase_in_headings: 'الكلمة المفتاحية في العناوين الفرعية',
+    keyphrase_density: 'كثافة الكلمة المفتاحية مناسبة',
+    word_count: 'طول المحتوى كافٍ',
+    internal_links: 'وجود روابط داخلية',
+    external_links: 'وجود روابط خارجية',
+    images_alt: 'صور مع نص بديل',
+    transition_words: 'استخدام كلمات انتقالية',
+    sentence_length: 'الجمل ليست طويلة جدًا',
+    paragraph_length: 'الفقرات ليست طويلة جدًا',
+    passive_voice: 'المبني للمجهول محدود',
+    consecutive_starts: 'تنويع بدايات الجمل',
+    competing_links: 'تجنّب روابط منافسة للكلمة المفتاحية',
+    previously_used_keyphrase: 'عدم تكرار الكلمة المفتاحية في مقالات سابقة',
+};
+
+function yoastCheckClass(status: string): string {
+    if (status === 'ok') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100';
+    if (status === 'warn') return 'border-amber-500/30 bg-amber-500/10 text-amber-100';
+    return 'border-slate-500/30 bg-white/5 text-slate-200';
+}
+
 const STORY_TEMPLATE_SECTIONS = [
     { title: 'المقدمة', hint: 'ملخص سريع يجيب عن ماذا/من/أين/متى.' },
     { title: 'الخلفية', hint: 'سياق مختصر يشرح لماذا يهم الخبر.' },
@@ -2395,6 +2421,18 @@ function WorkspaceDraftsPageContent() {
                             <p>- طول Meta: {seoPack?.yoast?.meta_length ?? 0} (المطلوب 140-155)</p>
                             <p>- طول SEO Title: {seoPack?.yoast?.title_length ?? 0} (الموصى به 40-60)</p>
                         </div>
+                        {!!seoPack?.yoast?.checks?.length && (
+                            <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+                                {seoPack.yoast.checks.map((item: any, idx: number) => (
+                                    <div
+                                        key={`${item.code}-${idx}`}
+                                        className={cn('rounded-lg border px-2 py-1 text-[11px]', yoastCheckClass(item.status))}
+                                    >
+                                        {YOAST_CHECK_LABELS[item.code] || item.code}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 ) : <Empty text="اضغط زر «SEO» لاستخراج المقترحات." />}
                 <div className="mt-3 rounded-xl border border-teal-500/30 bg-teal-500/10 p-2 space-y-2 text-xs text-teal-100">
