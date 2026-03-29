@@ -491,8 +491,13 @@ export default function TodayPage() {
     const showJournalistOverlay = tutorialActive && tutorialRole === 'journalist' && tutorialStep === 'today_open';
     const showChiefOverlay = tutorialActive && tutorialRole === 'editor_chief' && tutorialStep === 'chief_today';
 
-    const handleTutorialStart = (selectedRole: 'journalist' | 'editor_chief') => {
-        updateTutorial({ role: selectedRole, step: selectedRole === 'editor_chief' ? 'chief_today' : 'today_open', done: false });
+    const handleTutorialStart = (selectedRole: 'journalist' | 'editor_chief', pace: 'full' | 'quick') => {
+        updateTutorial({
+            role: selectedRole,
+            pace,
+            step: selectedRole === 'editor_chief' ? 'chief_today' : 'today_open',
+            done: false,
+        });
     };
 
     const handleTutorialSkip = () => {
@@ -542,12 +547,14 @@ export default function TodayPage() {
         breakingQuery.isLoading ||
         notificationsQuery.isLoading;
 
+    const isQuickTour = tutorialState.pace === 'quick';
+
     return (
         <div className="space-y-6" dir="rtl">
             <TutorialWelcomeModal open={showWelcome} onSelectRole={handleTutorialStart} onSkip={handleTutorialSkip} />
             <TutorialOverlay
                 open={showJournalistOverlay}
-                stepLabel="الخطوة 1 / 5"
+                stepLabel={`الخطوة 1 / ${isQuickTour ? 4 : 5}`}
                 title="ابدأ من Today"
                 description="هنا تجد موادك اليومية. افتح أول مادة لننتقل مباشرة للمحرر ونكمل الجولة خلال دقيقتين."
                 targetSelector={journalistFirst ? '[data-tutorial=\"today-first-card\"]' : undefined}

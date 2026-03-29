@@ -4,6 +4,7 @@ const STORAGE_KEY = 'ech_tutorial_state_v2';
 const VERSION = 'v2';
 
 export type TutorialRole = 'journalist' | 'editor_chief';
+export type TutorialPace = 'full' | 'quick';
 export type TutorialStep =
     | 'welcome'
     | 'today_open'
@@ -21,6 +22,7 @@ export type TutorialState = {
     role?: TutorialRole;
     step?: TutorialStep;
     done?: boolean;
+    pace?: TutorialPace;
 };
 
 function readState(): TutorialState {
@@ -34,7 +36,7 @@ function readState(): TutorialState {
         if (!parsed || parsed.version !== VERSION) {
             return { version: VERSION, done: false };
         }
-        return parsed;
+        return { pace: 'full', ...parsed };
     } catch {
         return { version: VERSION, done: false };
     }

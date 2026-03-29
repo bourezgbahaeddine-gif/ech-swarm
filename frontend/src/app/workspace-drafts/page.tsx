@@ -1930,6 +1930,10 @@ function WorkspaceDraftsPageContent() {
         onError: (e: any) => setErr(e?.response?.data?.detail || e?.message || 'تعذر إرسال الطلب بتحفظات'),
     });
     const handleTutorialEditNext = () => {
+        if (tutorialState.pace === 'quick') {
+            updateTutorial({ step: 'editor_submit' });
+            return;
+        }
         updateTutorial({ step: 'editor_tools' });
     };
     const handleTutorialToolsNext = () => {
@@ -2064,8 +2068,10 @@ function WorkspaceDraftsPageContent() {
     const showTechnicalDiagnostics = !isWriterRole || decisionDetailOpen;
     const showInlineResults = toolsExpanded;
     const tutorialStep = tutorialState.step;
+    const isQuickTour = tutorialState.pace === 'quick';
+    const totalTourSteps = isQuickTour ? 4 : 5;
     const showEditorEditOverlay = tutorialActive && tutorialState.role === 'journalist' && tutorialStep === 'editor_edit';
-    const showEditorToolsOverlay = tutorialActive && tutorialState.role === 'journalist' && tutorialStep === 'editor_tools';
+    const showEditorToolsOverlay = tutorialActive && tutorialState.role === 'journalist' && tutorialStep === 'editor_tools' && !isQuickTour;
     const showEditorSubmitOverlay = tutorialActive && tutorialState.role === 'journalist' && tutorialStep === 'editor_submit';
     const openReportTab = (tab: RightTab) => {
         setToolsExpanded(true);
@@ -3098,7 +3104,7 @@ function WorkspaceDraftsPageContent() {
         <div className="space-y-4">
             <TutorialOverlay
                 open={showEditorEditOverlay}
-                stepLabel="الخطوة 3 / 5"
+                stepLabel={`الخطوة 3 / ${totalTourSteps}`}
                 title="هذا هو مكان العمل الأساسي"
                 description="عدّل العنوان أو الافتتاحية سريعًا لنؤكد أن المادة أصبحت جاهزة للعمل."
                 targetSelector='[data-tutorial="editor-title"]'
@@ -3108,7 +3114,7 @@ function WorkspaceDraftsPageContent() {
             />
             <TutorialOverlay
                 open={showEditorToolsOverlay}
-                stepLabel="الخطوة 4 / 5"
+                stepLabel={`الخطوة 4 / ${totalTourSteps}`}
                 title="جرّب الأدوات السريعة"
                 description="استخدم التحقق، التدقيق، SEO أو السوشيال عند الحاجة. يمكنك متابعة الجولة بدون تشغيل الأدوات."
                 targetSelector='[data-tutorial="editor-tools"]'
@@ -3118,7 +3124,7 @@ function WorkspaceDraftsPageContent() {
             />
             <TutorialOverlay
                 open={showEditorSubmitOverlay}
-                stepLabel="الخطوة 5 / 5"
+                stepLabel={`الخطوة ${isQuickTour ? 4 : 5} / ${totalTourSteps}`}
                 title="أرسل المادة للاعتماد"
                 description="عندما تنتهي من التعديل، أرسل المادة مباشرة للاعتماد."
                 targetSelector='[data-tutorial="editor-submit"]'

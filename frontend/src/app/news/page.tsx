@@ -47,6 +47,7 @@ function NewsPageContent() {
     const { state: tutorialState, update: updateTutorial, complete: completeTutorial, active: tutorialActive } = useTutorialState();
     const tutorialRole = tutorialState.role;
     const tutorialStep = tutorialState.step;
+    const isQuickTour = tutorialState.pace === 'quick';
     const showNewsOverlay = tutorialActive && tutorialRole === 'journalist' && tutorialStep === 'news_open';
     const { user } = useAuth();
     const initialStatus = searchParams.get('status') || '';
@@ -397,7 +398,7 @@ function NewsPageContent() {
         <div className="space-y-6">
             <TutorialOverlay
                 open={showNewsOverlay}
-                stepLabel="الخطوة 2 / 5"
+                stepLabel={`الخطوة 2 / ${isQuickTour ? 4 : 5}`}
                 title="افتح المادة الأولى"
                 description="هذه مادة جاهزة للعمل. افتح المحرر لنبدأ التعديل السريع."
                 targetSelector='[data-tutorial="news-first-edit"]'
