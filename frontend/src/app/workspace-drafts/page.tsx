@@ -451,6 +451,62 @@ function normalizeForMatch(value: string): string {
         .toLowerCase();
 }
 
+function containsPhrase(text: string, phrase: string): boolean {
+    if (!text || !phrase) return false;
+    return text.toLowerCase().includes(phrase.toLowerCase());
+}
+
+function applySeoAutofixHtml(html: string, focusKeyphrase: string): { html: string; changed: boolean; notes: string[] } {
+    const cleanPhrase = (focusKeyphrase || '').trim();
+    if (!html || !cleanPhrase || typeof window === 'undefined') {
+        return { html, changed: false, notes: [] };
+    }
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    let changed = false;
+    const notes: string[] = [];
+
+    const firstParagraph = doc.querySelector('p');
+    if (firstParagraph && !containsPhrase(firstParagraph.textContent || '', cleanPhrase)) {
+        firstParagraph.textContent = `${cleanPhrase} - ${firstParagraph.textContent || ''}`.trim();
+        changed = true;
+        notes.push('intro');
+    }
+
+    const headingList = Array.from(doc.querySelectorAll('h2, h3'));
+    const headingHasPhrase = headingList.some((h) => containsPhrase(h.textContent || '', cleanPhrase));
+    if (!headingHasPhrase) {
+        if (headingList.length) {
+            const target = headingList[0];
+            target.textContent = `${target.textContent || ''} | ${cleanPhrase}`.trim();
+            changed = true;
+            notes.push('heading');
+        } else if (firstParagraph) {
+            const newHeading = doc.createElement('h2');
+            newHeading.textContent = cleanPhrase;
+            firstParagraph.insertAdjacentElement('afterend', newHeading);
+            changed = true;
+            notes.push('heading');
+        }
+    }
+
+    const images = Array.from(doc.querySelectorAll('img'));
+    let addedAlt = 0;
+    for (const img of images) {
+        const alt = (img.getAttribute('alt') || '').trim();
+        if (!alt) {
+            img.setAttribute('alt', `\u0635\u0648\u0631\u0629 \u0639\u0646 ${cleanPhrase}`.trim());
+            addedAlt += 1;
+        }
+    }
+    if (addedAlt > 0) {
+        changed = true;
+        notes.push('alt');
+    }
+
+    return { html: doc.body.innerHTML, changed, notes };
+}
+
 function storyItemTimestamp(item: StoryContextItem): number {
     const value = item?.published_at || item?.created_at;
     if (!value) return 0;
@@ -813,6 +869,15 @@ function WorkspaceDraftsPageContent() {
             });
         }
         return payload;
+    };
+
+    const applyDraftUpdate = (draft?: any) => {
+        if (!draft || !editor) return;
+        setTitle(cleanText(draft.title || ''));
+        setBodyHtml(draft.body || '');
+        editor.commands.setContent(draft.body || '<p></p>', { emitUpdate: false });
+        setBaseVersion(draft.version);
+        setSaveState('saved');
     };
 
     const { data: listData, isLoading: listLoading } = useQuery({
@@ -1201,19 +1266,76 @@ function WorkspaceDraftsPageContent() {
         },
         onSuccess: (r) => {
             const d = r.data?.draft;
-            if (d && editor) {
-                setTitle(cleanText(d.title || ''));
-                setBodyHtml(d.body || '');
-                editor.commands.setContent(d.body || '<p></p>', { emitUpdate: false });
-                setBaseVersion(d.version);
-                setSaveState('saved');
-            }
+            applyDraftUpdate(d);
             setOk(`تم إدراج ${r.data?.applied_links || 0} رابط في المسودة.`);
             queryClient.invalidateQueries({ queryKey: ['smart-editor-context', workId] });
             queryClient.invalidateQueries({ queryKey: ['smart-editor-versions', workId] });
             queryClient.invalidateQueries({ queryKey: ['smart-editor-links-history', workId] });
         },
         onError: (e: any) => setErr(e?.response?.data?.detail || e?.message || 'تعذر تطبيق الروابط'),
+    });
+
+    const autoSeoFix = useMutation({
+        mutationFn: async () => {
+            if (!workId) throw new Error('تعذر تحديد المسودة.');
+            let localSeo = seoPack;
+            if (!localSeo) {
+                localSeo = await runEditorialActionWithPolling(() => editorialApi.aiSeoSuggestion(workId!), 'تحسين SEO');
+                setSeoPack(localSeo);
+            }
+            const focusKeyphrase = cleanText(localSeo?.focus_keyphrase || '').trim();
+            if (!focusKeyphrase) {
+                throw new Error('لا توجد كلمة مفتاحية رئيسية لتطبيق التحسينات.');
+            }
+
+            let currentVersion = baseVersion;
+            let currentHtml = bodyHtml;
+            let currentTitle = title;
+            let appliedLinks = 0;
+
+            const linkData = await runEditorialActionWithPolling(
+                () => editorialApi.aiLinkSuggestions(workId!, { mode: 'mixed', target_count: 6 }),
+                'اقتراح الروابط',
+            );
+            if (linkData?.run_id && Array.isArray(linkData?.items) && linkData.items.length) {
+                const selectedIds = linkData.items.map((x: any) => Number(x.id)).filter((id: number) => Number.isFinite(id));
+                const applyRes = await editorialApi.applyLinkSuggestions(workId!, {
+                    run_id: linkData.run_id,
+                    based_on_version: currentVersion,
+                    item_ids: selectedIds,
+                });
+                const draft = applyRes.data?.draft;
+                if (draft) {
+                    applyDraftUpdate(draft);
+                    currentVersion = draft.version;
+                    currentHtml = draft.body || currentHtml;
+                    currentTitle = draft.title || currentTitle;
+                    appliedLinks = applyRes.data?.applied_links || 0;
+                }
+            }
+
+            const fix = applySeoAutofixHtml(currentHtml, focusKeyphrase);
+            if (fix.changed) {
+                const res = await editorialApi.applyAiSuggestion(workId!, {
+                    title: currentTitle,
+                    body: fix.html,
+                    based_on_version: currentVersion,
+                    suggestion_tool: 'seo_autofix',
+                });
+                applyDraftUpdate(res.data?.draft);
+            }
+            return { appliedLinks, updated: fix.changed };
+        },
+        onSuccess: (data) => {
+            const parts = [];
+            if (data.appliedLinks) parts.push(`روابط: ${data.appliedLinks}`);
+            if (data.updated) parts.push('تم تضمين الكلمة المفتاحية والعناوين/الصور');
+            setOk(parts.length ? `تم تحسين SEO تلقائياً (${parts.join(' | ')})` : 'تم تحسين SEO تلقائياً.');
+            if (!runReadiness.isPending) {
+                runReadiness.mutate();
+            }
+        },
+        onError: (e: any) => setErr(e?.response?.data?.detail || e?.message || 'تعذر تطبيق تحسينات SEO تلقائياً.'),
     });
     const runSocial = useMutation({
         mutationFn: () => runEditorialActionWithPolling(() => editorialApi.aiSocialVariants(workId!), 'نسخ السوشيال'),
@@ -2433,6 +2555,18 @@ function WorkspaceDraftsPageContent() {
                                 ))}
                             </div>
                         )}
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <button
+                                onClick={() => autoSeoFix.mutate()}
+                                disabled={autoSeoFix.isPending}
+                                className="px-3 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-100 text-xs disabled:opacity-60"
+                            >
+                                {autoSeoFix.isPending ? 'جاري تحسين SEO تلقائياً...' : 'تحسين SEO تلقائياً'}
+                            </button>
+                            <span className="text-[11px] text-slate-400">
+                                يطبّق الكلمة المفتاحية في المقدمة والعناوين + يضيف Alt للصور + يولّد روابط داخلية/خارجية.
+                            </span>
+                        </div>
                     </div>
                 ) : <Empty text="اضغط زر «SEO» لاستخراج المقترحات." />}
                 <div className="mt-3 rounded-xl border border-teal-500/30 bg-teal-500/10 p-2 space-y-2 text-xs text-teal-100">
