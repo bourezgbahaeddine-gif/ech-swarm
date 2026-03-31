@@ -479,6 +479,7 @@ export default function DigitalPage() {
     const [channel, setChannel] = useState<'all' | DigitalChannel>('news');
     const [status, setStatus] = useState<'all' | DigitalTaskStatus>('all');
     const [taskTypeFilter, setTaskTypeFilter] = useState<string>('all');
+    const [taskTypeDraft, setTaskTypeDraft] = useState<string>('');
     const [onlyMine, setOnlyMine] = useState(false);
     const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
     const [selectedTaskIds, setSelectedTaskIds] = useState<number[]>([]);
@@ -612,6 +613,26 @@ export default function DigitalPage() {
         uniq.sort((a, b) => a.localeCompare(b));
         return uniq;
     }, [tasks]);
+    const quickTaskTemplates = useMemo(() => {
+        if (desk === 'news') {
+            return [
+                { key: 'breaking', label: 'عاجل', title: 'عاجل: ...', task_type: 'breaking' },
+                { key: 'last_minute', label: 'آخر خبر', title: 'آخر خبر: ...', task_type: 'last_minute' },
+                { key: 'news_card', label: 'بطاقة خبر', title: 'بطاقة خبر: ...', task_type: 'news_card' },
+                { key: 'photo_post', label: 'صورة خبرية', title: 'صورة خبرية: ...', task_type: 'photo_post' },
+                { key: 'album', label: 'ألبوم', title: 'ألبوم صور: ...', task_type: 'album' },
+                { key: 'follow_up', label: 'متابعة', title: 'متابعة: ...', task_type: 'follow_up' },
+            ];
+        }
+        return [
+            { key: 'promo', label: 'برومو', title: 'برومو حلقة: ...', task_type: 'promo' },
+            { key: 'clip', label: 'Clip', title: 'Clip: ...', task_type: 'clip' },
+            { key: 'quote', label: 'Quote card', title: 'Quote: ...', task_type: 'quote' },
+            { key: 'guest', label: 'بوستر ضيف', title: 'بوستر ضيف: ...', task_type: 'guest_poster' },
+            { key: 'highlight', label: 'Highlight', title: 'Highlight: ...', task_type: 'highlight' },
+            { key: 'repost', label: 'إعادة تدوير', title: 'إعادة تدوير أفضل لحظة', task_type: 'repost' },
+        ];
+    }, [desk]);
     const filteredTasks = useMemo(() => {
         return tasks.filter((task) => {
             if (taskTypeFilter !== 'all' && task.task_type !== taskTypeFilter) return false;
@@ -936,24 +957,44 @@ export default function DigitalPage() {
     });
 
     const createTaskMutation = useMutation({
-        mutationFn: () =>
+        mutationFn: (overrides?: Partial<{
+            channel: DigitalChannel;
+            title: string;
+            brief: string | null;
+            task_type: string;
+            platform: string;
+            due_at: string | null;
+        }>) =>
             digitalApi.createTask({
-                channel: taskChannel,
-                title: taskTitle.trim(),
-                brief: taskBrief.trim() || null,
-                due_at: taskDueAt ? new Date(taskDueAt).toISOString() : null,
+                channel: overrides?.channel ?? taskChannel,
+                title: (overrides?.title ?? taskTitle).trim() || (desk === 'news' ? 'تغطية خبرية' : 'تغطية برامجية'),
+                brief: overrides?.brief ?? (taskBrief.trim() || null),
+                task_type: overrides?.task_type ?? (taskTypeDraft || undefined),
+                platform: overrides?.platform,
+                due_at: overrides?.due_at ?? (taskDueAt ? new Date(taskDueAt).toISOString() : null),
             }),
         onSuccess: async (res) => {
             setSelectedTaskId(res.data.id);
             setTaskTitle('');
             setTaskBrief('');
             setTaskDueAt('');
+            setTaskTypeDraft('');
             setError(null);
             setMessage('تم إنشاء المهمة.');
             await refreshAll();
         },
         onError: (err) => setError(apiErrorMessage(err, 'تعذر إنشاء المهمة.')),
     });
+
+    const handleQuickCreate = (template: { title: string; task_type: string }) => {
+        createTaskMutation.mutate({
+            channel: desk,
+            title: template.title,
+            task_type: template.task_type,
+            brief: null,
+        });
+        setDeskMode('execute');
+    };
 
     const updateTaskMutation = useMutation({
         mutationFn: ({ taskId, nextStatus }: { taskId: number; nextStatus: DigitalTaskStatus }) =>
@@ -1487,6 +1528,12 @@ export default function DigitalPage() {
                         <section className="rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
                             <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2"><PlusCircle className="w-4 h-4 text-cyan-300" />إضافة مهمة</h2>
                             <input value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} placeholder="عنوان المهمة" className="h-10 w-full rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white" />
+                            <select value={taskTypeDraft} onChange={(e) => setTaskTypeDraft(e.target.value)} className="h-10 w-full rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white">
+                                <option value="">نوع المهمة (اختياري)</option>
+                                {taskTypeOptions.map((type) => (
+                                    <option key={type} value={type}>{type}</option>
+                                ))}
+                            </select>
                             <textarea value={taskBrief} onChange={(e) => setTaskBrief(e.target.value)} placeholder="وصف مختصر" rows={3} className="w-full rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-white" />
                             <div className="grid grid-cols-2 gap-2">
                                 <select value={taskChannel} onChange={(e) => setTaskChannel(e.target.value as DigitalChannel)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white"><option value="news">الشروق نيوز</option><option value="tv">الشروق تي في</option></select>
@@ -1575,6 +1622,20 @@ export default function DigitalPage() {
                         {desk === 'news' ? 'طابور الأخبار الرقمية' : 'طابور البرامج الرقمية'}
                     </h2>
                 <div className="text-xs text-slate-400">{desk === 'news' ? 'الآن / التالي / المتعثرة' : 'المقاطع / الحلقات القادمة / الجاهز للنشر'}</div>
+                </div>
+                <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3">
+                    <div className="text-xs text-slate-300 mb-2">نماذج سريعة ({desk === 'news' ? 'أخبار' : 'برامج'})</div>
+                    <div className="flex flex-wrap gap-2">
+                        {quickTaskTemplates.map((template) => (
+                            <button
+                                key={template.key}
+                                onClick={() => handleQuickCreate(template)}
+                                className="h-8 px-3 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-xs"
+                            >
+                                {template.label}
+                            </button>
+                        ))}
+                    </div>
                 </div>
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
                     {queueColumns.map((group) => (
