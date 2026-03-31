@@ -91,6 +91,43 @@ function channelLabel(channel: string): string {
     return channel;
 }
 
+function resolveCoverageSource(task: DigitalTask | null, action: DigitalTaskActionItem | null): { type: string; id?: number } {
+    if (action?.source_type) {
+        return { type: action.source_type, id: undefined };
+    }
+    if (!task) return { type: 'manual', id: undefined };
+    if (task.article_id) return { type: 'article', id: task.article_id };
+    if (task.event_id) return { type: 'event', id: task.event_id };
+    if (task.story_id) return { type: 'story', id: task.story_id };
+    if (task.program_slot_id) return { type: 'program', id: task.program_slot_id };
+    if (task.task_type === 'breaking') return { type: 'breaking', id: task.article_id || undefined };
+    return { type: 'manual', id: undefined };
+}
+
+function resolveReadiness(task: DigitalTask | null, action: DigitalTaskActionItem | null): string {
+    if (!task) return 'غير معروف';
+    if (action?.risk_flags?.includes('بدون مسؤول') || !task.owner_user_id) return 'ناقص مسؤول';
+    if (action?.risk_flags?.includes('يوجد منشور فاشل')) return 'بحاجة استرجاع';
+    if (!task.title) return 'ناقص عنوان';
+    return 'جاهز';
+}
+
+function buildCoverageMeta(task: DigitalTask | null, action: DigitalTaskActionItem | null): Array<{ label: string; value: string }> {
+    if (!task) return [];
+    const source = resolveCoverageSource(task, action);
+    const readiness = resolveReadiness(task, action);
+    const windowLabel = action?.trigger_window || (task.due_at ? formatRelativeTime(task.due_at) : '—');
+    return [
+        { label: 'المصدر', value: source.type },
+        { label: 'معرف المصدر', value: source.id ? String(source.id) : '—' },
+        { label: 'المسؤول', value: task.owner_username || 'غير محدد' },
+        { label: 'الأولوية', value: String(task.priority || 3) },
+        { label: 'الجاهزية', value: readiness },
+        { label: 'النافذة', value: windowLabel },
+        { label: 'الإجراء التالي', value: action?.next_best_action || '—' },
+    ];
+}
+
 function taskStatusLabel(status: string): string {
     const labels: Record<string, string> = {
         todo: 'جديد',
@@ -1170,9 +1207,9 @@ export default function DigitalPage() {
                 <div>
                     <h1 className="text-2xl font-bold text-white flex items-center gap-2">
                         <Megaphone className="w-6 h-6 text-cyan-300" />
-                        لوحة فريق الديجيتال
+                        Digital Coverage Desk
                     </h1>
-                    <p className="text-sm text-gray-400 mt-1">مهام النشر الاجتماعي لقناتي الشروق نيوز والشروق تي في.</p>
+                    <p className="text-sm text-gray-400 mt-1">طبقة تشغيل رقمية تُحوّل الخبر أو الحدث إلى مهام متعددة القنوات قابلة للتخطيط والتركيب والتنفيذ والمتابعة.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                     <button onClick={() => refreshAll()} className="h-10 px-3 rounded-xl border border-slate-500/30 bg-slate-500/10 text-slate-200 text-xs inline-flex items-center gap-1"><RefreshCcw className="w-4 h-4" />تحديث</button>
@@ -1307,7 +1344,7 @@ export default function DigitalPage() {
                                 : 'border-slate-700 bg-slate-900/60 text-slate-300'
                         )}
                     >
-                        تنفيذ Now
+                        Execute
                     </button>
                     <button
                         onClick={() => setDeskMode('compose')}
@@ -1328,9 +1365,7 @@ export default function DigitalPage() {
                                 ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
                                 : 'border-slate-700 bg-slate-900/60 text-slate-300'
                         )}
-                    >
-                        Planning
-                    </button>
+                    >Planning</button>
                 </div>
             </div>
 
@@ -1339,7 +1374,7 @@ export default function DigitalPage() {
                 <div className="flex items-center justify-between gap-2">
                     <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
                         <ArrowRightCircle className="w-4 h-4 text-cyan-300" />
-                        نفّذ الآن
+                        طابور التغطية الرقمية
                     </h2>
                     <div className="text-xs text-slate-400">Now / Next / At Risk</div>
                 </div>
@@ -1382,6 +1417,21 @@ export default function DigitalPage() {
                                             <span className={cn('inline-flex px-2 py-0.5 rounded-lg border text-[10px]', actionCodeClass(item.next_best_action_code))}>
                                                 {actionCodeLabel(item.next_best_action_code)}
                                             </span>
+                                        </div>
+                                        <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-slate-300">
+                                            <span className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-0.5">
+                                                المصدر: {item.source_type || 'task'}
+                                            </span>
+                                            {item.source_ref && (
+                                                <span className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-0.5">
+                                                    المرجع: {item.source_ref}
+                                                </span>
+                                            )}
+                                            {item.task.owner_username && (
+                                                <span className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-0.5">
+                                                    المسؤول: {item.task.owner_username}
+                                                </span>
+                                            )}
                                         </div>
                                         <div className="text-[11px] text-slate-400 mt-1">{item.why_now}</div>
                                         {!!item.risk_flags?.length && (
@@ -1490,8 +1540,8 @@ export default function DigitalPage() {
                         <section className="rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
                             <div className="flex items-center justify-between gap-2">
                                 <div>
-                                    <h2 className="text-sm font-semibold text-slate-200">Quick Compose</h2>
-                                    <p className="text-xs text-slate-400 mt-1">مساحة خفيفة للتنفيذ السريع قبل الدخول إلى Workspace الكامل.</p>
+                                    <h2 className="text-sm font-semibold text-slate-200">Coverage Workspace — Execute</h2>
+                                    <p className="text-xs text-slate-400 mt-1">نافذة تنفيذ سريعة قبل الدخول إلى Workspace الكامل.</p>
                                 </div>
                                 {selectedTask && <button onClick={() => setDeskMode('compose')} className="h-8 px-2 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-200 text-xs">فتح Compose</button>}
                             </div>
@@ -1502,9 +1552,19 @@ export default function DigitalPage() {
                                         <div className="text-sm text-white font-medium">{selectedTask.title}</div>
                                         <div className="text-xs text-slate-400 mt-1">{selectedTask.brief || 'بدون brief تحريري.'}</div>
                                     </div>
+                                    <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                                        <div className="text-xs text-slate-300 mb-2">Coverage Object</div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                                            {buildCoverageMeta(selectedTask, selectedTaskAction).map((item) => (
+                                                <div key={item.label} className="rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-1 text-slate-300">
+                                                    {item.label}: {item.value}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
                                     {selectedTaskAction && (
                                         <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-3 space-y-2">
-                                            <div className="text-xs text-slate-300">Why now?</div>
+                                            <div className="text-xs text-slate-300">Trigger Layer</div>
                                             <div className="text-sm text-white">{selectedTaskAction.why_now}</div>
                                             <div className="grid grid-cols-2 gap-2 text-xs">
                                                 <div className="rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-1 text-slate-300">المصدر: {selectedTaskAction.source_type || 'task'}</div>
@@ -1675,11 +1735,21 @@ export default function DigitalPage() {
 
             {deskMode === 'compose' && (
             <section className="rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
-                <h2 className="text-sm font-semibold text-slate-200">مواد السوشيال للمهمة المحددة</h2>
+                <h2 className="text-sm font-semibold text-slate-200">Coverage Workspace — Compose</h2>
                 {!selectedTask && <div className="text-sm text-slate-400">اختر مهمة من الجدول.</div>}
                 {selectedTask && (
                     <div className="space-y-3">
                         <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-3 text-sm text-slate-200">{selectedTask.title}</div>
+                        <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                            <div className="text-xs text-slate-300 mb-2">Coverage Object</div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                                {buildCoverageMeta(selectedTask, actionDeskItems.get(selectedTask.id) || null).map((item) => (
+                                    <div key={item.label} className="rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-1 text-slate-300">
+                                        {item.label}: {item.value}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
                         {composeSuggestion && (
                             <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-3 space-y-3">
                                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1717,7 +1787,7 @@ export default function DigitalPage() {
                         )}
                         {actionDeskItems.get(selectedTask.id) && (
                             <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-3 space-y-2">
-                                <div className="text-xs text-slate-300">سبب الإنشاء / Why now</div>
+                                <div className="text-xs text-slate-300">Trigger Layer</div>
                                 <div className="text-sm text-white">{actionDeskItems.get(selectedTask.id)?.why_now}</div>
                                 <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-xs">
                                     <div className="rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-1 text-slate-300">المصدر: {actionDeskItems.get(selectedTask.id)?.source_type || 'task'}</div>
@@ -1728,7 +1798,7 @@ export default function DigitalPage() {
                             </div>
                         )}
                         <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-3 space-y-2">
-                            <div className="text-xs text-slate-300">Digital Story Pack</div>
+                            <div className="text-xs text-slate-300">Digital Pack Model</div>
                             <div className="flex flex-wrap gap-2 items-center">
                                 <select
                                     value={bundlePlaybookKey}
@@ -1768,8 +1838,8 @@ export default function DigitalPage() {
                             <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-3 space-y-3">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                     <div>
-                                        <div className="text-xs text-cyan-300">حزمة التغطية الرقمية</div>
-                                        <div className="text-sm text-slate-200">نتائج مختصرة جاهزة للنشر السريع</div>
+                                        <div className="text-xs text-cyan-300">Pack Variants</div>
+                                        <div className="text-sm text-slate-200">نسخ متعددة جاهزة للتنفيذ والمراجعة</div>
                                     </div>
                                     <button
                                         onClick={() =>
@@ -2036,3 +2106,6 @@ export default function DigitalPage() {
         </div>
     );
 }
+
+
+
