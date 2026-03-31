@@ -10,6 +10,7 @@ import {
     authApi,
     digitalApi,
     type DigitalChannel,
+    type DigitalPlaybookTemplate,
     type DigitalPost,
     type DigitalPostVersion,
     type DigitalPostStatus,
