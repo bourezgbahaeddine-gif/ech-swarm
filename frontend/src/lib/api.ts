@@ -2003,7 +2003,7 @@ export interface DigitalPlaybookTemplate {
     cta_style: string | null;
     include_hashtags: boolean;
     include_media_slot: boolean;
-    desk?: string | null;
+    desk?: 'news' | 'tv' | null;
 }
 
 export interface DigitalBundleGenerateResponse {

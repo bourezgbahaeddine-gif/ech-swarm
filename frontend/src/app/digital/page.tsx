@@ -54,6 +54,37 @@ const COVERAGE_CHECK_LABELS: Record<string, string> = {
     summary_length: 'طول الملخص غير مناسب للجوال.',
     push_length: 'طول إشعار الدفع يحتاج ضبطًا.',
 };
+const SHARED_WORKFLOW_STEPS = [
+    'استلام المادة من المصدر التحريري أو البرنامج.',
+    'فرز أولي حسب الأولوية والسياق.',
+    'تحديد الشكل الأنسب للنشر.',
+    'إنتاج المحتوى (نص/تصميم/فيديو).',
+    'مراجعة سريعة للدقة والملاءمة.',
+    'نشر أو جدولة أو توزيع متعدد القنوات.',
+    'متابعة الأداء وتحديث أو إعادة تدوير.',
+];
+const NEWS_DESK_SCOPE = ['العاجل', 'الأخبار الرسمية', 'المجتمع', 'الرياضة', 'المتابعات السريعة', 'بطاقات آخر خبر'];
+const NEWS_DESK_ROLES = ['محرر أخبار رقمي', 'Digital Producer أخبار', 'مصمم/قوالب', 'منفذ نشر', 'قائد الشيفت'];
+const NEWS_DESK_OUTPUTS = ['Breaking', 'Photo post', 'News card', 'Album', 'Follow-up', 'Recap'];
+const NEWS_DESK_FLOW = [
+    'استلام خبر عاجل/رسمي/ميداني.',
+    'فرز سريع: عاجل؟ متابعة؟ يحتاج تصميم؟',
+    'اختيار قالب النشر المناسب.',
+    'كتابة النص والعنوان وتجهيز الصورة.',
+    'مراجعة مختصرة ثم نشر أو جدولة.',
+    'متابعة وتحديث أو إصدار recap.',
+];
+const PROGRAM_DESK_SCOPE = ['الحلقات', 'الضيوف', 'المقاطع المقتطعة', 'البروموهات', 'الاقتباسات', 'إعادة تدوير المحتوى التلفزيوني'];
+const PROGRAM_DESK_ROLES = ['منتج محتوى برامج', 'مستخرج لحظات/مراقب', 'مونتير قصير', 'مصمم', 'منفذ نشر', 'قائد شيفت رقمي'];
+const PROGRAM_DESK_OUTPUTS = ['Promo', 'Clip', 'Quote card', 'Guest poster', 'Episode highlight', 'Repost best moment'];
+const PROGRAM_DESK_FLOW = [
+    'استلام حلقة/فقرة/ضيف.',
+    'اختيار اللحظات القابلة للنشر.',
+    'قص المقطع وتجهيز الغلاف.',
+    'كتابة caption أو quote.',
+    'مراجعة ثم نشر موزع زمنيًا.',
+    'إعادة تدوير أفضل اللحظات.',
+];
 
 function normalizePlatform(platform: string): string {
     const key = (platform || '').trim().toLowerCase();
@@ -152,8 +183,8 @@ function taskStatusLabel(status: string): string {
 }
 
 function deskLabel(channel: string): string {
-    if (channel === 'news') return 'News Desk';
-    if (channel === 'tv') return 'TV/Program Desk';
+    if (channel === 'news') return 'Desk الأخبار';
+    if (channel === 'tv') return 'Desk البرامج';
     return 'Desk';
 }
 
@@ -621,7 +652,7 @@ export default function DigitalPage() {
                 tone: 'border-cyan-500/20 bg-cyan-500/5',
             },
             {
-                label: 'At Risk / Failed',
+                label: 'متعثرة / فاشلة',
                 value: actionDesk?.at_risk_count || 0,
                 tone: 'border-rose-500/20 bg-rose-500/5',
             },
@@ -633,6 +664,57 @@ export default function DigitalPage() {
         ],
         [actionDesk?.at_risk_count, actionDesk?.now_count, overviewQuery.data?.data?.scheduled_posts_next_24h]
     );
+    const queueColumns = useMemo(() => {
+        const isNews = desk === 'news';
+        const labels = isNews
+            ? {
+                  now: 'الآن',
+                  next: 'التالي',
+                  risk: 'معرّضة للخطر',
+                  nowEmpty: 'لا توجد مهام عاجلة الآن.',
+                  nextEmpty: 'لا توجد مهام قادمة الآن.',
+                  riskEmpty: 'لا توجد مهام متعثرة.',
+              }
+            : {
+                  now: 'Clips قيد الإنتاج',
+                  next: 'حلقات قادمة',
+                  risk: 'جاهز للنشر / إعادة التدوير',
+                  nowEmpty: 'لا توجد مقاطع قيد الإنتاج الآن.',
+                  nextEmpty: 'لا توجد حلقات قادمة مجدولة.',
+                  riskEmpty: 'لا توجد مهام جاهزة للنشر أو إعادة التدوير.',
+              };
+        return [
+            {
+                key: 'now',
+                title: `${labels.now} (${actionDesk?.now_count || 0})`,
+                items: actionDesk?.now || [],
+                empty: labels.nowEmpty,
+                tone: 'border-cyan-500/20 bg-cyan-500/5',
+            },
+            {
+                key: 'next',
+                title: `${labels.next} (${actionDesk?.next_count || 0})`,
+                items: actionDesk?.next || [],
+                empty: labels.nextEmpty,
+                tone: 'border-indigo-500/20 bg-indigo-500/5',
+            },
+            {
+                key: 'at_risk',
+                title: `${labels.risk} (${actionDesk?.at_risk_count || 0})`,
+                items: actionDesk?.at_risk || [],
+                empty: labels.riskEmpty,
+                tone: 'border-rose-500/20 bg-rose-500/5',
+            },
+        ];
+    }, [
+        actionDesk?.at_risk,
+        actionDesk?.at_risk_count,
+        actionDesk?.next,
+        actionDesk?.next_count,
+        actionDesk?.now,
+        actionDesk?.now_count,
+        desk,
+    ]);
     const planningKpis = useMemo(
         () => [
             { label: 'إجمالي المهام', value: overviewQuery.data?.data?.total_tasks ?? 0, tone: 'border-cyan-500/20 bg-cyan-500/5' },
@@ -1246,13 +1328,15 @@ export default function DigitalPage() {
                 <div>
                     <h1 className="text-2xl font-bold text-white flex items-center gap-2">
                         <Megaphone className="w-6 h-6 text-cyan-300" />
-                        Digital Coverage Desk
+                        Desk التغطية الرقمية
                     </h1>
                     <div className="mt-1 inline-flex items-center gap-2 text-xs text-slate-300">
                         <span className="rounded-full border border-slate-700 bg-slate-900/60 px-2 py-0.5">{deskLabel(channel)}</span>
-                        <span>Queue • Workspace • Execute</span>
+                        <span>طابور • مساحة العمل • تنفيذ</span>
                     </div>
-                    <p className="text-sm text-gray-400 mt-1">طبقة تشغيل رقمية تُحوّل الخبر أو الحدث إلى مهام متعددة القنوات قابلة للتخطيط والتركيب والتنفيذ والمتابعة.</p>
+                    <p className="text-sm text-gray-400 mt-1">
+                        طبقة تشغيل رقمية تُحوّل المادة إلى مهام قابلة للتخطيط والتركيب والتنفيذ والمتابعة عبر قنوات متعددة، مع سجل قرار واضح.
+                    </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                     <button onClick={() => refreshAll()} className="h-10 px-3 rounded-xl border border-slate-500/30 bg-slate-500/10 text-slate-200 text-xs inline-flex items-center gap-1"><RefreshCcw className="w-4 h-4" />تحديث</button>
@@ -1266,7 +1350,7 @@ export default function DigitalPage() {
             {changesSinceLast && (
                 <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3 text-cyan-100 text-sm flex flex-wrap gap-4">
                     <span>جديد منذ آخر زيارة: {changesSinceLast.new_now} في Now</span>
-                    <span>{changesSinceLast.new_risk} في At Risk</span>
+                <span>{changesSinceLast.new_risk} في المتعثرة</span>
                     <span>{changesSinceLast.moved_to_next} انتقلت إلى Next</span>
                 </div>
             )}
@@ -1280,6 +1364,51 @@ export default function DigitalPage() {
                                 <div className="text-2xl font-bold text-white">{kpi.value}</div>
                             </div>
                         ))}
+                    </div>
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                        <section className="rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
+                            <h2 className="text-sm font-semibold text-slate-200">الهيكل العام للفريق</h2>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 space-y-2">
+                                    <div className="text-sm font-semibold text-emerald-200">Desk الأخبار</div>
+                                    <div className="text-xs text-slate-300">يتعامل مع: {NEWS_DESK_SCOPE.join(' • ')}</div>
+                                    <div className="text-xs text-slate-400">الأدوار: {NEWS_DESK_ROLES.join(' • ')}</div>
+                                    <div className="text-xs text-slate-400">مخرجات أساسية: {NEWS_DESK_OUTPUTS.join(' • ')}</div>
+                                </div>
+                                <div className="rounded-xl border border-purple-500/20 bg-purple-500/5 p-3 space-y-2">
+                                    <div className="text-sm font-semibold text-purple-200">Desk البرامج</div>
+                                    <div className="text-xs text-slate-300">يتعامل مع: {PROGRAM_DESK_SCOPE.join(' • ')}</div>
+                                    <div className="text-xs text-slate-400">الأدوار: {PROGRAM_DESK_ROLES.join(' • ')}</div>
+                                    <div className="text-xs text-slate-400">مخرجات أساسية: {PROGRAM_DESK_OUTPUTS.join(' • ')}</div>
+                                </div>
+                            </div>
+                        </section>
+                        <section className="rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
+                            <h2 className="text-sm font-semibold text-slate-200">Workflow العام المشترك</h2>
+                            <ol className="text-xs text-slate-300 list-decimal pr-5 space-y-1">
+                                {SHARED_WORKFLOW_STEPS.map((step) => (
+                                    <li key={step}>{step}</li>
+                                ))}
+                            </ol>
+                        </section>
+                    </div>
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                        <section className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-3">
+                            <h2 className="text-sm font-semibold text-emerald-200">Workflow Desk الأخبار</h2>
+                            <ol className="text-xs text-slate-200 list-decimal pr-5 space-y-1">
+                                {NEWS_DESK_FLOW.map((step) => (
+                                    <li key={step}>{step}</li>
+                                ))}
+                            </ol>
+                        </section>
+                        <section className="rounded-2xl border border-purple-500/20 bg-purple-500/5 p-4 space-y-3">
+                            <h2 className="text-sm font-semibold text-purple-200">Workflow Desk البرامج</h2>
+                            <ol className="text-xs text-slate-200 list-decimal pr-5 space-y-1">
+                                {PROGRAM_DESK_FLOW.map((step) => (
+                                    <li key={step}>{step}</li>
+                                ))}
+                            </ol>
+                        </section>
                     </div>
                     <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
                         <section className="xl:col-span-2 rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
@@ -1390,7 +1519,7 @@ export default function DigitalPage() {
                                 : 'border-slate-700 bg-slate-900/60 text-slate-300'
                         )}
                     >
-                        News Desk
+                        Desk الأخبار
                     </button>
                     <button
                         onClick={() => setDesk('tv')}
@@ -1401,7 +1530,7 @@ export default function DigitalPage() {
                                 : 'border-slate-700 bg-slate-900/60 text-slate-300'
                         )}
                     >
-                        TV/Program Desk
+                        Desk البرامج
                     </button>
                     <span className="text-[11px] text-slate-500">القناة الحالية: {channelLabel(channel)}</span>
                     <button
@@ -1413,7 +1542,7 @@ export default function DigitalPage() {
                                 : 'border-slate-700 bg-slate-900/60 text-slate-300'
                         )}
                     >
-                        Execute
+                        تنفيذ
                     </button>
                     <button
                         onClick={() => setDeskMode('compose')}
@@ -1434,7 +1563,7 @@ export default function DigitalPage() {
                                 ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
                                 : 'border-slate-700 bg-slate-900/60 text-slate-300'
                         )}
-                    >Planning</button>
+                    >تخطيط</button>
                 </div>
             </div>
 
@@ -1443,34 +1572,12 @@ export default function DigitalPage() {
                 <div className="flex items-center justify-between gap-2">
                     <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
                         <ArrowRightCircle className="w-4 h-4 text-cyan-300" />
-                        طابور التغطية الرقمية
+                        {desk === 'news' ? 'طابور الأخبار الرقمية' : 'طابور البرامج الرقمية'}
                     </h2>
-                    <div className="text-xs text-slate-400">Now / Next / At Risk</div>
+                <div className="text-xs text-slate-400">{desk === 'news' ? 'الآن / التالي / المتعثرة' : 'المقاطع / الحلقات القادمة / الجاهز للنشر'}</div>
                 </div>
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
-                    {[
-                        {
-                            key: 'now',
-                            title: `Now (${actionDesk?.now_count || 0})`,
-                            items: actionDesk?.now || [],
-                            empty: 'لا توجد مهام حرجة الآن.',
-                            tone: 'border-cyan-500/20 bg-cyan-500/5',
-                        },
-                        {
-                            key: 'next',
-                            title: `Next (${actionDesk?.next_count || 0})`,
-                            items: actionDesk?.next || [],
-                            empty: 'لا توجد مهام خلال الساعتين القادمتين.',
-                            tone: 'border-indigo-500/20 bg-indigo-500/5',
-                        },
-                        {
-                            key: 'risk',
-                            title: `At Risk (${actionDesk?.at_risk_count || 0})`,
-                            items: actionDesk?.at_risk || [],
-                            empty: 'لا توجد مهام مهددة حالياً.',
-                            tone: 'border-rose-500/20 bg-rose-500/5',
-                        },
-                    ].map((group) => (
+                    {queueColumns.map((group) => (
                         <div key={group.key} className={cn('rounded-xl border p-3 space-y-2', group.tone)}>
                             <div className="text-sm font-medium text-white">{group.title}</div>
                             <div className="space-y-2 max-h-64 overflow-auto">
@@ -1553,7 +1660,7 @@ export default function DigitalPage() {
                         <section className="rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
                             <div className="flex items-center justify-between gap-2">
                                 <div>
-                                    <h2 className="text-sm font-semibold text-slate-200">Task Queue</h2>
+                                    <h2 className="text-sm font-semibold text-slate-200">طابور التنفيذ</h2>
                                     <p className="text-xs text-slate-400 mt-1">ترتيب ذكي حسب الاستعجال والمخاطر والنافذة الزمنية.</p>
                                 </div>
                                 <div className="text-xs text-slate-500">{executeQueue.length} مهام</div>
@@ -1609,12 +1716,12 @@ export default function DigitalPage() {
                         <section className="rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
                             <div className="flex items-center justify-between gap-2">
                                 <div>
-                                    <h2 className="text-sm font-semibold text-slate-200">Coverage Workspace — Execute</h2>
+                            <h2 className="text-sm font-semibold text-slate-200">مساحة التغطية — تنفيذ</h2>
                                     <p className="text-xs text-slate-400 mt-1">نافذة تنفيذ سريعة قبل الدخول إلى Workspace الكامل.</p>
                                 </div>
                                 {selectedTask && <button onClick={() => setDeskMode('compose')} className="h-8 px-2 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-200 text-xs">فتح Compose</button>}
                             </div>
-                            {!selectedTask && <div className="text-sm text-slate-400">اختر مهمة من Task Queue لبدء التنفيذ السريع.</div>}
+                            {!selectedTask && <div className="text-sm text-slate-400">اختر مهمة من طابور التنفيذ لبدء التنفيذ السريع.</div>}
                             {selectedTask && (
                                 <div className="space-y-3">
                                     <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-3">
@@ -1804,7 +1911,7 @@ export default function DigitalPage() {
 
             {deskMode === 'compose' && (
             <section className="rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
-                <h2 className="text-sm font-semibold text-slate-200">Coverage Workspace — Compose</h2>
+                <h2 className="text-sm font-semibold text-slate-200">مساحة التغطية — Compose</h2>
                 {!selectedTask && <div className="text-sm text-slate-400">اختر مهمة من الجدول.</div>}
                 {selectedTask && (
                     <div className="space-y-3">
