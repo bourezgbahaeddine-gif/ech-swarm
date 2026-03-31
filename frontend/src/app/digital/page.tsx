@@ -34,6 +34,17 @@ const PLATFORM_CHAR_LIMITS: Record<string, number> = {
     tiktok: 2200,
     youtube: 5000,
 };
+const TV_PLAYBOOK_KEYS = new Set([
+    'pre_show_teaser',
+    'live_now',
+    'post_show_recap',
+    'program_promo',
+    'guest_quote',
+    'clip_extract',
+    'episode_highlights',
+    'poster_teaser',
+    'best_moment_repost',
+]);
 const COVERAGE_CHECK_LABELS: Record<string, string> = {
     missing_core: 'جملة الجوهر غير واضحة.',
     missing_source: 'المصدر غير ظاهر في الصياغات.',
@@ -137,6 +148,12 @@ function taskStatusLabel(status: string): string {
         cancelled: 'ملغي',
     };
     return labels[status] || status;
+}
+
+function deskLabel(channel: string): string {
+    if (channel === 'news') return 'News Desk';
+    if (channel === 'tv') return 'TV/Program Desk';
+    return 'Desk';
 }
 
 function postStatusLabel(status: string): string {
@@ -426,7 +443,8 @@ export default function DigitalPage() {
     const [error, setError] = useState<string | null>(null);
 
     const [q, setQ] = useState('');
-    const [channel, setChannel] = useState<'all' | DigitalChannel>('all');
+    const [desk, setDesk] = useState<'news' | 'tv'>('news');
+    const [channel, setChannel] = useState<'all' | DigitalChannel>('news');
     const [status, setStatus] = useState<'all' | DigitalTaskStatus>('all');
     const [taskTypeFilter, setTaskTypeFilter] = useState<string>('all');
     const [onlyMine, setOnlyMine] = useState(false);
@@ -450,6 +468,11 @@ export default function DigitalPage() {
     const [postHashtags, setPostHashtags] = useState('');
     const [postScheduledAt, setPostScheduledAt] = useState('');
     const [coveragePack, setCoveragePack] = useState<DigitalComposeResult['coverage_pack'] | null>(null);
+
+    useEffect(() => {
+        setChannel(desk);
+        setTaskChannel(desk);
+    }, [desk]);
 
     const [scopeUserId, setScopeUserId] = useState('');
     const [scopeNews, setScopeNews] = useState(true);
@@ -522,6 +545,21 @@ export default function DigitalPage() {
         queryFn: () => digitalApi.playbooks(),
         enabled: canRead,
     });
+
+    const deskPlaybooks = useMemo(() => {
+        const list = (playbooksQuery.data?.data || []) as DigitalPlaybookTemplate[];
+        return list.filter((pb) => {
+            if (pb.desk) return pb.desk === desk;
+            return desk === 'tv' ? TV_PLAYBOOK_KEYS.has(pb.key) : !TV_PLAYBOOK_KEYS.has(pb.key);
+        });
+    }, [desk, playbooksQuery.data]);
+
+    useEffect(() => {
+        if (!deskPlaybooks.length) return;
+        if (!deskPlaybooks.find((pb) => pb.key === bundlePlaybookKey)) {
+            setBundlePlaybookKey(deskPlaybooks[0].key);
+        }
+    }, [deskPlaybooks, bundlePlaybookKey]);
 
     const scopePerformanceQuery = useQuery({
         queryKey: ['digital-scope-performance'],
@@ -1209,6 +1247,10 @@ export default function DigitalPage() {
                         <Megaphone className="w-6 h-6 text-cyan-300" />
                         Digital Coverage Desk
                     </h1>
+                    <div className="mt-1 inline-flex items-center gap-2 text-xs text-slate-300">
+                        <span className="rounded-full border border-slate-700 bg-slate-900/60 px-2 py-0.5">{deskLabel(channel)}</span>
+                        <span>Queue • Workspace • Execute</span>
+                    </div>
                     <p className="text-sm text-gray-400 mt-1">طبقة تشغيل رقمية تُحوّل الخبر أو الحدث إلى مهام متعددة القنوات قابلة للتخطيط والتركيب والتنفيذ والمتابعة.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -1242,7 +1284,10 @@ export default function DigitalPage() {
                         <section className="xl:col-span-2 rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-4 space-y-3">
                             <div className="flex flex-wrap gap-2 items-center">
                                 <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="بحث..." className="h-10 w-full md:w-72 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white" />
-                                <select value={channel} onChange={(e) => setChannel(e.target.value as 'all' | DigitalChannel)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white"><option value="all">كل القنوات</option><option value="news">نيوز</option><option value="tv">TV</option></select>
+                                <div className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white flex items-center">
+                                    {deskLabel(channel)}
+                                    <span className="ml-2 text-[10px] text-slate-400">مثبت حسب Desk</span>
+                                </div>
                                 <select value={status} onChange={(e) => setStatus(e.target.value as 'all' | DigitalTaskStatus)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white"><option value="all">كل الحالات</option><option value="todo">جديد</option><option value="in_progress">قيد التنفيذ</option><option value="review">مراجعة</option><option value="done">منجز</option><option value="cancelled">ملغي</option></select>
                                 <select value={taskTypeFilter} onChange={(e) => setTaskTypeFilter(e.target.value)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white">
                                     <option value="all">كل أنواع المهام</option>
@@ -1334,7 +1379,30 @@ export default function DigitalPage() {
             )}
 
             <div className="rounded-2xl border border-slate-700/70 bg-[#0b1323]/90 p-2">
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2 items-center">
+                    <button
+                        onClick={() => setDesk('news')}
+                        className={cn(
+                            'h-9 px-3 rounded-xl border text-xs',
+                            desk === 'news'
+                                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                                : 'border-slate-700 bg-slate-900/60 text-slate-300'
+                        )}
+                    >
+                        News Desk
+                    </button>
+                    <button
+                        onClick={() => setDesk('tv')}
+                        className={cn(
+                            'h-9 px-3 rounded-xl border text-xs',
+                            desk === 'tv'
+                                ? 'border-purple-500/30 bg-purple-500/10 text-purple-200'
+                                : 'border-slate-700 bg-slate-900/60 text-slate-300'
+                        )}
+                    >
+                        TV/Program Desk
+                    </button>
+                    <span className="text-[11px] text-slate-500">القناة الحالية: {channelLabel(channel)}</span>
                     <button
                         onClick={() => setDeskMode('execute')}
                         className={cn(
@@ -1805,11 +1873,11 @@ export default function DigitalPage() {
                                     onChange={(e) => setBundlePlaybookKey(e.target.value)}
                                     className="h-9 min-w-[220px] rounded-lg border border-slate-700 bg-slate-900/60 px-3 text-xs text-white"
                                 >
-                                    {(playbooksQuery.data?.data || []).map((pb) => (
-                                        <option key={pb.key} value={pb.key}>{pb.label}</option>
-                                    ))}
-                                    {!playbooksQuery.data?.data?.length && <option value="breaking_alert">Breaking Alert</option>}
-                                </select>
+                                {(deskPlaybooks || []).map((pb) => (
+                                    <option key={pb.key} value={pb.key}>{pb.label}</option>
+                                ))}
+                                {!deskPlaybooks.length && <option value="breaking_alert">Breaking Alert</option>}
+                            </select>
                                 <button
                                     onClick={() => generateBundleMutation.mutate()}
                                     disabled={!canWrite || generateBundleMutation.isPending}
