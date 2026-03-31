@@ -1539,7 +1539,7 @@ export default function DigitalPage() {
                                 <select value={taskChannel} onChange={(e) => setTaskChannel(e.target.value as DigitalChannel)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white"><option value="news">الشروق نيوز</option><option value="tv">الشروق تي في</option></select>
                                 <input type="datetime-local" value={taskDueAt} onChange={(e) => setTaskDueAt(e.target.value)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white" />
                             </div>
-                            <button onClick={() => createTaskMutation.mutate()} disabled={!canWrite || !taskTitle.trim()} className="h-10 w-full rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-sm disabled:opacity-50">حفظ المهمة</button>
+                            <button onClick={() => createTaskMutation.mutate({})} disabled={!canWrite} className="h-10 w-full rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-sm disabled:opacity-50">حفظ المهمة</button>
                             <div className="pt-3 border-t border-slate-800">
                                 <h3 className="text-sm text-slate-200 mb-2 flex items-center gap-1"><CalendarDays className="w-4 h-4 text-indigo-300" />روزنامة 7 أيام</h3>
                                 <div className="space-y-2 max-h-48 overflow-auto">
