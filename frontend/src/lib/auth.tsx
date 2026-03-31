@@ -34,8 +34,8 @@ type AuthState = {
 };
 
 type AuthAction =
-    | { type: 'hydrate'; payload: { user: AuthUser | null } }
-    | { type: 'login'; payload: { user: AuthUser } }
+    | { type: 'hydrate'; payload: { user: AuthUser | null; token: string | null } }
+    | { type: 'login'; payload: { user: AuthUser; token: string | null } }
     | { type: 'logout' };
 
 const AuthContext = createContext<AuthContextType>({
@@ -47,6 +47,7 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 const PUBLIC_PATHS = ['/login'];
+const AUTH_TOKEN_KEY = 'echorouk_access_token';
 
 function getHomePathByRole(role: string): string {
     const normalized = (role || '').toLowerCase();
@@ -60,13 +61,13 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
     switch (action.type) {
         case 'hydrate':
             return {
-                token: null,
+                token: action.payload.token,
                 user: action.payload.user,
                 isLoading: false,
             };
         case 'login':
             return {
-                token: null,
+                token: action.payload.token,
                 user: action.payload.user,
                 isLoading: false,
             };
@@ -78,6 +79,14 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
             };
         default:
             return state;
+    }
+}
+
+function applyAuthToken(token: string | null) {
+    if (token) {
+        api.defaults.headers.common.Authorization = `Bearer ${token}`;
+    } else {
+        delete api.defaults.headers.common.Authorization;
     }
 }
 
@@ -97,12 +106,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         const hydrate = async () => {
             try {
+                const storedToken = typeof window !== 'undefined' ? localStorage.getItem(AUTH_TOKEN_KEY) : null;
+                if (storedToken) {
+                    applyAuthToken(storedToken);
+                }
                 const response = await api.get<AuthUser>('/auth/me');
                 if (cancelled) return;
-                dispatch({ type: 'hydrate', payload: { user: response.data } });
+                dispatch({ type: 'hydrate', payload: { user: response.data, token: storedToken } });
             } catch {
                 if (cancelled) return;
-                dispatch({ type: 'hydrate', payload: { user: null } });
+                if (typeof window !== 'undefined') {
+                    localStorage.removeItem(AUTH_TOKEN_KEY);
+                }
+                applyAuthToken(null);
+                dispatch({ type: 'hydrate', payload: { user: null, token: null } });
             }
         };
 
@@ -120,7 +137,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, [isLoading, pathname, router, user]);
 
     const login = (newUser: AuthUser, _token: string | null = null) => {
-        dispatch({ type: 'login', payload: { user: newUser } });
+        const resolvedToken = _token || null;
+        if (typeof window !== 'undefined' && resolvedToken) {
+            localStorage.setItem(AUTH_TOKEN_KEY, resolvedToken);
+        }
+        applyAuthToken(resolvedToken);
+        dispatch({ type: 'login', payload: { user: newUser, token: resolvedToken } });
         router.push(getHomePathByRole(newUser.role));
     };
 
@@ -131,6 +153,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // ignore network/logout errors
         }
 
+        if (typeof window !== 'undefined') {
+            localStorage.removeItem(AUTH_TOKEN_KEY);
+        }
+        applyAuthToken(null);
         dispatch({ type: 'logout' });
         router.push('/login');
     };

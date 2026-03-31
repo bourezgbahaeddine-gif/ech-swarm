@@ -25,7 +25,7 @@ export default function LoginPage() {
             const response = await api.post('/auth/login', { username, password });
             const { user } = response.data;
 
-            login(user);
+            login(user, response.data.access_token);
 
         } catch (err: unknown) {
             const detail = axios.isAxiosError(err)
