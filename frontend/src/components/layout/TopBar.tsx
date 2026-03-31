@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -10,7 +10,7 @@ import { dashboardApi, type DashboardNotification, type PublishedMonitorLatestRe
 import { journalistServicesApi } from '@/lib/journalist-services-api';
 
 const roleLabels: Record<string, string> = {
-    director: 'المدير العام',
+    director: 'المدير',
     editor_chief: 'رئيس التحرير',
     journalist: 'صحفي',
     social_media: 'السوشيال ميديا',
@@ -587,4 +587,5 @@ function PublishedMonitorDrawer({
         document.body
     );
 }
+
 

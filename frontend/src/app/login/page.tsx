@@ -23,10 +23,9 @@ export default function LoginPage() {
 
         try {
             const response = await api.post('/auth/login', { username, password });
-            const { access_token, user } = response.data;
+            const { user } = response.data;
 
-            // Use auth context to login
-            login(access_token, user);
+            login(user);
 
         } catch (err: unknown) {
             const detail = axios.isAxiosError(err)
@@ -54,7 +53,7 @@ export default function LoginPage() {
                         <div className="w-16 h-16 mx-auto rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden mb-4">
                             <Image src="/ech-logo.png" alt="Echorouk" width={40} height={40} className="w-10 h-10 object-contain" />
                         </div>
-                        <h1 className="text-2xl font-bold text-white">Echorouk Editorial OS</h1>
+                        <h1 className="text-2xl font-bold text-white">Echorouk Editorial os</h1>
                         <p className="text-sm text-gray-400 mt-1">Intelligent Editorial Workflows</p>
                     </div>
 
@@ -145,7 +144,7 @@ export default function LoginPage() {
                             نظام التشغيل الذكي لسير العمل التحريري — الإصدار 1.1
                         </p>
                         <p className="text-[10px] text-gray-700 mt-1">
-                            Echorouk Editorial OS © 2026 — Bourezg Baha eddine
+                            Echorouk Editorial os © 2026 — Bourezg Baha eddine
                         </p>
                         <p className="text-[10px] text-gray-700 mt-1">
                             الحقوق محفوظة — يمنع النسخ أو الاستخدام دون إذن قانوني
@@ -168,3 +167,4 @@ export default function LoginPage() {
         </div>
     );
 }
+

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -19,7 +19,7 @@ import { useAuth } from '@/lib/auth';
 import { cn, formatRelativeTime } from '@/lib/utils';
 
 const ROLE_OPTIONS: Array<{ value: CreateUserPayload['role']; label: string }> = [
-    { value: 'director', label: 'المدير العام' },
+    { value: 'director', label: 'المدير' },
     { value: 'editor_chief', label: 'رئيس التحرير' },
     { value: 'journalist', label: 'صحفي' },
     { value: 'social_media', label: 'سوشيال ميديا' },
@@ -27,7 +27,7 @@ const ROLE_OPTIONS: Array<{ value: CreateUserPayload['role']; label: string }> =
 ];
 
 const ROLE_CONFIG: Record<string, { label: string; color: string; icon: LucideIcon }> = {
-    director: { label: 'المدير العام', color: 'from-amber-500 to-orange-500', icon: Shield },
+    director: { label: 'المدير', color: 'from-amber-500 to-orange-500', icon: Shield },
     editor_chief: { label: 'رئيس التحرير', color: 'from-purple-500 to-pink-500', icon: UserCheck },
     journalist: { label: 'صحفي', color: 'from-blue-500 to-cyan-500', icon: Newspaper },
     social_media: { label: 'سوشيال ميديا', color: 'from-pink-500 to-rose-500', icon: MessageCircle },
@@ -503,3 +503,4 @@ export default function TeamPage() {
         </div>
     );
 }
+

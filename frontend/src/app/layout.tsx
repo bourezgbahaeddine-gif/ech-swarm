@@ -1,15 +1,15 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "@/lib/providers";
 import { AuthProvider } from "@/lib/auth";
 import AppShell from "@/components/layout/AppShell";
 
 export const metadata: Metadata = {
-  title: "Echorouk Editorial OS | Intelligent Editorial Workflows",
+  title: "Echorouk Editorial os | Intelligent Editorial Workflows",
   description:
-    "Echorouk Editorial OS - The Operating System for Intelligent Editorial Workflows.",
+    "Echorouk Editorial os - The Operating System for Intelligent Editorial Workflows.",
   keywords: ["echorouk", "editorial", "newsroom", "algeria", "workflows", "governance"],
-  authors: [{ name: "Echorouk Editorial OS Team" }],
+  authors: [{ name: "Echorouk Editorial os Team" }],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -25,3 +25,4 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
+

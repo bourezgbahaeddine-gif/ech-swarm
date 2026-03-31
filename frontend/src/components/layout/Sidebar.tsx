@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useMemo, useState, type ComponentType } from 'react';
 import Link from 'next/link';
@@ -367,8 +367,8 @@ export default function Sidebar({
                     </div>
                     {!collapsed && (
                         <div className="overflow-hidden">
-                            <h1 className="text-sm font-bold truncate text-[#F8FAFC]">غرفة الشروق</h1>
-                            <p className="text-[10px] font-medium text-[#CBD5E1]">تجربة عمل مبسطة حسب الدور</p>
+                            <h1 className="text-sm font-bold truncate text-[#F8FAFC]">Echorouk Editorial os</h1>
+                            <p className="text-[10px] font-medium text-[#CBD5E1]">أول قاعة تحرير ذكية</p>
                         </div>
                     )}
                 </div>
@@ -434,3 +434,4 @@ export default function Sidebar({
         </>
     );
 }
+
