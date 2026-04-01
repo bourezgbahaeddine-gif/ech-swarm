@@ -525,9 +525,7 @@ export default function DigitalPage() {
     const [quickTitle, setQuickTitle] = useState('');
     const [quickCaption, setQuickCaption] = useState('');
     const [quickHashtags, setQuickHashtags] = useState('');
-    const [quickMediaUrl, setQuickMediaUrl] = useState('');
     const [quickPlatform, setQuickPlatform] = useState('facebook');
-    const [quickScheduleAt, setQuickScheduleAt] = useState('');
     const [quickTaskType, setQuickTaskType] = useState('');
     const [coveragePack, setCoveragePack] = useState<DigitalComposeResult['coverage_pack'] | null>(null);
 
@@ -1026,50 +1024,31 @@ export default function DigitalPage() {
         setDeskMode('execute');
     };
 
-    const quickPublishMutation = useMutation({
-        mutationFn: async (action: 'draft' | 'publish' | 'schedule') => {
+    const quickGenerateMutation = useMutation({
+        mutationFn: async () => {
             const title = quickTitle.trim() || selectedTask?.title || (desk === 'news' ? 'تغطية خبرية' : 'تغطية برامجية');
             const taskType = quickTaskType || selectedTask?.task_type || (desk === 'news' ? 'breaking' : 'clip');
             const taskRes = await digitalApi.createTask({
                 channel: desk,
                 task_type: taskType,
                 title,
-                brief: null,
+                brief: quickCaption.trim() || selectedTask?.brief || null,
                 due_at: null,
             });
             const taskId = taskRes.data.id;
-            const hashtags = parseHashtags(quickHashtags);
-            const mediaUrls = quickMediaUrl.trim() ? [quickMediaUrl.trim()] : undefined;
-            const status: DigitalPostStatus =
-                action === 'draft' ? 'draft' : action === 'schedule' ? 'approved' : 'approved';
-            const scheduledAt = action === 'schedule' && quickScheduleAt ? new Date(quickScheduleAt).toISOString() : null;
-            const postRes = await digitalApi.createTaskPost(taskId, {
-                platform: quickPlatform,
-                content_text: quickCaption.trim() || selectedTask?.brief || title,
-                hashtags,
-                media_urls: mediaUrls,
-                status,
-                scheduled_at: scheduledAt,
-            });
-            if (action === 'publish') {
-                await digitalApi.dispatchPost(postRes.data.id, { action: 'publish' });
-            }
-            if (action === 'schedule') {
-                await digitalApi.dispatchPost(postRes.data.id, { action: 'schedule' });
-            }
-            return postRes.data;
+            const composed = await digitalApi.composeTask(taskId, { platform: quickPlatform, max_hashtags: 6 });
+            const text = composed.data.recommended_text || title;
+            const hashtags = (composed.data.hashtags || []).join(', ');
+            setQuickCaption(text);
+            if (hashtags) setQuickHashtags(hashtags);
+            return composed.data;
         },
         onSuccess: async () => {
-            setQuickTitle('');
-            setQuickCaption('');
-            setQuickHashtags('');
-            setQuickMediaUrl('');
-            setQuickScheduleAt('');
             setError(null);
-            setMessage('تم إرسال المنشور ضمن مسار التغطية الرقمية.');
+            setMessage('تم توليد صياغة المنصة المختارة.');
             await refreshAll();
         },
-        onError: (err) => setError(apiErrorMessage(err, 'تعذر تنفيذ النشر السريع.')),
+        onError: (err) => setError(apiErrorMessage(err, 'تعذر توليد الصياغة.')),
     });
 
     const applyQuickTemplate = (templateType: string) => {
@@ -1753,8 +1732,8 @@ export default function DigitalPage() {
                 <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-4 space-y-3">
                     <div className="flex items-center justify-between gap-2">
                         <div>
-                            <div className="text-sm font-semibold text-white">مسار سريع للنشر المباشر</div>
-                            <div className="text-xs text-slate-400">ارفع مقطع/فيديو أو خبر بسرعة بدون المرور برئيس التحرير.</div>
+                            <div className="text-sm font-semibold text-white">مسار سريع لتوليد الصياغات</div>
+                            <div className="text-xs text-slate-400">اختيار نوع المخرج ثم توليد صياغات جاهزة للمنصة بدون رفع ملفات.</div>
                         </div>
                         <span className="text-[10px] text-slate-400">{desk === 'news' ? 'خبر/عاجل' : 'مقطع برنامج'}</span>
                     </div>
@@ -1785,24 +1764,17 @@ export default function DigitalPage() {
                                 <option key={template.key} value={template.task_type}>{template.label}</option>
                             ))}
                         </select>
-                        <textarea value={quickCaption} onChange={(e) => setQuickCaption(e.target.value)} placeholder="نص السوشيال / caption" rows={3} className="md:col-span-2 rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-white" />
-                        <input value={quickMediaUrl} onChange={(e) => setQuickMediaUrl(e.target.value)} placeholder="رابط الفيديو أو الصورة (اختياري)" className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white" />
+                        <textarea value={quickCaption} onChange={(e) => setQuickCaption(e.target.value)} placeholder="النص المبدئي أو اتركه فارغًا للتوليد" rows={3} className="md:col-span-2 rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-white" />
                         <select value={quickPlatform} onChange={(e) => setQuickPlatform(e.target.value)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white">
                             {PLATFORM_OPTIONS.map((platform) => (
                                 <option key={platform} value={platform}>{platform}</option>
                             ))}
                         </select>
                         <input value={quickHashtags} onChange={(e) => setQuickHashtags(e.target.value)} placeholder="هاشتاغات مفصولة بفاصلة" className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white" />
-                        <input type="datetime-local" value={quickScheduleAt} onChange={(e) => setQuickScheduleAt(e.target.value)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white" />
                     </div>
                     <div className="flex flex-wrap gap-2">
-                        <button onClick={() => quickPublishMutation.mutate('draft')} disabled={!canWrite} className="h-9 px-3 rounded-lg border border-slate-600 bg-slate-800/60 text-slate-200 text-xs disabled:opacity-50">حفظ كمسودة</button>
-                        {canWrite && (
-                            <>
-                                <button onClick={() => quickPublishMutation.mutate('publish')} className="h-9 px-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-xs">نشر الآن</button>
-                                <button onClick={() => quickPublishMutation.mutate('schedule')} className="h-9 px-3 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-xs">جدولة</button>
-                            </>
-                        )}
+                        <button onClick={() => quickGenerateMutation.mutate()} disabled={!canWrite} className="h-9 px-3 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-xs disabled:opacity-50">توليد صياغة</button>
+                        <button onClick={() => copySimple(composeCopyText(quickCaption, parseHashtags(quickHashtags)))} className="h-9 px-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-xs">نسخ الصياغة</button>
                     </div>
                 </div>
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
