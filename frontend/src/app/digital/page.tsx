@@ -525,7 +525,8 @@ export default function DigitalPage() {
     const [quickTitle, setQuickTitle] = useState('');
     const [quickCaption, setQuickCaption] = useState('');
     const [quickHashtags, setQuickHashtags] = useState('');
-    const [quickPlatform, setQuickPlatform] = useState('facebook');
+    const [quickPlatforms, setQuickPlatforms] = useState<string[]>(['facebook']);
+    const [quickGenerated, setQuickGenerated] = useState<Record<string, { text: string; hashtags: string[] }>>({});
     const [quickTaskType, setQuickTaskType] = useState('');
     const [coveragePack, setCoveragePack] = useState<DigitalComposeResult['coverage_pack'] | null>(null);
 
@@ -1028,6 +1029,9 @@ export default function DigitalPage() {
         mutationFn: async () => {
             const title = quickTitle.trim() || selectedTask?.title || (desk === 'news' ? 'تغطية خبرية' : 'تغطية برامجية');
             const taskType = quickTaskType || selectedTask?.task_type || (desk === 'news' ? 'breaking' : 'clip');
+            if (!quickPlatforms.length) {
+                throw new Error('اختر منصة واحدة على الأقل.');
+            }
             const taskRes = await digitalApi.createTask({
                 channel: desk,
                 task_type: taskType,
@@ -1036,20 +1040,35 @@ export default function DigitalPage() {
                 due_at: null,
             });
             const taskId = taskRes.data.id;
-            const composed = await digitalApi.composeTask(taskId, { platform: quickPlatform, max_hashtags: 6 });
-            const text = composed.data.recommended_text || title;
-            const hashtags = (composed.data.hashtags || []).join(', ');
-            setQuickCaption(text);
-            if (hashtags) setQuickHashtags(hashtags);
-            return composed.data;
+            const composed = await Promise.all(
+                quickPlatforms.map(async (platform) => {
+                    const res = await digitalApi.composeTask(taskId, { platform, max_hashtags: 6 });
+                    return [platform, { text: res.data.recommended_text || title, hashtags: res.data.hashtags || [] }] as const;
+                })
+            );
+            const map = Object.fromEntries(composed) as Record<string, { text: string; hashtags: string[] }>;
+            setQuickGenerated(map);
+            const firstPlatform = quickPlatforms[0];
+            if (firstPlatform && map[firstPlatform]) {
+                setQuickCaption(map[firstPlatform].text);
+                setQuickHashtags((map[firstPlatform].hashtags || []).join(', '));
+            }
+            return map;
         },
         onSuccess: async () => {
             setError(null);
-            setMessage('تم توليد صياغة المنصة المختارة.');
+            setMessage('تم توليد صياغات متعددة للمنصات.');
             await refreshAll();
         },
         onError: (err) => setError(apiErrorMessage(err, 'تعذر توليد الصياغة.')),
     });
+
+    const toggleQuickPlatform = (platform: string) => {
+        setQuickPlatforms((prev) => {
+            if (prev.includes(platform)) return prev.filter((item) => item !== platform);
+            return [...prev, platform];
+        });
+    };
 
     const applyQuickTemplate = (templateType: string) => {
         const baseTitle = quickTitle.trim() || selectedTask?.title || '';
@@ -1765,17 +1784,54 @@ export default function DigitalPage() {
                             ))}
                         </select>
                         <textarea value={quickCaption} onChange={(e) => setQuickCaption(e.target.value)} placeholder="النص المبدئي أو اتركه فارغًا للتوليد" rows={3} className="md:col-span-2 rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-white" />
-                        <select value={quickPlatform} onChange={(e) => setQuickPlatform(e.target.value)} className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white">
-                            {PLATFORM_OPTIONS.map((platform) => (
-                                <option key={platform} value={platform}>{platform}</option>
-                            ))}
-                        </select>
+                        <div className="flex flex-wrap gap-2 items-center rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-2">
+                            <span className="text-xs text-slate-400">المنصات:</span>
+                            {PLATFORM_OPTIONS.map((platform) => {
+                                const active = quickPlatforms.includes(platform);
+                                return (
+                                    <button
+                                        key={platform}
+                                        type="button"
+                                        onClick={() => toggleQuickPlatform(platform)}
+                                        className={cn(
+                                            'h-7 px-2 rounded-lg border text-xs',
+                                            active
+                                                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                                                : 'border-slate-700 bg-slate-800/60 text-slate-300'
+                                        )}
+                                    >
+                                        {platform}
+                                    </button>
+                                );
+                            })}
+                        </div>
                         <input value={quickHashtags} onChange={(e) => setQuickHashtags(e.target.value)} placeholder="هاشتاغات مفصولة بفاصلة" className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white" />
                     </div>
                     <div className="flex flex-wrap gap-2">
                         <button onClick={() => quickGenerateMutation.mutate()} disabled={!canWrite} className="h-9 px-3 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-xs disabled:opacity-50">توليد صياغة</button>
                         <button onClick={() => copySimple(composeCopyText(quickCaption, parseHashtags(quickHashtags)))} className="h-9 px-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-xs">نسخ الصياغة</button>
                     </div>
+                    {!!Object.keys(quickGenerated).length && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {Object.entries(quickGenerated).map(([platform, payload]) => (
+                                <div key={platform} className="rounded-xl border border-slate-700 bg-slate-900/60 p-3 space-y-2">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <span className="text-xs text-slate-300">{platform}</span>
+                                        <button
+                                            onClick={() => copySimple(composeCopyText(payload.text, payload.hashtags || []))}
+                                            className="h-7 px-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-xs"
+                                        >
+                                            نسخ
+                                        </button>
+                                    </div>
+                                    <div className="text-xs text-slate-300 whitespace-pre-wrap">{payload.text}</div>
+                                    {!!(payload.hashtags || []).length && (
+                                        <div className="text-[10px] text-slate-400">#{payload.hashtags.join(' #')}</div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
                     {queueColumns.map((group) => (
