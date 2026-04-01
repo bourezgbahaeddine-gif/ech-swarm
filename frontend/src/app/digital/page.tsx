@@ -86,6 +86,21 @@ const PROGRAM_DESK_FLOW = [
     'إعادة تدوير أفضل اللحظات.',
 ];
 
+const QUICK_TEMPLATE_MAP: Record<string, { prefix: string; hashtags: string[] }> = {
+    breaking: { prefix: 'عاجل |', hashtags: ['الشروق_نيوز', 'عاجل'] },
+    last_minute: { prefix: 'آخر خبر |', hashtags: ['الشروق_نيوز', 'آخر_خبر'] },
+    news_card: { prefix: 'ملخص |', hashtags: ['الشروق_نيوز'] },
+    photo_post: { prefix: '', hashtags: ['الشروق_نيوز'] },
+    album: { prefix: 'صور |', hashtags: ['الشروق_نيوز'] },
+    follow_up: { prefix: 'متابعة |', hashtags: ['الشروق_نيوز'] },
+    promo: { prefix: 'برومو |', hashtags: ['الشروق_تي_في'] },
+    clip: { prefix: 'مقتطف |', hashtags: ['الشروق_تي_في'] },
+    quote: { prefix: 'اقتباس |', hashtags: ['الشروق_تي_في'] },
+    guest_poster: { prefix: 'ضيف الحلقة |', hashtags: ['الشروق_تي_في'] },
+    highlight: { prefix: 'أبرز اللحظات |', hashtags: ['الشروق_تي_في'] },
+    repost: { prefix: 'أفضل لحظة |', hashtags: ['الشروق_تي_في'] },
+};
+
 function normalizePlatform(platform: string): string {
     const key = (platform || '').trim().toLowerCase();
     if (key === 'twitter') return 'x';
@@ -1013,8 +1028,8 @@ export default function DigitalPage() {
 
     const quickPublishMutation = useMutation({
         mutationFn: async (action: 'draft' | 'publish' | 'schedule') => {
-            const title = quickTitle.trim() || (desk === 'news' ? 'تغطية خبرية' : 'تغطية برامجية');
-            const taskType = quickTaskType || (desk === 'news' ? 'breaking' : 'clip');
+            const title = quickTitle.trim() || selectedTask?.title || (desk === 'news' ? 'تغطية خبرية' : 'تغطية برامجية');
+            const taskType = quickTaskType || selectedTask?.task_type || (desk === 'news' ? 'breaking' : 'clip');
             const taskRes = await digitalApi.createTask({
                 channel: desk,
                 task_type: taskType,
@@ -1030,7 +1045,7 @@ export default function DigitalPage() {
             const scheduledAt = action === 'schedule' && quickScheduleAt ? new Date(quickScheduleAt).toISOString() : null;
             const postRes = await digitalApi.createTaskPost(taskId, {
                 platform: quickPlatform,
-                content_text: quickCaption.trim() || title,
+                content_text: quickCaption.trim() || selectedTask?.brief || title,
                 hashtags,
                 media_urls: mediaUrls,
                 status,
@@ -1056,6 +1071,43 @@ export default function DigitalPage() {
         },
         onError: (err) => setError(apiErrorMessage(err, 'تعذر تنفيذ النشر السريع.')),
     });
+
+    const applyQuickTemplate = (templateType: string) => {
+        const baseTitle = quickTitle.trim() || selectedTask?.title || '';
+        const template = QUICK_TEMPLATE_MAP[templateType];
+        setQuickTaskType(templateType);
+        if (!quickTitle.trim()) setQuickTitle(baseTitle);
+        const captionBase = baseTitle || (desk === 'news' ? 'خبر عاجل' : 'مقطع برنامج');
+        const caption = template?.prefix ? `${template.prefix} ${captionBase}` : captionBase;
+        setQuickCaption(caption);
+        if (template?.hashtags?.length) setQuickHashtags(template.hashtags.join(', '));
+    };
+
+    const loadFromSelectedTask = () => {
+        if (!selectedTask) return;
+        setQuickTitle(selectedTask.title || '');
+        setQuickCaption(selectedTask.brief || selectedTask.title || '');
+        if (selectedTask.task_type) {
+            setQuickTaskType(selectedTask.task_type);
+            const tpl = QUICK_TEMPLATE_MAP[selectedTask.task_type];
+            if (tpl?.hashtags?.length) setQuickHashtags(tpl.hashtags.join(', '));
+        }
+    };
+
+    const quickSuggestionButtons = useMemo(() => {
+        if (desk === 'news') {
+            return [
+                { label: 'عاجل سريع', type: 'breaking' },
+                { label: 'آخر خبر', type: 'last_minute' },
+                { label: 'متابعة', type: 'follow_up' },
+            ];
+        }
+        return [
+            { label: 'برومو', type: 'promo' },
+            { label: 'Clip', type: 'clip' },
+            { label: 'Quote', type: 'quote' },
+        ];
+    }, [desk]);
 
     const updateTaskMutation = useMutation({
         mutationFn: ({ taskId, nextStatus }: { taskId: number; nextStatus: DigitalTaskStatus }) =>
@@ -1705,6 +1757,25 @@ export default function DigitalPage() {
                             <div className="text-xs text-slate-400">ارفع مقطع/فيديو أو خبر بسرعة بدون المرور برئيس التحرير.</div>
                         </div>
                         <span className="text-[10px] text-slate-400">{desk === 'news' ? 'خبر/عاجل' : 'مقطع برنامج'}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        {quickSuggestionButtons.map((item) => (
+                            <button
+                                key={item.type}
+                                onClick={() => applyQuickTemplate(item.type)}
+                                className="h-8 px-3 rounded-lg border border-slate-600 bg-slate-800/60 text-slate-200 text-xs"
+                            >
+                                {item.label}
+                            </button>
+                        ))}
+                        {selectedTask && (
+                            <button
+                                onClick={loadFromSelectedTask}
+                                className="h-8 px-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-xs"
+                            >
+                                سحب من المهمة الحالية
+                            </button>
+                        )}
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                         <input value={quickTitle} onChange={(e) => setQuickTitle(e.target.value)} placeholder="عنوان مختصر" className="h-10 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-sm text-white" />
